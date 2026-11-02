@@ -74,3 +74,28 @@ def must_erase(type_name: str | None, method: str) -> bool:
     if type_name is None:
         return False
     return method in SHADOWED.get(type_name, ()) and method not in EQUIVALENT.get(type_name, ())
+
+
+# Builtin exception classes with a PyO3 type (`pyo3::exceptions::PyValueError`
+# for `ValueError`, ..). `except ValueError:` tests `err.is_instance_of::<..>()`
+# and `raise ValueError(..)` creates the exception with `PyValueError::new_err`.
+# `ExceptionGroup` and `PythonFinalizationError` have none.
+BUILTIN_EXCEPTIONS: dict[str, str] = {
+    name: f"Py{name}"
+    for name in """
+    BaseException Exception StopAsyncIteration StopIteration GeneratorExit
+    ArithmeticError LookupError AssertionError AttributeError BufferError EOFError
+    FloatingPointError OSError ImportError ModuleNotFoundError IndexError KeyError
+    KeyboardInterrupt MemoryError NameError OverflowError RuntimeError RecursionError
+    NotImplementedError SyntaxError ReferenceError SystemError SystemExit TypeError
+    UnboundLocalError UnicodeError UnicodeDecodeError UnicodeEncodeError
+    UnicodeTranslateError BaseExceptionGroup ValueError ZeroDivisionError
+    BlockingIOError BrokenPipeError ChildProcessError ConnectionError
+    ConnectionAbortedError ConnectionRefusedError ConnectionResetError
+    FileExistsError FileNotFoundError InterruptedError IsADirectoryError
+    NotADirectoryError PermissionError ProcessLookupError TimeoutError Warning
+    UserWarning DeprecationWarning PendingDeprecationWarning SyntaxWarning
+    RuntimeWarning FutureWarning ImportWarning UnicodeWarning BytesWarning
+    ResourceWarning EncodingWarning
+    """.split()
+} | {"IOError": "PyOSError", "EnvironmentError": "PyOSError"}

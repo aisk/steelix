@@ -32,12 +32,14 @@ _NOT_RAW = {"self": "slf", "Self": "Self_", "crate": "crate_", "super": "super_"
 CONTEXT = "m"
 CONTEXT_FALLBACK = "module"
 # Names the generated code binds or relies on inside function bodies.
-FUNCTION_RESERVED = frozenset({"py", "_guard", "Ok", "Err", "Some", "None"})
+# `frame` is the traceback frame of the function (design §9), `_handling`
+# the guard of the exception an `except` block handles.
+FUNCTION_RESERVED = frozenset({"py", "_guard", "frame", "_handling", "Ok", "Err", "Some", "None"})
 # Item names the generated module defines or relies on next to the functions.
 # The context parameter and `py` are locals of generated fns, which would
 # shadow functions of the same name.
 MODULE_RESERVED = frozenset(
-    {"exec_module", CONTEXT, CONTEXT_FALLBACK, "py", "Ok", "Err", "Some", "None"}
+    {"exec_module", CONTEXT, CONTEXT_FALLBACK, "py", "frame", "Ok", "Err", "Some", "None"}
 )
 
 

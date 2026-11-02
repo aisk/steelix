@@ -58,40 +58,48 @@ pub fn parse_line<'py>(
     line: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let parts = line.call_method0("split")?;
-    if parts.len()? < 10
-        || !parts
-            .get_item(3)?
-            .call_method1("startswith", ("[",))?
-            .is_truthy()?
-    {
-        return Ok(rt::none(py));
-    }
-    let status = parts.get_item(8)?;
-    if status.len()? != 3 || !status.call_method0("isdigit")?.is_truthy()? {
-        return Ok(rt::none(py));
-    }
-    let size = parts.get_item(9)?;
-    let mut millis = rt::none(py);
-    if parts.len()? > 10
-        && parts
-            .get_item(10)?
-            .call_method1("endswith", ("ms",))?
-            .is_truthy()?
-    {
-        millis = rt::builtin(py, "int")?.call1((parts.get_item(10)?.get_item(rt::slice(
-            py,
-            py.None(),
-            -2,
-        )?)?,))?;
-    }
-    Ok([
-        ("ip", &parts.get_item(0)?),
-        // ... five more fields ...
-        ("ms", &millis),
-    ]
-    .into_py_dict(py)?
-    .into_any())
+    rt::frame!(m, "parse_line", 28, |frame| {
+        frame.line(30);
+        let parts = line.call_method0("split")?;
+        frame.line(31);
+        if parts.len()? < 10
+            || !parts
+                .get_item(3)?
+                .call_method1("startswith", ("[",))?
+                .is_truthy()?
+        {
+            return Ok(rt::none(py));
+        }
+        frame.line(33);
+        let status = parts.get_item(8)?;
+        frame.line(34);
+        if status.len()? != 3 || !status.call_method0("isdigit")?.is_truthy()? {
+            return Ok(rt::none(py));
+        }
+        frame.line(36);
+        let size = parts.get_item(9)?;
+        let mut millis = rt::none(py);
+        frame.line(38);
+        if parts.len()? > 10
+            && parts
+                .get_item(10)?
+                .call_method1("endswith", ("ms",))?
+                .is_truthy()?
+        {
+            frame.line(39);
+            millis = rt::builtin(py, "int")?.call1((parts
+                .get_item(10)?
+                .get_item(rt::slice(py, py.None(), -2)?)?,))?;
+        }
+        frame.line(40);
+        Ok([
+            ("ip", &parts.get_item(0)?),
+            // ... five more fields ...
+            ("ms", &millis),
+        ]
+        .into_py_dict(py)?
+        .into_any())
+    })
 }
 ```
 
@@ -105,8 +113,16 @@ pub fn parse_line<'py>(
     line: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let Some(request) = native::parse_line(line.extract()?) else {
-        return Ok(rt::none(py));
+    let request = match native::parse_line(line.extract()?) {
+        Ok(Some(request)) => request,
+        Ok(None) => return Ok(rt::none(py)),
+        // The exception the Python version raises (from `int()`), which
+        // `load` catches with `except ValueError`.
+        Err(native::NotANumber(text)) => {
+            return Err(PyValueError::new_err(format!(
+                "invalid literal for int() with base 10: '{text}'"
+            )));
+        }
     };
     let record = PyDict::new(py);
     record.set_item("ip", request.ip)?;
@@ -123,50 +139,77 @@ pub fn parse_line<'py>(
 and in `logsum/native.rs`:
 
 ```rust
+/// A size or time in a log line that is not a number. The Python version
+/// raises `ValueError` for it (from `int()`), which `load` catches.
+#[derive(Debug, PartialEq)]
+pub struct NotANumber<'a>(pub &'a str);
+
 /// Splits one log line into a request, or returns `None` if it is malformed.
-pub fn parse_line(line: &str) -> Option<Request<'_>> {
+pub fn parse_line(line: &str) -> Result<Option<Request<'_>>, NotANumber<'_>> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 10 || !parts[3].starts_with('[') {
-        return None;
+        return Ok(None);
     }
     let status = parts[8];
     if status.len() != 3 || !status.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+        return Ok(None);
     }
     let bytes = match parts[9] {
         "-" => 0,
-        size => size.parse().ok()?,
+        size => number(size)?,
     };
     let ms = match parts.get(10).and_then(|time| time.strip_suffix("ms")) {
-        Some(ms) => Some(ms.parse().ok()?),
+        Some(ms) => Some(number(ms)?),
         None => None,
     };
     let (path, _query) = parts[6].split_once('?').unwrap_or((parts[6], ""));
-    Some(Request {
+    Ok(Some(Request {
         ip: parts[0],
         hour: parts[3].get(13..15).unwrap_or_default(),
         method: parts[5].trim_start_matches('"'),
         path,
-        status: status.parse().ok()?,
+        status: number(status)?,
         bytes,
         ms,
-    })
+    }))
+}
+
+/// `text` as a number, where the Python version calls `int(text)`.
+fn number<T: std::str::FromStr>(text: &str) -> Result<T, NotANumber<'_>> {
+    text.parse().map_err(|_| NotANumber(text))
 }
 ```
 
-`load`, which calls `parse_line(m, &line)?` for every line, did not change.
-Python code calling `parse_line` would not notice the difference either,
-except for the numbers. The Python version converts them with `int()` and
-the Rust one with `str::parse::<u64>`, which accept different strings:
+The Python version raises `ValueError` (from `int()`) for a size or time
+that is not a number, and `load` catches it:
 
-- `int()` also accepts a sign (`-5`), digits grouped with underscores
-  (`1_024`) and non-ASCII digits (`٤٢`). The rewritten `parse_line` treats
-  such a line as malformed, where the Python version read the number.
-- A number neither accepts (`12x`) made the Python version raise
-  `ValueError`; the rewritten one counts the line as malformed.
+```python
+try:
+    request = parse_line(line)
+except ValueError:
+    # A size or time that is not a number.
+    request = None
+```
+
+The rewritten `parse_line` keeps that contract. The native function reports
+such a number as `Err(NotANumber(text))`, a plain Rust error, and the adapter
+turns it into the same `ValueError`, with the message `int()` would give. So
+`load`, which is still generated code and catches the error with
+`except ValueError`, did not change, and neither would Python code calling
+`parse_line`. This is the convention for errors (section 15 of
+`docs/design.md`): native code uses `Result` or `Option`, and the adapter
+raises the exception the Python version raised. `access.log` has a line with
+the time `12xms` to check it.
+
+The numbers are the one place the behavior changes. The Python version
+converts them with `int()` and the Rust one with `str::parse::<u64>`, which
+accept different strings: `int()` also accepts a sign (`-5`), digits grouped
+with underscores (`1_024`) and non-ASCII digits (`٤٢`). The rewritten
+`parse_line` raises `ValueError` for them, so `load` counts such a line as
+malformed, where the Python version read the number.
 
 This is deliberate: a log with negative sizes or Arabic-Indic digits is
-broken. `access.log` contains one line of each of the first kind, so the
+broken. `access.log` contains one line of each of these kinds, so the
 rewritten program prints different totals than CPython for it, and
 `tests/test_examples.py` checks exactly that: its output is what CPython
 prints for a copy of the log in which those three lines are malformed.

@@ -84,14 +84,17 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
             if ty is not None:
                 text += f": {ty}"
             if init is not None:
-                text += f" = {print_expr(init)}"
+                text += f" = {print_expr(init, level)}"
             return text + ";"
         case rs.Assign(target, value):
             return f"{print_expr(target)} = {print_expr(value)};"
+        case rs.ExprStmt(rs.Match() as match):
+            # A `match` statement needs no semicolon.
+            return print_expr(match, level)
         case rs.ExprStmt(expr):
-            return f"{print_expr(expr)};"
+            return f"{print_expr(expr, level)};"
         case rs.Return(value):
-            return "return;" if value is None else f"return {print_expr(value)};"
+            return "return;" if value is None else f"return {print_expr(value, level)};"
         case rs.If():
             return _print_if(stmt, level)
         case rs.While(cond, body, label):
@@ -134,7 +137,10 @@ def _macro_call(path: str, args: tuple[rs.Expr, ...]) -> str:
 
 
 def _print_if(stmt: rs.If, level: int) -> str:
-    text = f"if {print_expr(stmt.cond)} {print_block(stmt.then, level)}"
+    cond = print_expr(stmt.cond, level)
+    if stmt.pattern is not None:
+        cond = f"let {stmt.pattern} = {cond}"
+    text = f"if {cond} {print_block(stmt.then, level)}"
     match stmt.orelse:
         case None:
             return text
@@ -200,7 +206,38 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
             if isinstance(orelse, rs.IfExpr):
                 return text + print_expr(orelse, level)
             return text + print_block(orelse, level)
+        case rs.Closure(params, body, ret):
+            head = f"|{', '.join(params)}|"
+            if ret is not None:
+                return f"{head} -> {ret} {print_block(body, level)}"
+            if not body.stmts and body.tail is not None:
+                return f"{head} {print_expr(body.tail, level)}"
+            return f"{head} {print_block(body, level)}"
+        case rs.Match(scrutinee, arms):
+            inner = INDENT * (level + 1)
+            lines = [f"match {print_expr(scrutinee, level)} {{"]
+            for arm in arms:
+                head = arm.pattern
+                if arm.guard is not None:
+                    head += f" if {print_expr(arm.guard, level + 1)}"
+                lines.append(f"{inner}{head} => {_arm_body(arm.body, level + 1)}")
+            lines.append(INDENT * level + "}")
+            return "\n".join(lines)
     raise TypeError(f"unknown expression {expr!r}")
+
+
+def _arm_body(body: rs.Block, level: int) -> str:
+    """A jump or a single expression without braces, else a block."""
+    if len(body.stmts) == 1 and body.tail is None:
+        match body.stmts[0]:
+            case rs.Return() | rs.Break() | rs.Continue() | rs.Assign() as simple:
+                # `Ok(value) => x = value,`: an assignment is an expression too.
+                return print_stmt(simple, level).removesuffix(";") + ","
+            case rs.ExprStmt(rs.MacroCall("unreachable") as never):
+                return print_expr(never, level) + ","
+    if not body.stmts and body.tail is not None:
+        return print_expr(body.tail, level) + ","
+    return print_block(body, level)
 
 
 def _args(args: tuple[rs.Expr, ...]) -> str:
@@ -209,7 +246,7 @@ def _args(args: tuple[rs.Expr, ...]) -> str:
 
 def _precedence(expr: rs.Expr) -> int:
     match expr:
-        case rs.BlockExpr() | rs.IfExpr():
+        case rs.BlockExpr() | rs.IfExpr() | rs.Closure() | rs.Match():
             return _BLOCKLIKE
         case rs.Binary(op):
             return _BINARY_PRECEDENCE.get(op, _COMPARE)

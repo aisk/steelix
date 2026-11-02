@@ -33,12 +33,12 @@ pub fn unpack<'py, const N: usize>(value: &Bound<'py, PyAny>) -> PyResult<[Bound
             } else {
                 None
             };
-            Err(PyValueError::new_err(match size {
+            Err(crate::raised(PyValueError::new_err(match size {
                 Some(size) if size > N => {
                     format!("too many values to unpack (expected {N}, got {size})")
                 }
                 _ => format!("too many values to unpack (expected {N})"),
-            }))
+            })))
         }
     }
 }
@@ -68,10 +68,10 @@ pub fn unpack_star<'py, const B: usize, const A: usize>(
     }
     let len = rest.len();
     if len < A {
-        return Err(PyValueError::new_err(format!(
+        return Err(crate::raised(PyValueError::new_err(format!(
             "not enough values to unpack (expected at least {expected}, got {})",
             B + len
-        )));
+        ))));
     }
     let after = std::array::from_fn(|i| {
         rest.get_item(len - A + i)
@@ -93,7 +93,9 @@ fn iterate<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyIterator>> {
             )
         };
         if err.is_instance_of::<PyTypeError>(py) && not_iterable {
-            PyTypeError::new_err(format!("cannot unpack non-iterable {type_name} object"))
+            crate::raised(PyTypeError::new_err(format!(
+                "cannot unpack non-iterable {type_name} object"
+            )))
         } else {
             err
         }
@@ -108,7 +110,7 @@ fn take<'py, const N: usize>(
     while items.len() < N {
         match iter.next() {
             Some(item) => items.push(item?),
-            None => return Err(PyValueError::new_err(message(items.len()))),
+            None => return Err(crate::raised(PyValueError::new_err(message(items.len())))),
         }
     }
     Ok(items

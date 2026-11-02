@@ -14,7 +14,10 @@ from steelix.frontend.fallback import first_line, python_runs, python_source
 from steelix.lower.context import Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
 from steelix.lower.function import cell_declared_at, lower_nested
+from steelix.lower.handling import HandlingLowering
+from steelix.lower.rustflow import diverges, fallible, statement_line
 from steelix.rustast import nodes as rs
+from steelix.rustast.rewrite import map_exprs
 
 
 def _rt(name: str, *args: rs.Expr) -> rs.Call:
@@ -36,16 +39,41 @@ class _Loop:
     """Number of labeled blocks open around the loop."""
     label: str | None = None
     """The loop's own label, given once a jump needs it."""
+    header: int | None = None
+    """The line of the loop header, if its next iteration (the test of a
+    `while`, the next item of a `for`) can raise: `continue` and the end of
+    the body set the traceback line back to it."""
 
 
-class StmtLowering:
-    def __init__(self, ctx: Context) -> None:
+class StmtLowering(HandlingLowering):
+    def __init__(self, ctx: Context, line: int | None = None) -> None:
         self.ctx = ctx
         self.exprs = ExprLowering(ctx)
         self.loops: list[_Loop] = []
         """The enclosing loops, innermost last."""
         self.blocks = 0
         """Number of labeled blocks open around the statement being lowered."""
+        self.closures: list = []
+        """The closure regions being lowered (`handling.Closure`), innermost last."""
+        self.line = line
+        """The traceback line of the frame at this point of the generated
+        code, if known: `frame.line(n)` only goes where it changes."""
+        self.markers = 0
+        """Number of `frame.line(n)` emitted so far."""
+
+    # --- traceback lines ---
+
+    def at_line(self, line: int) -> list[rs.Stmt]:
+        """`frame.line(line);`, unless the frame is known to be there."""
+        if self.line == line:
+            return []
+        self.line = line
+        self.markers += 1
+        return [_line_marker(line)]
+
+    def mark(self, line: int, rust: list[rs.Stmt]) -> list[rs.Stmt]:
+        """`at_line` for code on `line` that may raise."""
+        return self.at_line(line) if fallible(rust) else []
 
     def block(self, stmts: list[ast.stmt]) -> rs.Block:
         out: list[rs.Stmt] = []
@@ -92,9 +120,22 @@ class StmtLowering:
         comments = self.comments(stmt)
         if stmt in self.ctx.flow.unreachable:
             return comments
+        if isinstance(stmt, ast.Break | ast.Continue):
+            # Not worth a line of its own: the signal check before the next
+            # iteration then reports the line before.
+            return comments + self._stmt(stmt)
+        if isinstance(stmt, _COMPOUND):
+            # They mark the line of their header themselves.
+            with self.exprs.fresh() as prelude:
+                out = self._stmt(stmt)
+            return comments + self.flush_items() + prelude + out
         with self.exprs.fresh() as prelude:
             out = self._stmt(stmt)
-        return comments + self.flush_items() + prelude + out
+        items = self.flush_items()
+        rust = prelude + out
+        if isinstance(stmt, ast.FunctionDef):
+            rust = _without_def_macros(rust)
+        return comments + items + self.mark(statement_line(stmt), rust) + prelude + out
 
     def comments(self, stmt: ast.stmt) -> list[rs.Stmt]:
         if isinstance(stmt, ast.FunctionDef):
@@ -118,7 +159,7 @@ class StmtLowering:
             case ast.Delete(targets):
                 return [s for target in targets for s in self.delete(target)]
             case ast.Return(value):
-                return [rs.Return(self.return_value(value))]
+                return [self.return_stmt(value)]
             case ast.If():
                 return self.if_stmt(stmt)
             case ast.While():
@@ -126,12 +167,9 @@ class StmtLowering:
             case ast.For():
                 return self.for_stmt(stmt)
             case ast.Break():
-                loop = self.loops[-1]
-                if loop.else_label is not None:
-                    return [rs.Break(loop.else_label)]
-                return [rs.Break(self.jump_label(loop))]
+                return self.jump("break")
             case ast.Continue():
-                return [rs.Continue(self.jump_label(self.loops[-1]))]
+                return self.jump("continue")
             case ast.Import(names):
                 return [s for alias in names for s in self.import_(stmt, alias)]
             case ast.ImportFrom(module, names):
@@ -141,6 +179,12 @@ class StmtLowering:
                 return [self.assert_stmt(test, msg)]
             case ast.FunctionDef():
                 return self.function_def(stmt)
+            case ast.Raise(exc, cause):
+                return [self.raise_stmt(exc, cause)]
+            case ast.Try():
+                return self.try_stmt(stmt)
+            case ast.With():
+                return self.with_stmt(stmt)
             case ast.Pass() | ast.Global() | ast.Nonlocal():
                 return []
         raise self.ctx.unsupported(type(stmt).__name__, stmt)
@@ -161,7 +205,9 @@ class StmtLowering:
                 out = [self.store_name(stmt, stmt.name, self.exprs.function_value(stmt, rust))]
             else:
                 out = [rs.ExprStmt(self.exprs.function_value(stmt, rust, bind=True).expr)]
-        return self.flush_items() + prelude + out
+        items = self.flush_items()
+        line = self.mark(stmt.lineno, _without_def_macros(prelude + out))
+        return items + line + prelude + out
 
     # --- expressions as statements ---
 
@@ -201,12 +247,38 @@ class StmtLowering:
             )
         return self.exprs.value(value).result()
 
+    def return_stmt(self, value: ast.expr | None) -> rs.Stmt:
+        if not self.closures:
+            return rs.Return(self.return_value(value))
+        if value is None:
+            none = rs.Call(rs.Path("rt::none"), (rs.Path(self.ctx.py()),))
+            return self.return_jump(Value(none, Kind.OWNED))
+        return self.return_jump(self.exprs.value(value))
+
+    def jump(self, kind: str) -> list[rs.Stmt]:
+        """`break` or `continue` of the innermost loop."""
+        if self.leaves_closure():
+            return [self.loop_jump(kind)]
+        loop = self.loops[-1]
+        if kind == "break":
+            if loop.else_label is not None:
+                return [rs.Break(loop.else_label)]
+            return [rs.Break(self.jump_label(loop))]
+        line = self.line
+        out = [*self.next_iteration(loop), rs.Continue(self.jump_label(loop))]
+        self.line = line  # for code after the jump, which runs on another path
+        return out
+
     # --- control flow ---
 
     def if_stmt(self, stmt: ast.If) -> list[rs.Stmt]:
         cond = self.exprs.condition(stmt.test)
         items = self.flush_items()
+        self.exprs.prelude[:0] = self.mark(stmt.lineno, [*self.exprs.prelude, rs.ExprStmt(cond)])
+        start = self.line
         then = self.block(stmt.body)
+        then_end = self.line
+        self.line = start
         orelse: rs.Block | rs.If | None = None
         if len(stmt.orelse) == 1 and isinstance(stmt.orelse[0], ast.If):
             # `elif`: the test may need statements first, then it is `else { .. }`.
@@ -217,6 +289,11 @@ class StmtLowering:
                 orelse = rs.Block(tuple(inner))
         elif stmt.orelse:
             orelse = self.block(stmt.orelse)
+        # The line after the `if` is where the branches that go on ended.
+        ends = [] if diverges(then.stmts) else [then_end]
+        if orelse is None or not _diverges_branch(orelse):
+            ends.append(self.line)
+        self.line = ends[0] if ends and all(end == ends[0] for end in ends) else None
         return [*items, rs.If(cond, then, orelse)]
 
     def loop_label(self, stmt: ast.While | ast.For, base: str) -> str | None:
@@ -241,12 +318,25 @@ class StmtLowering:
             loop.label = self.ctx.label("outer")
         return loop.label
 
-    def loop_body(self, stmts: list[ast.stmt], else_label: str | None) -> tuple[rs.Block, _Loop]:
-        loop = _Loop(else_label, self.blocks)
+    def loop_body(
+        self, stmts: list[ast.stmt], else_label: str | None, header: int | None
+    ) -> tuple[rs.Block, _Loop]:
+        """The body of a loop. With `header`, the line of a header that can
+        raise when the loop goes on, the body ends by going back to it."""
+        loop = _Loop(else_label, self.blocks, header=header)
         self.loops.append(loop)
         body = self.block(stmts)
+        if not diverges(body.stmts):
+            body = rs.Block((*body.stmts, *self.next_iteration(loop)))
         self.loops.pop()
         return body, loop
+
+    def next_iteration(self, loop: _Loop) -> list[rs.Stmt]:
+        """What runs before the next iteration of `loop` (at the end of the
+        body or at `continue`): CPython checks for signals there, on the line
+        the iteration ended on, then the header line is back."""
+        reset = [] if loop.header is None else self.at_line(loop.header)
+        return [self.check_signals(), *reset]
 
     def with_else(
         self, stmt: ast.While | ast.For, loop: rs.Stmt, label: str | None
@@ -265,20 +355,38 @@ class StmtLowering:
         with self.exprs.fresh() as prelude:
             cond = None if constant_true else self.exprs.condition(stmt.test)
         items = self.flush_items()
-        body, target = self.loop_body(stmt.body, label)
-        check = self.check_signals()
+        markers = self.markers
+        test_fails = cond is not None and fallible([*prelude, rs.ExprStmt(cond)])
+        header: int | None = None
+        before: list[rs.Stmt] = []
+        if test_fails and not prelude:
+            # `frame.line(n); while test { ..; frame.line(n); }`
+            before = self.at_line(stmt.lineno)
+            header = stmt.lineno
+        elif test_fails:
+            # The test is evaluated at the top of a `loop`, where the line is set.
+            self.line = None
+            prelude = [*self.at_line(stmt.lineno), *prelude]
+        elif _changes_line(stmt.body, self.line):
+            self.line = None
+        body, target = self.loop_body(stmt.body, label, header)
+        if header is None and self.markers != markers:
+            self.line = None  # for the `else` block
         if cond is None:
-            loop: rs.Stmt = rs.Loop(rs.Block((check, *body.stmts)), target.label)
+            loop: rs.Stmt = rs.Loop(body, target.label)
         elif not prelude:
-            loop = rs.While(cond, rs.Block((check, *body.stmts)), target.label)
+            loop = rs.While(cond, body, target.label)
         else:
             # The test needs statements before it on every iteration.
             exit_ = rs.If(negate(cond), rs.Block((rs.Break(),)))
-            loop = rs.Loop(rs.Block((check, *prelude, exit_, *body.stmts)), target.label)
-        return items + self.with_else(stmt, loop, label)
+            loop = rs.Loop(rs.Block((*prelude, exit_, *body.stmts)), target.label)
+        out = items + before + self.with_else(stmt, loop, label)
+        if self.markers != markers:
+            self.line = None
+        return out
 
     def check_signals(self) -> rs.Stmt:
-        """`py.check_signals()?;` at the start of every loop iteration, where
+        """`py.check_signals()?;` at the end of every loop iteration, where
         CPython's eval loop would run pending signal handlers: without it, a
         native loop can not be stopped with Ctrl-C (`KeyboardInterrupt`)."""
         return _try_stmt(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals", ()))
@@ -289,6 +397,9 @@ class StmtLowering:
         # Functions defined by the header, which the loop body must not hide.
         items = self.flush_items()
         iterator = rs.Try(iterable.method("try_iter"))
+        markers = self.markers
+        # Getting the iterator and each item can raise.
+        self.exprs.prelude[:0] = self.at_line(stmt.lineno)
         fn = self.ctx.function
         target = stmt.target
         scoped = fn is not None and any(
@@ -307,13 +418,15 @@ class StmtLowering:
             with self.exprs.fresh() as prelude:
                 head = self.store(stmt, target, item, declare=scoped)
             head = prelude + head
-        body, target = self.loop_body(stmt.body, label)
-        check = self.check_signals()
-        loop = rs.For(pat, iterator, rs.Block((*head, check, *body.stmts)), target.label)
-        return items + self.with_else(stmt, loop, label)
+        body, target = self.loop_body(stmt.body, label, stmt.lineno)
+        loop = rs.For(pat, iterator, rs.Block((*head, *body.stmts)), target.label)
+        out = items + self.with_else(stmt, loop, label)
+        if self.markers != markers:
+            self.line = None
+        return out
 
     def assert_stmt(self, test: ast.expr, msg: ast.expr | None) -> rs.Stmt:
-        self.exprs.use("pyo3::exceptions::PyAssertionError")
+        self.use_exception("AssertionError")
         cond = self.exprs.condition(test)
         with self.exprs.fresh() as prelude:
             match msg:
@@ -327,7 +440,8 @@ class StmtLowering:
                     value = self.exprs.value(msg)
                     args = rs.Tuple((rs.MethodCall(value.owned(), "unbind"),))
         error = rs.Call(rs.Path("PyAssertionError::new_err"), (args,))
-        raise_ = rs.Return(rs.Call(rs.Path("Err"), (error,)))
+        raised = rs.MethodCall(rs.Path("frame"), "raise", (error,))
+        raise_ = rs.Return(rs.Call(rs.Path("Err"), (raised,)))
         return rs.If(negate(cond), rs.Block((*prelude, raise_)))
 
     # --- assignment ---
@@ -544,6 +658,43 @@ class StmtLowering:
         return out
 
 
+_COMPOUND = (ast.If, ast.While, ast.For, ast.Try, ast.With)
+
+
+def _without_def_macros(stmts: list[rs.Stmt]) -> list[rs.Stmt]:
+    """`stmts` with `rt::def!(..)?` and `rt::function!(..)?` replaced by
+    their arguments: creating the function object only fails when Python is
+    out of memory, which is not worth a line marker before every `def`. The
+    defaults and decorators it evaluates can raise."""
+
+    def visit(node: rs.Expr) -> rs.Expr:
+        match node:
+            case rs.Try(rs.MacroCall("rt::def" | "rt::function", args)):
+                return rs.Tuple(args)
+        return node
+
+    return [map_exprs(stmt, visit) for stmt in stmts]
+
+
+def _line_marker(line: int) -> rs.Stmt:
+    return rs.ExprStmt(rs.MethodCall(rs.Path("frame"), "line", (rs.IntLit(line),)))
+
+
+def _changes_line(body: list[ast.stmt], line: int | None) -> bool:
+    """Whether running `body` may move the traceback line away from `line`."""
+    return any(
+        isinstance(node, ast.stmt) and node.lineno != line
+        for stmt in body
+        for node in ast.walk(stmt)
+    )
+
+
+def _diverges_branch(branch: rs.Block | rs.If) -> bool:
+    if isinstance(branch, rs.If):
+        return diverges((branch,))
+    return diverges(branch.stmts)
+
+
 def _pattern(names: list[str], star: int | None) -> str:
     """`[a, b]`, or `([a], rest, [b])` for `rt::unpack_star`."""
     if star is None:
@@ -590,3 +741,8 @@ def _loop_breaks(body: list[ast.stmt]):
             case ast.If(_, then, orelse):
                 yield from _loop_breaks(then)
                 yield from _loop_breaks(orelse)
+            case ast.With(body=body):
+                yield from _loop_breaks(body)
+            case ast.Try(body, handlers, orelse, finalbody):
+                for block in (body, *(h.body for h in handlers), orelse, finalbody):
+                    yield from _loop_breaks(block)

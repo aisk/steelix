@@ -83,6 +83,53 @@ def test_jump_labels() -> None:
     assert not problems(rs.LabeledBlock("'b", rs.Block((rs.Break("'b"),))))
 
 
+def test_closure_sees_locals_but_not_labels() -> None:
+    """A closure (the body of a `try`) reads the enclosing locals, but a
+    jump can not leave it: `break` to an outer loop is a `Flow`."""
+    body = rs.Block((rs.ExprStmt(rs.MethodCall(p("x"), "is_truthy")), rs.Break("'outer")))
+    closure = rs.Closure((), body, "PyResult<()>")
+    loop = rs.Loop(rs.Block((rs.ExprStmt(rs.Call(closure, ())),)), "'outer")
+    [problem] = problems(rs.Let("x", init=p("py")), loop)
+    assert "no enclosing label `'outer`" in problem
+
+
+def test_closure_parameter_is_in_scope() -> None:
+    closure = rs.Closure(("file",), rs.Block((), rs.MethodCall(p("file"), "is_truthy")))
+    assert not problems(
+        rs.ExprStmt(rs.MethodCall(p("frame"), "with", (p("py"), closure))),
+        params=(rs.Param("frame", "&rt::Frame<'py>"),),
+    )
+    [problem] = problems(
+        rs.ExprStmt(rs.Call(rs.Closure(("file",), rs.Block()), (p("py"),))),
+        rs.ExprStmt(rs.MethodCall(p("file"), "is_truthy")),
+    )
+    assert "`file` is not in scope" in problem
+
+
+def test_match_arm_bindings() -> None:
+    """`Err(err) if guard => body` binds `err` in the guard and the body
+    of its arm only; `Ok`, `Err` and `rt::Flow::..` bind nothing."""
+    guard = rs.MethodCall(p("err"), "is_instance_of::<PyValueError>", (p("py"),))
+    arms = (
+        rs.Arm(
+            "Ok(rt::Flow::Return(value))", rs.Block((rs.Return(rs.Call(p("Ok"), (p("value"),))),))
+        ),
+        rs.Arm("Ok(_)", rs.Block()),
+        rs.Arm("Err(err)", rs.Block((rs.ExprStmt(rs.MethodCall(p("err"), "is_truthy")),)), guard),
+        rs.Arm("Err(other)", rs.Block((rs.ExprStmt(rs.MethodCall(p("value"), "is_truthy")),))),
+    )
+    [problem] = problems(rs.ExprStmt(rs.Match(p("py"), arms)))
+    assert "`value` is not in scope" in problem
+
+
+def test_if_let_binds_in_then_block() -> None:
+    then = rs.Block((rs.Return(rs.Call(p("Ok"), (p("value"),))),))
+    stmt = rs.If(p("py"), then, pattern="rt::Flow::Return(value)")
+    assert not problems(stmt)
+    [problem] = problems(stmt, rs.ExprStmt(rs.MethodCall(p("value"), "is_truthy")))
+    assert "`value` is not in scope" in problem
+
+
 @pytest.mark.parametrize(
     ("receiver", "method", "bad"),
     [

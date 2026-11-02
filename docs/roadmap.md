@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d → M4 → M5 → M8 → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 → M8 → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
 
 ## M0 项目骨架 ✅
 
@@ -113,16 +113,18 @@
 
 另外修复了两个顺带发现的问题：原生代码里只有一个参数的 `exec(src)`/`eval(src)` 没有帧可用，报 `SystemError`，现在在模块级显式传入 globals，函数里的保留为 Python；模块级不会结束的原生循环后面不再生成 `Ok(())`（unreachable 警告）。bin 模式下未捕获的 `KeyboardInterrupt` 和 CPython 一样以 `SIGINT` 结束进程。
 
-## M4 异常与上下文管理
+## M4 异常与上下文管理 ✅
 
-- [ ] `raise`、`raise ... from ...`
-- [ ] `try/except/else/finally`，`Flow` 枚举处理块内的 return/break/continue（§9）
-- [ ] 进入 handler 时设置当前处理异常的 RAII guard，handler 内裸 `raise`
-- [ ] `except (A, B) as e`、裸 `except`
-- [ ] `with`（多个 item）
-- [ ] 原生函数在 traceback 里的合成帧（类似 Cython：出错路径上用 `PyFrame_New` + `PyTraceBack_Here`，文件名和行号取自生成器已知的源位置），替代原来计划的 `add_note`
-- [ ] e2e 测试比较预期异常的类型和消息
-- [ ] 改写约定补充：改写后的适配层抛出的异常类型必须与原来一致，加 e2e 用例在改写过的函数外面 `except` 原来的异常类型
+- [x] `raise`、`raise ... from ...`、`from None`、裸 `raise`（包括 handler 调用的辅助函数里的），`__cause__`、`__context__`、`__suppress_context__`、`__traceback__` 与 CPython 一致
+- [x] `try/except/else/finally`，`Flow` 枚举处理块内的 return/break/continue（§9）。只有一个表达式的 `try` 直接 `match` 结果，不用闭包；`finally` 覆盖 `return`、吞掉异常与 CPython 一致
+- [x] 进入 handler 时设置当前处理异常的 RAII guard（`rt::Handling`），用 `logging.exception`、`traceback.print_exc()`、嵌套 handler 验证
+- [x] `except (A, B) as e`（结尾隐式 `del e`）、裸 `except`。`except*` 保留为 Python
+- [x] `with`（多个 item、元组目标、`__enter__`/`__exit__` 在类型上查找、吞掉异常、跳出 `with`）。`async with` 保留为 Python
+- [x] 原生函数在 traceback 里的合成帧（类似 Cython：异常离开时用 `PyFrame_New` 和 `types.TracebackType` 补上帧，语句前的 `frame.line(N)` 记录行号），替代原来计划的 `add_note`。logging、warnings 看到的仍是最近的 Python 帧，没有公开 API 可以在运行期间压入解释器帧，记录在 §12
+- [x] e2e 测试比较预期异常的类型和消息，并且比较完整的 traceback（去掉原生帧没有的 `^` 行）；`tests/test_apps.py` 比较每一帧的位置
+- [x] 改写约定补充：改写后的适配层抛出的异常类型必须与原来一致。`examples/logsum` 的 `parse_line` 把原生的 `Err(NotANumber)` 转成 `ValueError`，生成的 `load` 用 `except ValueError` 接住
+
+覆盖率的变化见 `coverage.md`：6 个工具的原生函数从 23% 到 37%，标准库从 14% 到 22%，和 M3c 时的预测一致。顺带把循环里的 `check_signals` 从迭代开头移到结尾，`KeyboardInterrupt` 的行号和 CPython 一样。
 
 ## M5 类
 
@@ -156,6 +158,7 @@
 
 ## M9 可读性与渐进式改写
 
+- [ ] 生成选项：不生成 `rt::frame!` 和 `frame.line(N)` 行号跟踪（M4 引入后 golden 增加约三分之一行数），给只关心改写起点、不需要精确 traceback 的场景用；或者找更轻的写法
 - [ ] 基于类型注解的可选 typed lowering（`int` → `i64` 等），只在用户显式开启时启用
 - [ ] 符合条件的类可选升级为 `#[pyclass]`（§10）
 - [ ] 生成代码的清理 pass：去掉多余 clone、合并临时变量

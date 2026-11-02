@@ -2,7 +2,10 @@
 
 Each case is transpiled into an executable (bin mode) and must behave like
 `python case.py`: same stdout, same exit code, and for uncaught exceptions the
-same final traceback line (the traceback frames themselves differ).
+same traceback, native functions included (design §9). Native frames have no
+column positions, so the `^^^^` lines under source lines are left out of the
+comparison, and so are the `SyntaxWarning`s CPython prints when it compiles
+the file.
 """
 
 from __future__ import annotations
@@ -38,15 +41,17 @@ KNOWN_DIFFERENCES: dict[str, dict[str, str]] = {
             r"WARNING __init__\.py:\d+ warning: native step 1"
         ),
         # No Python frame at all.
-        "UserWarning frames_logging.py:37: from native code": (
+        "UserWarning frames_logging.py:36: from native code": (
             r"UserWarning <sys>:0: from native code"
         ),
         # The kept function's call of the native one.
-        "UserWarning frames_logging.py:37: from native code, called by kept code": (
-            r"UserWarning frames_logging\.py:49: from native code, called by kept code"
+        "UserWarning frames_logging.py:36: from native code, called by kept code": (
+            r"UserWarning frames_logging\.py:48: from native code, called by kept code"
         ),
     },
 }
+# The lines marking the failing expression under a source line.
+CARETS = re.compile(r"\s*[~^]+\s*")
 # A case that runs until it is interrupted: the test sends SIGINT once the
 # program has printed its first line.
 INTERRUPT = "# steelix-test: interrupt after the first line of output"
@@ -57,6 +62,24 @@ class Outcome:
     stdout: str
     stderr: str
     returncode: int
+
+    @property
+    def traceback(self) -> list[str]:
+        """stderr without caret lines and compile time `SyntaxWarning`s."""
+        lines = self.stderr.splitlines()
+        out = []
+        skip = False
+        for line in lines:
+            if skip:
+                skip = False
+                continue
+            if re.match(r"^\S.*:\d+: SyntaxWarning: ", line):
+                skip = True  # and the source line after it
+                continue
+            if CARETS.fullmatch(line):
+                continue
+            out.append(line)
+        return out
 
     @property
     def last_stderr_line(self) -> str:
@@ -117,13 +140,11 @@ def test_bin_matches_python(case: str, bin_workspace: Workspace, tmp_path: Path)
     else:
         assert actual.stdout == expected.stdout
     assert actual.returncode == expected.returncode
-    if not expected.stderr:
-        assert actual.stderr == ""
-    elif EXCEPTION_TYPE_ONLY in text:
+    if EXCEPTION_TYPE_ONLY in text:
         exception_type = expected.last_stderr_line.split(":")[0]
         assert actual.last_stderr_line.split(":")[0] == exception_type
     else:
-        assert actual.last_stderr_line == expected.last_stderr_line
+        assert actual.traceback == expected.traceback
 
 
 def assert_known_differences(expected: str, actual: str, differences: dict[str, str]) -> None:
@@ -176,17 +197,17 @@ def traceback_frames(stderr: str) -> list[str]:
     ]
 
 
-def test_python_frames_have_original_locations(bin_workspace: Workspace, tmp_path: Path) -> None:
+def test_tracebacks_have_native_and_python_frames(bin_workspace: Workspace, tmp_path: Path) -> None:
     """Code kept as Python (mixed mode) runs with its file name and original
-    line numbers: its traceback frames are CPython's. The frames of native
-    functions are missing (design §12)."""
+    line numbers, and native functions add frames of their own (design §9):
+    the traceback has CPython's frames, with their source lines."""
     case = "mixed_uncaught"
     expected = run([str(PYTHON), str(CASES_DIR / f"{case}.py")], tmp_path)
     actual = run([str(E2E_DIR / "target" / "debug" / case)], tmp_path)
     frames = traceback_frames(actual.stderr)
-    assert frames
-    assert frames == traceback_frames(expected.stderr)[-len(frames) :]
+    assert frames == traceback_frames(expected.stderr)
     assert "line 9, in python_kept" in frames[-1]
+    assert any(", in native |" in frame for frame in frames)
 
 
 def test_panic_exits_like_an_uncaught_exception(tmp_path: Path) -> None:

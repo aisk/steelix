@@ -3,8 +3,11 @@ use steelix_runtime as rt;
 
 // chained_conditions.py:4
 pub fn f<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::builtins::print(m.py(), ("f", x))?;
-    Ok(x.clone())
+    rt::frame!(m, "f", 4, |frame| {
+        frame.line(5);
+        rt::builtins::print(m.py(), ("f", x))?;
+        Ok(x.clone())
+    })
 }
 
 // chained_conditions.py:9
@@ -15,56 +18,75 @@ pub fn check<'py>(
     d: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    if a.lt(b)? && {
-        let rhs = f(m, &rt::int(py, 3))?;
-        b.lt(&rhs)? && rhs.lt(d)?
-    } {
-        rt::builtins::print(py, ("all ascending",))?;
-    } else {
-        rt::builtins::print(py, ("not ascending",))?;
-    }
-    let rhs2 = f(m, b)?;
-    if a.lt(&rhs2)? && {
-        let rhs3 = f(m, &rt::int(py, 3))?;
-        rhs2.lt(&rhs3)? && rhs3.le(d)? && d.lt(f(m, &rt::int(py, 10))?)?
-    } {
-        rt::builtins::print(py, ("long chain",))?;
-    }
-    if f(m, a)?.eq(1)? && rt::int(py, 1).lt(f(m, b)?)? && {
-        let rhs4 = f(m, &rt::int(py, 5))?;
-        b.lt(&rhs4)? && rhs4.lt(d)?
-    } {
-        rt::builtins::print(py, ("mixed",))?;
-    } else {
-        let rhs5 = f(m, &rt::int(py, 0))?;
-        if a.lt(&rhs5)? && rhs5.lt(d)? {
-            rt::builtins::print(py, ("elif",))?;
+    rt::frame!(m, "check", 9, |frame| {
+        frame.line(10);
+        if a.lt(b)? && {
+            let rhs = f(m, &rt::int(py, 3))?;
+            b.lt(&rhs)? && rhs.lt(d)?
+        } {
+            frame.line(11);
+            rt::builtins::print(py, ("all ascending",))?;
+        } else {
+            frame.line(13);
+            rt::builtins::print(py, ("not ascending",))?;
         }
-    }
-    let mut n = rt::int(py, 0);
-    loop {
-        py.check_signals()?;
-        let rhs6 = f(m, &rt::int(py, 2))?;
-        if !(n.lt(&rhs6)? && rhs6.lt(d)?) {
-            break;
+        frame.line(14);
+        let rhs2 = f(m, b)?;
+        if a.lt(&rhs2)? && {
+            let rhs3 = f(m, &rt::int(py, 3))?;
+            rhs2.lt(&rhs3)? && rhs3.le(d)? && d.lt(f(m, &rt::int(py, 10))?)?
+        } {
+            frame.line(15);
+            rt::builtins::print(py, ("long chain",))?;
         }
-        n = rt::iadd(&n, 1)?;
-    }
-    rt::builtins::print(py, ("n", &n))?;
-    Ok(rt::none(py))
+        frame.line(16);
+        if f(m, a)?.eq(1)? && rt::int(py, 1).lt(f(m, b)?)? && {
+            let rhs4 = f(m, &rt::int(py, 5))?;
+            b.lt(&rhs4)? && rhs4.lt(d)?
+        } {
+            frame.line(17);
+            rt::builtins::print(py, ("mixed",))?;
+        } else {
+            frame.line(18);
+            let rhs5 = f(m, &rt::int(py, 0))?;
+            if a.lt(&rhs5)? && rhs5.lt(d)? {
+                frame.line(19);
+                rt::builtins::print(py, ("elif",))?;
+            }
+        }
+        let mut n = rt::int(py, 0);
+        loop {
+            frame.line(21);
+            let rhs6 = f(m, &rt::int(py, 2))?;
+            if !(n.lt(&rhs6)? && rhs6.lt(d)?) {
+                break;
+            }
+            frame.line(22);
+            n = rt::iadd(&n, 1)?;
+            py.check_signals()?;
+        }
+        frame.line(23);
+        rt::builtins::print(py, ("n", &n))?;
+        Ok(rt::none(py))
+    })
 }
 
 /// Executes the body of `chained_conditions.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    m.set_global(
-        "__doc__",
-        "Chained comparisons in conditions whose operands need temporaries.",
-    )?;
-    rt::def!(m, f(x))?;
-    rt::def!(m, check(a, b, d))?;
-    check(m, &rt::int(py, 1), &rt::int(py, 2), &rt::int(py, 4))?;
-    check(m, &rt::int(py, 1), &rt::int(py, 2), &rt::int(py, 3))?;
-    check(m, &rt::int(py, 5), &rt::int(py, 2), &rt::int(py, 4))?;
-    Ok(())
+    rt::frame!(m, "<module>", 1, |frame| {
+        m.set_global(
+            "__doc__",
+            "Chained comparisons in conditions whose operands need temporaries.",
+        )?;
+        rt::def!(m, f(x))?;
+        rt::def!(m, check(a, b, d))?;
+        frame.line(26);
+        check(m, &rt::int(py, 1), &rt::int(py, 2), &rt::int(py, 4))?;
+        frame.line(27);
+        check(m, &rt::int(py, 1), &rt::int(py, 2), &rt::int(py, 3))?;
+        frame.line(28);
+        check(m, &rt::int(py, 5), &rt::int(py, 2), &rt::int(py, 4))?;
+        Ok(())
+    })
 }

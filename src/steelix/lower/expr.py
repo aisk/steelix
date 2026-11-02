@@ -501,6 +501,8 @@ class ExprLowering:
             if name in fn.locals.optional:
                 check = _rt("local", rs.Ref(rs.Path(rust)), rs.StrLit(name))
                 return Value(_try(check), Kind.REF)
+            if name in fn.locals.with_params:
+                return Value(rs.Path(rust), Kind.REF)  # the parameter of a `with` closure
             if name in fn.scope.params and name not in fn.locals.assigned_params:
                 typed = {fn.varargs: "PyTuple", fn.varkw: "PyDict"}.get(name)
                 return Value(rs.Path(rust), Kind.REF, typed=typed)

@@ -41,10 +41,16 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
         ("def f(a):\n    a.b: int\n", "annotated assignment", 2, 5),
         ("from . import x\n", "relative import", 1, 1),
         ("from os import *\n", "star import", 1, 1),
-        ("raise E\n", "raise", 1, 1),
-        ("with a:\n    pass\n", "with statement", 1, 1),
+        ("async def f():\n    pass\n", "async function", 1, 1),
+        ("match x:\n    case 1:\n        pass\n", "match statement", 1, 1),
         ("class A:\n    pass\n", "class definition", 1, 1),
-        ("try:\n    pass\nexcept E:\n    pass\n", "try statement", 1, 1),
+        ("try:\n    pass\nexcept* E:\n    pass\n", "try/except*", 1, 1),
+        (
+            "def f():\n    try:\n        pass\n    except E as e:\n        pass\n    return e\n",
+            "except-as name used outside its handler",
+            4,
+            5,
+        ),
         ("if (y := 1):\n    pass\n", "assignment expression", 1, 5),
         ("x = t'{a}'\n", "t-string", 1, 5),
         ("x = 1j\n", "complex constant", 1, 5),
@@ -179,7 +185,7 @@ def test_conditions_use_rust_operators() -> None:
     )
     assert "if a.is_truthy()? && !b.is_truthy()? || a.is_none() {" in out
     # The middle operand of a chain is evaluated once.
-    assert "let len = xs.len()?;\n    if 0 < len && len <= 3 && !xs.contains(a)? {" in out
+    assert "let len = xs.len()?;\n        if 0 < len && len <= 3 && !xs.contains(a)? {" in out
 
 
 def test_builtin_special_cases_respect_rebinding() -> None:
@@ -208,7 +214,7 @@ def test_for_loop_variable_scoped_to_the_body() -> None:
                 print(x)
         """
     )
-    assert "for x in xs.try_iter()? {\n        let x = x?;" in out
+    assert "for x in xs.try_iter()? {\n            let x = x?;" in out
 
 
 def test_imports_bind_names() -> None:
@@ -240,7 +246,8 @@ def test_py_is_bound_once_or_spelled_in_place() -> None:
     )
     assert "pub fn once<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {" in out
     assert "Ok(rt::none(m.py()))" in out
-    assert "let py = m.py();\n    Ok(PyList::new(py, [x, &rt::int(py, 1)" in out
+    assert 'let py = m.py();\n    rt::frame!(m, "twice", 5, |frame| {' in out
+    assert "Ok(PyList::new(py, [x, &rt::int(py, 1)" in out
 
 
 def test_local_named_m_keeps_its_name() -> None:
@@ -254,7 +261,7 @@ def test_local_named_m_keeps_its_name() -> None:
         """
     )
     assert "module: &rt::Module<'py>," in out
-    assert 'let m = module\n        .global("re")?' in out
+    assert 'let m = module\n            .global("re")?' in out
     assert 'm.call_method1("group", (0,))' in out
 
 
@@ -268,7 +275,7 @@ def test_literal_defaults_are_passed_in_place() -> None:
         """
     )
     args = ["&rt::int(py, 1)", '&rt::str(py, "x")', "&rt::none(py)", '&m.default("f", "d")?']
-    assert ",\n        ".join(args) in out
+    assert ",\n            ".join(args) in out
 
 
 def test_assigned_defaults_are_read_from_the_function() -> None:
@@ -318,7 +325,8 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
         """
     )
     assert out.count("rt::exec_python!(") == 3
-    assert "    // about the class\n    // m.py:4, kept as Python: class definition at 4:1\n" in out
+    comments = "// about the class\n        // m.py:4, kept as Python: class definition at 4:1\n"
+    assert comments in out
     assert "// inside the class" not in out
     assert '"\nclass A:\n    # inside the class\n    pass\n"' in out
     simple = "ys = [i for i in range(3)]  # squares\nzs = {i: i for i in ys}\n"
@@ -332,7 +340,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
 def test_python_statement_after_semicolon() -> None:
     out = lower("x = 1; y = [i for i in 'ab']; print(y)\n")
     assert 'm.set_global("x", 1)?;' in out
-    assert "line = 1,\n        r#\"\ny = [i for i in 'ab']\n\"#" in out
+    assert "line = 1,\n            r#\"\ny = [i for i in 'ab']\n\"#" in out
     assert 'rt::builtins::print(m.py(), (m.global("y")?,))?;' in out
 
 
@@ -361,7 +369,7 @@ def test_future_annotations_reach_python_code() -> None:
             x: int
         """
     )
-    assert "line = 3,\n        future_annotations,\n" in out
+    assert "line = 3,\n            future_annotations,\n" in out
 
 
 def kept_lines(source: str) -> list[int]:
@@ -411,10 +419,9 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
         """
         for i in range(3):
             print(i)
-            try:
-                break
-            finally:
-                pass
+            match i:
+                case 1:
+                    break
         """
     ) == [2]
     # Jumps in a kept loop belong to it; native jumps stay native.
@@ -425,10 +432,9 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
                 ys = [j for j in range(i)]
                 break
             for j in range(i):
-                try:
-                    continue
-                finally:
-                    pass
+                match j:
+                    case _:
+                        continue
             else:
                 print(i)
         """
@@ -442,10 +448,9 @@ def test_jump_in_kept_loop_else_keeps_the_outer_loop() -> None:
             for j in range(3):
                 pass
             else:
-                try:
-                    break
-                finally:
-                    pass
+                match j:
+                    case _:
+                        break
         """
     ) == [2]
 
@@ -471,5 +476,6 @@ def test_exec_without_namespace_gets_the_module_globals() -> None:
             return eval("y")
         """
     )
-    assert 'm.global("exec")?\n        .call1(("y = 1", m.globals().clone().into_any()))?;' in out
+    call = 'm.global("exec")?\n            .call1(("y = 1", m.globals().clone().into_any()))?;'
+    assert call in out
     assert "// m.py:3, kept as Python: eval() without a namespace in a function at 4:12" in out

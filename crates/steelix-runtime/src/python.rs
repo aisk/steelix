@@ -115,6 +115,14 @@ fn eval(module: &Module<'_>, code: &Bound<'_, PyAny>) -> PyResult<()> {
     Ok(())
 }
 
+/// The file name of the module's code: its `__file__`.
+pub(crate) fn filename<'py>(module: &Module<'py>) -> PyResult<Bound<'py, PyString>> {
+    match module.globals().get_item("__file__")? {
+        Some(file) if file.is_instance_of::<PyString>() => Ok(file.cast_into()?),
+        _ => Ok(PyString::new(module.py(), "<steelix>")),
+    }
+}
+
 /// Compiles `source` as module code with the module's file name.
 fn compile<'py>(
     module: &Module<'py>,
@@ -122,10 +130,7 @@ fn compile<'py>(
     future_annotations: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = module.py();
-    let filename = match module.globals().get_item("__file__")? {
-        Some(file) if file.is_instance_of::<PyString>() => file,
-        _ => PyString::new(py, "<steelix>").into_any(),
-    };
+    let filename = filename(module)?;
     let source = CString::new(source)
         .map_err(|_| PyValueError::new_err("source code cannot contain null bytes"))?;
     let mut flags = ffi::PyCompilerFlags {

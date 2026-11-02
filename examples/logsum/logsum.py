@@ -55,7 +55,11 @@ def load(path):
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        request = parse_line(line)
+        try:
+            request = parse_line(line)
+        except ValueError:
+            # A size or time that is not a number.
+            request = None
         if request is None:
             malformed += 1
         else:

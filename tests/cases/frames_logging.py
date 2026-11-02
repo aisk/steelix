@@ -1,7 +1,7 @@
-# Native functions have no Python frame, so logging and warnings attribute
-# their records to the nearest Python frame instead (design §12): logging's
-# own frame, the frame of kept code calling the native function, or none.
-# `KNOWN_DIFFERENCES` in tests/test_e2e.py spells out the current output.
+# Native functions get a traceback frame only when an exception passes, so
+# logging and warnings attribute their records to the nearest Python frame
+# (design §12): logging's own frame, the frame of kept code calling the
+# native function, or none. `KNOWN_DIFFERENCES` in tests/test_e2e.py has it.
 import logging
 import sys
 import warnings
@@ -18,10 +18,9 @@ def step(n):
 
 
 def kept_step(n):
-    try:
-        logging.warning("kept step %d", n)
-    finally:
-        pass
+    match n:  # kept as Python
+        case _:
+            logging.warning("kept step %d", n)
     return n + 1
 
 
@@ -38,17 +37,15 @@ def warn_native(message):
 
 
 def warn_kept():
-    try:
-        warnings.warn("from kept code")
-    finally:
-        pass
+    match 0:  # kept as Python
+        case _:
+            warnings.warn("from kept code")
 
 
 def kept_calls_native():
-    try:
-        warn_native("from native code, called by kept code")
-    finally:
-        pass
+    match 0:  # kept as Python
+        case _:
+            warn_native("from native code, called by kept code")
 
 
 step(1)

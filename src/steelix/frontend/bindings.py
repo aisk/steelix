@@ -15,6 +15,14 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass, field
 
+from steelix.frontend.regions import (
+    Region,
+    expression_body,
+    region_node_ids,
+    regions_in,
+    try_regions,
+    with_regions,
+)
 from steelix.frontend.scope import (
     MODULE_SCOPE,
     FunctionNode,
@@ -378,6 +386,17 @@ class LocalsInfo:
     nested functions receive their value instead of the cell (design §6)."""
     unreachable: set[ast.stmt] = field(default_factory=set)
     end_reachable: bool = True
+    handler_scoped: set[str] = field(default_factory=set)
+    """`except .. as name` names used only in handlers that bind them: each
+    handler declares its own Rust variable, which goes away at its end like
+    the implicit `del name`."""
+    scoped: dict[str, Region] = field(default_factory=dict)
+    """Locals used only inside one closure region (`frontend.regions`),
+    declared inside its closure."""
+    region_top: dict[Region, list[str]] = field(default_factory=dict)
+    """Region scoped locals declared at the start of the region's closure."""
+    with_params: set[str] = field(default_factory=set)
+    """`with .. as name` names bound by the parameter of the `with` closure."""
 
 
 @dataclass(frozen=True)
@@ -424,6 +443,11 @@ class _DefiniteAssignment:
         """Statements kept as Python source, which bind no locals here."""
         self.info = LocalsInfo()
         self.loops: list[_Loop] = []
+        self.recording = True
+        """Off while re-analysing code only for the state after it."""
+        self.region_entry: dict[Region, _Flow] = {}
+        self.candidates: dict[Region, set[str]] = {}
+        """Locals whose every occurrence is in the region (innermost)."""
 
     def run(self, body: list[ast.stmt]) -> LocalsInfo:
         params = frozenset(self.scope.params)
@@ -433,9 +457,12 @@ class _DefiniteAssignment:
                     # A deleted local can be unassigned again afterwards.
                     for target in node.targets:
                         self.info.optional.update(self._local_names(target))
+        self.info.handler_scoped = self._handler_scoped(body)
+        self._region_candidates(body)
         end = self.block(body, _Flow(params, params))
         self.info.end_reachable = end is not None
         self._loop_scoped(body)
+        self._regions(body)
         self._declarations(body)
         params = set(self.scope.params)
         self.info.order += sorted(self.scope.locals - params - set(self.info.order))
@@ -445,7 +472,8 @@ class _DefiniteAssignment:
     def block(self, stmts: list[ast.stmt], state: State) -> State:
         for stmt in stmts:
             if state is None:
-                self.info.unreachable.add(stmt)
+                if self.recording:
+                    self.info.unreachable.add(stmt)
                 continue
             state = self.stmt(stmt, state)
         return state
@@ -503,9 +531,113 @@ class _DefiniteAssignment:
                 return self.assign_name(name, state)
             case ast.Pass() | ast.Global() | ast.Nonlocal():
                 pass
+            case ast.Raise(exc, cause):
+                for expr in (exc, cause):
+                    if expr is not None:
+                        self.reads(expr, state)
+                return None
+            case ast.Try():
+                return self.try_(stmt, state)
+            case ast.With():
+                return self.with_(stmt, state)
             case _:
                 raise AssertionError(f"unexpected statement {stmt!r}")
         return state
+
+    def try_(self, stmt: ast.Try, entry: _Flow) -> State:
+        regions = try_regions(stmt)
+        jumps = self._jump_marks()
+        for region in regions:
+            if region.part == "handled":
+                entry = self.enter(region, entry)
+        body_entry = entry
+        for region in regions:
+            if region.part == "body":
+                body_entry = self.enter(region, entry)
+        end_body = self.block(stmt.body, body_entry)
+        # An exception can come from anywhere in the body, but a body that
+        # evaluates one expression assigns nothing before it succeeds.
+        if expression_body(stmt) is None:
+            raised = _after_exception(body_entry, stmt.body)
+        else:
+            raised = body_entry
+        ends: list[State] = []
+        for handler in stmt.handlers:
+            state = raised
+            if handler.type is not None:
+                self.reads(handler.type, state)
+            if handler.name is not None:
+                state = self.assign_name(handler.name, state)
+            end = self.block(handler.body, state)
+            if end is not None and handler.name is not None:
+                # The implicit `del name` at the end of the handler.
+                end = _Flow(end.definite - {handler.name}, end.maybe - {handler.name})
+            ends.append(end)
+        end_else = self.block(stmt.orelse, end_body) if stmt.orelse else end_body
+        normal = _merge(end_else, *ends)
+        if not stmt.finalbody:
+            return normal
+        # `finally` also runs after exceptions and jumps out of any part.
+        parts: list[ast.AST] = [*stmt.body, *stmt.handlers, *stmt.orelse]
+        self.block(stmt.finalbody, _merge(normal, _after_exception(entry, parts)))
+        self._through_finally(jumps, stmt.finalbody)
+        if normal is None:
+            return None
+        return self.silently(lambda: self.block(stmt.finalbody, normal))
+
+    def with_(self, stmt: ast.With, state: _Flow) -> State:
+        entry = state
+        for i, item in enumerate(stmt.items):
+            self.reads(item.context_expr, state)
+            state = self.enter(Region(stmt, i), state)
+            if i == 0:
+                entry = state
+            if item.optional_vars is not None:
+                state = self.store(item.optional_vars, state)
+        end = self.block(stmt.body, state)
+        # `__exit__` may suppress an exception from anywhere in the block.
+        parts: list[ast.AST] = [*with_regions(stmt)[0].nodes()]
+        return _merge(end, _after_exception(entry, parts))
+
+    def enter(self, region: Region, state: _Flow) -> _Flow:
+        """The state at the start of a closure region. Locals that live only
+        in the region start out unassigned on every run of the closure."""
+        if self.recording:
+            previous = self.region_entry.get(region)
+            self.region_entry[region] = state if previous is None else _merge(previous, state)  # type: ignore[assignment]
+        inner = self.candidates.get(region, set())
+        return _Flow(state.definite - inner, state.maybe - inner)
+
+    def silently(self, analyse):  # type: ignore[no-untyped-def]
+        saved = self.recording
+        self.recording = False
+        try:
+            return analyse()
+        finally:
+            self.recording = saved
+
+    def _jump_marks(self) -> tuple[int, int] | None:
+        if not self.loops:
+            return None
+        loop = self.loops[-1]
+        return len(loop.breaks), len(loop.continues)
+
+    def _through_finally(self, marks: tuple[int, int] | None, finalbody: list[ast.stmt]) -> None:
+        """`break` and `continue` in a `try` run its `finally` block first,
+        which may assign or delete locals (approximated conservatively)."""
+        if marks is None:
+            return
+        loop = self.loops[-1]
+        assigned = _assigned_names(finalbody)
+        deleted = _deleted_names(finalbody)
+
+        def through(state: State) -> State:
+            if state is None:
+                return None
+            return _Flow(state.definite - deleted, state.maybe | assigned)
+
+        loop.breaks[marks[0] :] = [through(s) for s in loop.breaks[marks[0] :]]
+        loop.continues[marks[1] :] = [through(s) for s in loop.continues[marks[1] :]]
 
     def loop(
         self,
@@ -552,7 +684,7 @@ class _DefiniteAssignment:
     def assign_name(self, name: str, state: _Flow) -> _Flow:
         if not self.scope.is_local(name):
             return state
-        if name in state.maybe:
+        if name in state.maybe and self.recording:
             self.info.mutable.add(name)
             if name in self.scope.params:
                 self.info.assigned_params.add(name)
@@ -580,7 +712,7 @@ class _DefiniteAssignment:
                 self.read_name(node.id, state)
 
     def read_name(self, name: str, state: _Flow) -> None:
-        if self.scope.is_local(name) and name not in state.definite:
+        if self.scope.is_local(name) and name not in state.definite and self.recording:
             self.info.optional.add(name)
 
     def _nested_frees(self, node: FunctionNode) -> tuple[str, ...]:
@@ -604,6 +736,8 @@ class _DefiniteAssignment:
                 case ast.Import(names) | ast.ImportFrom(names=names):
                     position = (node.lineno, node.col_offset)
                     found += [(*position, _import_name(alias)) for alias in names]
+                case ast.ExceptHandler(name=str(name)):
+                    found.append((node.lineno, node.col_offset, name))
         found.sort(key=lambda item: item[:2])
         return [name for _, _, name in found]
 
@@ -619,6 +753,8 @@ class _DefiniteAssignment:
                     case ast.Import(names) | ast.ImportFrom(names=names):
                         for alias in names:
                             bindings[_import_name(alias)] += 1
+                    case ast.ExceptHandler(name=str(name)):
+                        bindings[name] += 1
         return bindings
 
     def _local_names(self, target: ast.expr) -> list[str]:
@@ -661,7 +797,9 @@ class _DefiniteAssignment:
 
     def _declarations(self, body: list[ast.stmt]) -> None:
         """Pick locals whose first occurrence is a top-level assignment."""
-        seen: set[str] = set(self.scope.params) | set(self.info.loop_scoped)
+        info = self.info
+        seen: set[str] = set(self.scope.params) | set(info.loop_scoped)
+        elsewhere = set(info.scoped) | info.handler_scoped | info.with_params
         for stmt in body:
             first = [
                 name
@@ -669,13 +807,158 @@ class _DefiniteAssignment:
                 if name not in seen and self.scope.is_local(name)
             ]
             seen.update(first)
-            self.info.order += first
+            info.order += first
+            first = [name for name in first if name not in elsewhere]
             declared = self._declarable(stmt, first)
             for name in first:
                 if name in declared:
-                    self.info.declared_at[name] = stmt
+                    info.declared_at[name] = stmt
                 else:
-                    self.info.declared_at_top.append(name)
+                    info.declared_at_top.append(name)
+        # Locals that live in a closure region are declared there, the same way.
+        by_region: dict[Region, set[str]] = {}
+        for name, region in info.scoped.items():
+            if name not in info.with_params:
+                by_region.setdefault(region, set()).add(name)
+        for region, names in by_region.items():
+            top = info.region_top.setdefault(region, [])
+            stmts = _region_statements(region)
+            for name in names:
+                if not any(name in self._occurrences(stmt) for stmt in stmts):
+                    top.append(name)
+            seen = set(top)
+            for stmt in stmts:
+                first = [
+                    name
+                    for name in dict.fromkeys(self._occurrences(stmt))
+                    if name in names and name not in seen
+                ]
+                seen.update(first)
+                declared = self._declarable(stmt, first)
+                for name in first:
+                    if name in declared:
+                        info.declared_at[name] = stmt
+                    else:
+                        top.append(name)
+            top.sort(key=info.order.index)
+
+    def _handler_scoped(self, body: list[ast.stmt]) -> set[str]:
+        """`except .. as name` names whose every occurrence is inside a
+        handler binding that name, where nothing else binds it."""
+        handlers: dict[str, list[ast.ExceptHandler]] = {}
+        for stmt in body:
+            for node in walk_scope(stmt):
+                if isinstance(node, ast.ExceptHandler) and node.name is not None:
+                    handlers.setdefault(node.name, []).append(node)
+        scoped = set()
+        for name, bound in handlers.items():
+            if not self.scope.is_local(name) or name in self.scope.cells:
+                continue
+            if name in self.scope.params:
+                continue
+            inside: set[int] = set()
+            nested = False
+            for handler in bound:
+                for stmt in handler.body:
+                    for node in walk_scope(stmt):
+                        inside.add(id(node))
+                        if isinstance(node, ast.ExceptHandler) and node.name == name:
+                            nested = True
+            if nested:
+                continue
+            ok = True
+            for stmt in body:
+                for node in walk_scope(stmt):
+                    if node in bound:
+                        continue
+                    if name in _names_bound_or_used(node, self._nested_frees) and (
+                        id(node) not in inside or _binds(node, name)
+                    ):
+                        ok = False
+            if ok:
+                scoped.add(name)
+        return scoped
+
+    def _region_candidates(self, body: list[ast.stmt]) -> None:
+        """The locals each closure region could declare itself: all their
+        occurrences are inside it (the innermost such region)."""
+        regions = list(regions_in(body))
+        if not regions:
+            return
+        ids = {region: region_node_ids(region) for region in regions}
+        where: dict[str, list[int]] = {}
+        for stmt in body:
+            for node in walk_scope(stmt):
+                for name in _names_bound_or_used(node, self._nested_frees):
+                    where.setdefault(name, []).append(id(node))
+        excluded = set(self.scope.params) | self.scope.cells | self.info.handler_scoped
+        for name, nodes in where.items():
+            if not self.scope.is_local(name) or name in excluded:
+                continue
+            containing = [r for r in regions if all(n in ids[r] for n in nodes)]
+            if containing:
+                innermost = min(containing, key=lambda r: len(ids[r]))
+                self.candidates.setdefault(innermost, set()).add(name)
+
+    def _regions(self, body: list[ast.stmt]) -> None:
+        """Decide where locals assigned in closure regions are declared. A
+        closure can not initialize a variable of the enclosing fn, so a local
+        it assigns that is not assigned before it runs (and does not live in
+        the region alone) has to be an `Option`."""
+        info = self.info
+        for region, names in self.candidates.items():
+            for name in names:
+                if name not in info.optional and name not in info.loop_scoped:
+                    info.scoped[name] = region
+        self._with_params(body)
+        for region, entry in self.region_entry.items():
+            inner = region_node_ids(region)
+            for name in _assigned_names(region.nodes()):
+                if not self.scope.is_local(name) or name in self.scope.cells:
+                    continue
+                if name in info.handler_scoped or name in info.loop_scoped:
+                    continue
+                if name in info.with_params:
+                    continue
+                home = info.scoped.get(name)
+                if home is not None and _within(home, region, inner):
+                    continue  # declared in this region or one inside it
+                if name not in entry.definite:
+                    info.optional.add(name)
+
+    def _with_params(self, body: list[ast.stmt]) -> None:
+        """`with .. as name` names that the closure of each `with` binding
+        them can take as its parameter: nothing else binds them, they are
+        only used inside those `with` statements, and no `with` binding the
+        name is inside another one."""
+        info = self.info
+        targets: dict[str, list[Region]] = {}
+        for region in self.region_entry:
+            if isinstance(region.node, ast.With):
+                target = region.node.items[region.part].optional_vars  # type: ignore[index]
+                if isinstance(target, ast.Name):
+                    targets.setdefault(target.id, []).append(region)
+        if not targets:
+            return
+        counts = self._binding_counts(body)
+        where: dict[str, list[int]] = {}
+        for stmt in body:
+            for node in walk_scope(stmt):
+                for name in _names_bound_or_used(node, self._nested_frees):
+                    where.setdefault(name, []).append(id(node))
+        excluded = set(self.scope.params) | self.scope.cells | info.handler_scoped
+        for name, regions in targets.items():
+            if not self.scope.is_local(name) or name in excluded:
+                continue
+            if name in info.optional or name in info.loop_scoped or counts[name] != len(regions):
+                continue
+            ids = [region_node_ids(region) for region in regions]
+            inside = set().union(*ids)
+            if not all(node in inside for node in where.get(name, [])):
+                continue
+            if any(id(r.node) in other for r in regions for other in ids):
+                continue  # a `with` binding it inside another
+            info.with_params.add(name)
 
     def _declarable(self, stmt: ast.stmt, first: list[str]) -> set[str]:
         """Names a reachable top-level assignment can declare with `let`."""
@@ -739,6 +1022,86 @@ class _DefiniteAssignment:
                 once = bindings[name] == 1 and name in info.declared_at
             if once and name not in info.mutable:
                 info.frozen.add(name)
+
+
+def _after_exception(state: _Flow, nodes: list[ast.AST]) -> _Flow:
+    """The state where an exception raised anywhere in `nodes` (starting
+    in `state`) is caught: anything they assign may or may not be."""
+    return _Flow(state.definite - _deleted_names(nodes), state.maybe | _assigned_names(nodes))
+
+
+def _assigned_names(nodes: list[ast.AST]) -> set[str]:
+    """Names bound (or unbound) by `nodes`, not counting nested functions."""
+    names = set()
+    for part in nodes:
+        for node in walk_scope(part):
+            match node:
+                case ast.Name(id, ast.Store() | ast.Del()):
+                    names.add(id)
+                case ast.FunctionDef(name) | ast.ExceptHandler(name=str(name)):
+                    names.add(name)
+                case ast.Import(aliases) | ast.ImportFrom(names=aliases):
+                    names.update(_import_name(alias) for alias in aliases)
+    return names
+
+
+def _deleted_names(nodes: list[ast.AST]) -> set[str]:
+    """Names `nodes` may unbind: `del name`, and the names of handlers."""
+    names = set()
+    for part in nodes:
+        for node in walk_scope(part):
+            match node:
+                case ast.Name(id, ast.Del()):
+                    names.add(id)
+                case ast.ExceptHandler(name=str(name)):
+                    names.add(name)
+    return names
+
+
+def _names_bound_or_used(node: ast.AST, frees) -> list[str]:  # type: ignore[no-untyped-def]
+    """The names `node` itself reads, binds or captures (not its children)."""
+    match node:
+        case ast.Name(id):
+            return [id]
+        case ast.FunctionDef(name):
+            return [name, *frees(node)]
+        case ast.Lambda():
+            return list(frees(node))
+        case ast.Import(aliases) | ast.ImportFrom(names=aliases):
+            return [_import_name(alias) for alias in aliases]
+        case ast.ExceptHandler(name=str(name)):
+            return [name]
+    return []
+
+
+def _binds(node: ast.AST, name: str) -> bool:
+    match node:
+        case ast.Name(id, ast.Store() | ast.Del()):
+            return id == name
+        case ast.FunctionDef(defined) | ast.ExceptHandler(name=str(defined)):
+            return defined == name
+        case ast.Import(aliases) | ast.ImportFrom(names=aliases):
+            return any(_import_name(alias) == name for alias in aliases)
+    return False
+
+
+def _within(inner: Region, outer: Region, outer_ids: set[int]) -> bool:
+    """Whether the region `inner` is `outer` or nested in it."""
+    if inner.node is outer.node:
+        if isinstance(inner.part, int) and isinstance(outer.part, int):
+            return inner.part >= outer.part
+        return inner.part == outer.part or outer.part == "handled"
+    return id(inner.node) in outer_ids
+
+
+def _region_statements(region: Region) -> list[ast.stmt]:
+    """The top-level statements of a region's closure body."""
+    match region.node, region.part:
+        case ast.Try(), "body":
+            return list(region.node.body)
+        case ast.With(items=items, body=body), int(index) if index == len(items) - 1:
+            return list(body)
+    return []
 
 
 def _import_name(alias: ast.alias) -> str:

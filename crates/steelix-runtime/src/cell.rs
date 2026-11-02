@@ -103,13 +103,13 @@ impl<'py> Cell<'py> {
     fn unbound(&self) -> PyErr {
         let name = crate::function::python_name(self.name);
         if self.free {
-            PyNameError::new_err(format!(
+            crate::raised(PyNameError::new_err(format!(
                 "cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
-            ))
+            )))
         } else {
-            PyUnboundLocalError::new_err(format!(
+            crate::raised(PyUnboundLocalError::new_err(format!(
                 "cannot access local variable '{name}' where it is not associated with a value"
-            ))
+            )))
         }
     }
 }

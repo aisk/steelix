@@ -35,6 +35,10 @@ mod unpack;
 pub mod embed;
 
 pub mod builtins;
+#[doc(hidden)]
+pub mod frame;
+
+pub use frame::{Flow, Frame, Handling, IntoException, matches};
 
 pub use cell::Cell;
 pub use function::{Body, Function, FunctionDef, Signature};
@@ -107,9 +111,9 @@ pub fn none(py: Python<'_>) -> Bound<'_, PyAny> {
 pub fn builtin<'py>(py: Python<'py>, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
     match builtins_module(py)?.dict().get_item(interned(py, name))? {
         Some(value) => Ok(value),
-        None => Err(PyNameError::new_err(format!(
+        None => Err(raised(PyNameError::new_err(format!(
             "name '{name}' is not defined"
-        ))),
+        )))),
     }
 }
 
@@ -160,6 +164,19 @@ pub(crate) fn builtins_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> 
         .map(|module| module.bind(py))
 }
 
+/// An exception created in Rust, made a real exception object right away.
+///
+/// `PyErr::new_err` creates the exception object lazily, when it is first
+/// needed. Implicit chaining (`__context__`) happens then, so an error created
+/// inside an `except` block but materialized after it would miss the
+/// exception being handled. Errors the runtime raises go through here.
+pub(crate) fn raised(err: PyErr) -> PyErr {
+    Python::attach(|py| {
+        err.value(py);
+    });
+    err
+}
+
 /// Reads a local variable that might not be assigned yet, raising
 /// `UnboundLocalError` like Python does.
 pub fn local<'a, 'py>(
@@ -179,9 +196,10 @@ pub fn del_local(value: &mut Option<Bound<'_, PyAny>>, name: &str) -> PyResult<(
 }
 
 fn unbound_local(name: &str) -> PyErr {
-    PyUnboundLocalError::new_err(format!(
+    let err = PyUnboundLocalError::new_err(format!(
         "cannot access local variable '{name}' where it is not associated with a value"
-    ))
+    ));
+    raised(err)
 }
 
 /// `start:stop` in a subscript: a `slice` object whose step is `None`.

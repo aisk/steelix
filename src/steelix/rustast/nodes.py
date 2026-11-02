@@ -136,6 +136,35 @@ class IfExpr(Expr):
 
 
 @dataclass(frozen=True)
+class Closure(Expr):
+    """`|params| body`, or `|| -> Ret { .. }` with a return type."""
+
+    params: tuple[str, ...]
+    """Parameter names or patterns such as `_`."""
+    body: Block
+    ret: str | None = None
+
+
+@dataclass(frozen=True)
+class Arm:
+    """`pattern if guard => body` in a `match`."""
+
+    pattern: str
+    """A pattern such as `Ok(value)` or `Err(err)`; the names it binds are
+    in scope in the guard and the body."""
+    body: Block
+    guard: Expr | None = None
+
+
+@dataclass(frozen=True)
+class Match(Expr):
+    """`match scrutinee { arms }`, as an expression or (in `ExprStmt`) a statement."""
+
+    scrutinee: Expr
+    arms: tuple[Arm, ...]
+
+
+@dataclass(frozen=True)
 class Tokens(Expr):
     """A macro argument that is not an expression, such as `name = value` or
     a signature: verbatim token text interleaved with expressions.
@@ -184,6 +213,9 @@ class If(Stmt):
     cond: Expr
     then: Block
     orelse: Block | If | None = None
+    pattern: str | None = None
+    """`if let pattern = cond`: the names the pattern binds are in scope in
+    `then`."""
 
 
 @dataclass(frozen=True)

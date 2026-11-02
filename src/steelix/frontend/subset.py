@@ -18,10 +18,7 @@ from steelix.diagnostics import SourceLocation, UnsupportedError
 _FEATURES: dict[type[ast.AST], str] = {
     ast.AsyncFor: "async for",
     ast.AnnAssign: "annotated assignment",
-    ast.Try: "try statement",
     ast.TryStar: "try/except*",
-    ast.Raise: "raise",
-    ast.With: "with statement",
     ast.AsyncWith: "async with",
     ast.ClassDef: "class definition",
     ast.AsyncFunctionDef: "async function",
@@ -169,6 +166,25 @@ class SubsetChecker:
                     self.check_expr(msg)
             case ast.Pass() | ast.Break() | ast.Continue() | ast.Global() | ast.Nonlocal():
                 pass
+            case ast.Raise(exc, cause):
+                if exc is not None:
+                    self.check_expr(exc)
+                if cause is not None:
+                    self.check_expr(cause)
+            case ast.Try(body, handlers, orelse, finalbody):
+                self.check_body(body)
+                for handler in handlers:
+                    if handler.type is not None:
+                        self.check_expr(handler.type)
+                    self.check_body(handler.body)
+                self.check_body(orelse)
+                self.check_body(finalbody)
+            case ast.With(items, body):
+                for item in items:
+                    self.check_expr(item.context_expr)
+                    if item.optional_vars is not None:
+                        self.check_target(item.optional_vars)
+                self.check_body(body)
             case ast.AnnAssign() if self.depth == 0:
                 self.fail("annotated assignment at module level", stmt)
                 self.descend(stmt)

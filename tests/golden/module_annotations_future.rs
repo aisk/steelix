@@ -12,42 +12,48 @@ use steelix_runtime as rt;
 /// Executes the body of `module_annotations_future.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    // The module's `__annotations__`, which CPython creates before running it
-    m.set_global("__annotations__", PyDict::new(py))?;
-    // With `from __future__ import annotations`, module annotations go into one
-    // `__annotations__` dict, created before the first statement as in CPython.
-    let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
-    m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
-    rt::builtins::print(py, (m.dir()?.contains("__annotations__")?,))?;
-    // module_annotations_future.py:6, kept as Python: annotated assignment at module level at 6:1
-    rt::exec_python!(
-        m,
-        line = 6,
-        future_annotations,
-        r#"
+    rt::frame!(m, "<module>", 1, |frame| {
+        // The module's `__annotations__`, which CPython creates before running it
+        m.set_global("__annotations__", PyDict::new(py))?;
+        // With `from __future__ import annotations`, module annotations go into one
+        // `__annotations__` dict, created before the first statement as in CPython.
+        frame.line(3);
+        let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
+        m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
+        frame.line(5);
+        rt::builtins::print(py, (m.dir()?.contains("__annotations__")?,))?;
+        // module_annotations_future.py:6, kept as Python: annotated assignment at module level at 6:1
+        rt::exec_python!(
+            m,
+            line = 6,
+            future_annotations,
+            r#"
 A: int = 1
 "#
-    )?;
-    rt::builtins::print(py, (m.global("__annotations__")?,))?;
-    // module_annotations_future.py:10, kept as Python: class definition at 10:1
-    rt::exec_python!(
-        m,
-        line = 10,
-        future_annotations,
-        r#"
+        )?;
+        frame.line(7);
+        rt::builtins::print(py, (m.global("__annotations__")?,))?;
+        // module_annotations_future.py:10, kept as Python: class definition at 10:1
+        rt::exec_python!(
+            m,
+            line = 10,
+            future_annotations,
+            r#"
 class Box:
     pass
 "#
-    )?;
-    // module_annotations_future.py:14, kept as Python: annotated assignment at module level at 14:1
-    rt::exec_python!(
-        m,
-        line = 14,
-        future_annotations,
-        r#"
+        )?;
+        // module_annotations_future.py:14, kept as Python: annotated assignment at module level at 14:1
+        rt::exec_python!(
+            m,
+            line = 14,
+            future_annotations,
+            r#"
 B: Box = Box()
 "#
-    )?;
-    rt::builtins::print(py, (m.global("__annotations__")?,))?;
-    Ok(())
+        )?;
+        frame.line(15);
+        rt::builtins::print(py, (m.global("__annotations__")?,))?;
+        Ok(())
+    })
 }

@@ -68,10 +68,20 @@ impl<'py> Module<'py> {
         if self.globals.contains(name)? {
             self.globals.del_item(name)
         } else {
-            Err(PyNameError::new_err(format!(
+            Err(crate::raised(PyNameError::new_err(format!(
                 "name '{name}' is not defined"
-            )))
+            ))))
         }
+    }
+
+    /// Unbinds a global if it is bound: the implicit `del name` at the end
+    /// of `except .. as name` at module level, which CPython compiles as
+    /// `name = None; del name`.
+    pub fn unbind_global(&self, name: &str) -> PyResult<()> {
+        if self.globals.contains(name)? {
+            self.globals.del_item(name)?;
+        }
+        Ok(())
     }
 
     /// The value a direct call of the module function `function` passes for
@@ -85,20 +95,20 @@ impl<'py> Module<'py> {
     /// no default to read and this raises `TypeError` (design §12).
     pub fn default(&self, function: &str, param: &str) -> PyResult<Bound<'py, PyAny>> {
         let Some(object) = self.globals.get_item(function)? else {
-            return Err(PyNameError::new_err(format!(
+            return Err(crate::raised(PyNameError::new_err(format!(
                 "name '{function}' is not defined"
-            )));
+            ))));
         };
         match object.cast::<Function>() {
             Ok(found) if found.get().is_def(function, &self.globals) => {
                 found.get().default(self.py(), param)
             }
-            _ => Err(PyTypeError::new_err(format!(
+            _ => Err(crate::raised(PyTypeError::new_err(format!(
                 "{function}() was replaced by {}, but transpiled code calls the original \
                  directly and can not take the default of its parameter '{param}' from the \
                  replacement",
                 object.repr()?
-            ))),
+            )))),
         }
     }
 

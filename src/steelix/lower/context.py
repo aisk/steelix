@@ -127,6 +127,23 @@ class Context:
         self._temps.add(name)
         return name
 
+    def binding(self, base: str) -> str:
+        """A name for a short-lived binding of the generated code, such as
+        the `err` of `Err(err) => ..`, that may not hide locals or
+        temporaries. Unlike `temp`, the name is not used up: every `match`
+        arm can bind its own `err`."""
+        taken = set(self.module.fn_names.mapping.values()) | FUNCTION_RESERVED | self._temps
+        taken |= self.item_names
+        taken.add(self.context_name)
+        if self.function is not None:
+            taken.update(self.function.names.mapping.values())
+        name = base
+        n = 1
+        while name in taken:
+            n += 1
+            name = f"{base}{n}"
+        return name
+
     def item_name(self, base: str, allowed: str | None = None) -> str:
         """A fresh name for a nested `fn` item, which must not be shadowed by
         locals or temporaries of the enclosing function (`allowed` is a local

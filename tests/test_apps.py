@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from conftest import APPS_DIR, E2E_DIR, PYTHON, Workspace, compiler_warnings, make_workspace
-from test_e2e import run
+from test_e2e import run, traceback_frames
 
 from steelix.emit.crate import Mode
 
@@ -88,8 +88,13 @@ def test_app_matches_python(app: str, args: list[str], apps_workspace: Workspace
     actual = run([str(E2E_DIR / "target" / "debug" / app), *args], DATA)
     assert actual.stdout == expected.stdout
     assert actual.returncode == expected.returncode
-    if "Traceback" in expected.stderr:
-        # Native functions have no traceback frames (design §12).
-        assert actual.last_stderr_line == expected.last_stderr_line
-    else:
+    if "Traceback" not in expected.stderr:
         assert actual.stderr == expected.stderr
+        return
+    # Tracebacks have the frames of native functions too (design §9). A
+    # native frame shows only the first line of a statement that spans
+    # several, so the frames are compared by their first source line.
+    assert traceback_frames(actual.stderr) == traceback_frames(expected.stderr)
+    assert actual.last_stderr_line == expected.last_stderr_line
+    before = expected.stderr.split("Traceback (most recent call last):")[0]
+    assert actual.stderr.startswith(before)

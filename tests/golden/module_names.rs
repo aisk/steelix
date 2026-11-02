@@ -3,7 +3,10 @@ use steelix_runtime as rt;
 
 // module_names.py:4
 pub fn m_<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    x.add(1)
+    rt::frame!(m, "m", 4, |frame| {
+        frame.line(5);
+        x.add(1)
+    })
 }
 
 // module_names.py:8
@@ -17,19 +20,28 @@ pub fn globals<'py>(
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    a.mul(b)
+    rt::frame!(m, "globals", 12, |frame| {
+        frame.line(13);
+        a.mul(b)
+    })
 }
 
 // module_names.py:16
 pub fn exec_module_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    m.global("m")?
-        .call1((1,))?
-        .add(m.global("globals")?.call1((3,))?)
+    rt::frame!(m, "exec_module", 16, |frame| {
+        frame.line(17);
+        m.global("m")?
+            .call1((1,))?
+            .add(m.global("globals")?.call1((3,))?)
+    })
 }
 
 // module_names.py:20
 pub fn module_<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    x.mul(2)
+    rt::frame!(m, "module", 20, |frame| {
+        frame.line(21);
+        x.mul(2)
+    })
 }
 
 // module_names.py:24
@@ -37,37 +49,46 @@ pub fn match_length<'py>(
     module: &rt::Module<'py>,
     text: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    // A local named like the context parameter of generated functions.
-    let m = module.global("len")?.call1((text,))?;
-    module.global("module")?.call1((&m,))
+    rt::frame!(module, "match_length", 24, |frame| {
+        // A local named like the context parameter of generated functions.
+        frame.line(26);
+        let m = module.global("len")?.call1((text,))?;
+        frame.line(27);
+        module.global("module")?.call1((&m,))
+    })
 }
 
 /// Executes the body of `module_names.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    m.set_global(
-        "__doc__",
-        "Module level functions named like the locals of the generated module code.",
-    )?;
-    rt::def!(m, m_(x), name = "m")?;
-    rt::def!(m, py_(), name = "py")?;
-    rt::def!(m, globals(a, b = 2))?;
-    rt::def!(m, exec_module_(), name = "exec_module")?;
-    rt::def!(m, module_(x), name = "module")?;
-    rt::def!(m, match_length(text))?;
-    m.global("print")?.call1((
-        m.global("m")?.call1((1,))?,
-        m.global("py")?.call0()?,
-        m.global("globals")?.call1((4,))?,
-        m.global("exec_module")?.call0()?,
-        m.global("match_length")?.call1(("abc",))?,
-    ))?;
-    m.set_global("f", m.global("m")?)?;
-    m.global("print")?.call1((
-        m.global("f")?.call1((10,))?,
-        m.global("m")?.getattr("__name__")?,
-        m.global("py")?.getattr("__name__")?,
-        m.global("exec_module")?.getattr("__name__")?,
-        m.global("module")?.getattr("__name__")?,
-    ))?;
-    Ok(())
+    rt::frame!(m, "<module>", 1, |frame| {
+        m.set_global(
+            "__doc__",
+            "Module level functions named like the locals of the generated module code.",
+        )?;
+        rt::def!(m, m_(x), name = "m")?;
+        rt::def!(m, py_(), name = "py")?;
+        rt::def!(m, globals(a, b = 2))?;
+        rt::def!(m, exec_module_(), name = "exec_module")?;
+        rt::def!(m, module_(x), name = "module")?;
+        rt::def!(m, match_length(text))?;
+        frame.line(30);
+        m.global("print")?.call1((
+            m.global("m")?.call1((1,))?,
+            m.global("py")?.call0()?,
+            m.global("globals")?.call1((4,))?,
+            m.global("exec_module")?.call0()?,
+            m.global("match_length")?.call1(("abc",))?,
+        ))?;
+        frame.line(31);
+        m.set_global("f", m.global("m")?)?;
+        frame.line(32);
+        m.global("print")?.call1((
+            m.global("f")?.call1((10,))?,
+            m.global("m")?.getattr("__name__")?,
+            m.global("py")?.getattr("__name__")?,
+            m.global("exec_module")?.getattr("__name__")?,
+            m.global("module")?.getattr("__name__")?,
+        ))?;
+        Ok(())
+    })
 }

@@ -34,6 +34,7 @@ from steelix.lower.function import (
     attach_comment_lines,
     attach_comments,
     bind_py,
+    in_frame,
     lower_function,
 )
 from steelix.lower.names import CONTEXT, MODULE_RESERVED, Renamer
@@ -127,7 +128,7 @@ def _lower_exec_module(
     module: ModuleContext, tree: ast.Module, parsed: ParsedModule, plan: FallbackPlan
 ) -> rs.Fn:
     ctx = Context(module, analyze_module_flow(tree, plan.python))
-    lowering = StmtLowering(ctx)
+    lowering = StmtLowering(ctx, line=1)
     body: list[rs.Stmt] = []
 
     doc = docstring(tree, parsed.filename)
@@ -156,11 +157,12 @@ def _lower_exec_module(
     # Not after a loop that never ends.
     ok = rs.Call(rs.Path("Ok"), (rs.Tuple(()),))
 
+    block = rs.Block(tuple(body), ok if ctx.flow.end_reachable else None)
     return rs.Fn(
         name="exec_module",
         params=(rs.Param(CONTEXT, "&rt::Module<'_>"),),
         ret="PyResult<()>",
-        body=bind_py(rs.Block(tuple(body), ok if ctx.flow.end_reachable else None), CONTEXT),
+        body=bind_py(in_frame(CONTEXT, "<module>", 1, block), CONTEXT),
         doc=(f"Executes the body of `{parsed.filename}` in the module `{CONTEXT}`.",),
     )
 

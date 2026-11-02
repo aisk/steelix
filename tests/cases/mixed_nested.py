@@ -31,20 +31,17 @@ for i in range(4):
 n = 0
 while True:
     n += 1
-    try:
-        if n == 3:
+    match n:
+        case 3:
             break
-    finally:
-        print("tried", n)
+    print("tried", n)
 
 # A kept loop inside a native one: its `break` is its own.
 for word in ["ab", "cde"]:
     for ch in word:
-        try:
-            if ch == "d":
+        match ch:
+            case "d":
                 break
-        finally:
-            pass
         print("char", ch)
     else:
         print("no d in", word)

@@ -171,9 +171,15 @@ class _Verifier:
             case rs.Return(value):
                 if value is not None:
                     self.expr(value, scope)
-            case rs.If(cond, then, orelse):
+            case rs.If(cond, then, orelse, pattern):
                 self.expr(cond, scope)
-                self.block(then, scope)
+                if pattern is None:
+                    self.block(then, scope)
+                else:
+                    inner = _Scope(scope)
+                    for name in _pattern_names(pattern):
+                        inner.locals[name] = None
+                    self.block(then, inner)
                 if isinstance(orelse, rs.If):
                     self.stmt(orelse, scope)
                 elif orelse is not None:
@@ -271,6 +277,25 @@ class _Verifier:
                     self.expr(orelse, scope)
                 else:
                     self.block(orelse, scope)
+            case rs.Closure(params, body):
+                # Locals of the enclosing fn are visible, jump targets are not.
+                inner = _Scope(scope)
+                for param in params:
+                    for name in _pattern_names(param):
+                        inner.locals[name] = None
+                saved = self.labels
+                self.labels = []
+                self.block(body, inner)
+                self.labels = saved
+            case rs.Match(scrutinee, arms):
+                self.expr(scrutinee, scope)
+                for arm in arms:
+                    inner = _Scope(scope)
+                    for name in _pattern_names(arm.pattern):
+                        inner.locals[name] = None
+                    if arm.guard is not None:
+                        self.expr(arm.guard, inner)
+                    self.block(arm.body, inner)
             case _:
                 self.problem(f"unknown expression {type(expr).__name__}")
 
@@ -372,8 +397,18 @@ class _Verifier:
         return None
 
 
+# Enum variants and paths that patterns name, which bind nothing.
+_PATTERN_PATHS = frozenset(
+    {"Ok", "Err", "Some", "None", "rt", "Flow", "Next", "Break", "Continue", "Return"}
+)
+
+
 def _pattern_names(pattern: str) -> list[str]:
-    return [n for n in _IDENT.findall(pattern) if n not in ("mut", "ref", "_")]
+    return [
+        n
+        for n in _IDENT.findall(pattern)
+        if n not in ("mut", "ref", "_") and n not in _PATTERN_PATHS
+    ]
 
 
 def check(file: rs.File) -> list[str]:

@@ -13,34 +13,44 @@ pub struct Request<'a> {
     pub ms: Option<u64>,
 }
 
+/// A size or time in a log line that is not a number. The Python version
+/// raises `ValueError` for it (from `int()`), which `load` catches.
+#[derive(Debug, PartialEq)]
+pub struct NotANumber<'a>(pub &'a str);
+
 /// Splits one log line into a request, or returns `None` if it is malformed.
-pub fn parse_line(line: &str) -> Option<Request<'_>> {
+pub fn parse_line(line: &str) -> Result<Option<Request<'_>>, NotANumber<'_>> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 10 || !parts[3].starts_with('[') {
-        return None;
+        return Ok(None);
     }
     let status = parts[8];
     if status.len() != 3 || !status.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+        return Ok(None);
     }
     let bytes = match parts[9] {
         "-" => 0,
-        size => size.parse().ok()?,
+        size => number(size)?,
     };
     let ms = match parts.get(10).and_then(|time| time.strip_suffix("ms")) {
-        Some(ms) => Some(ms.parse().ok()?),
+        Some(ms) => Some(number(ms)?),
         None => None,
     };
     let (path, _query) = parts[6].split_once('?').unwrap_or((parts[6], ""));
-    Some(Request {
+    Ok(Some(Request {
         ip: parts[0],
         hour: parts[3].get(13..15).unwrap_or_default(),
         method: parts[5].trim_start_matches('"'),
         path,
-        status: status.parse().ok()?,
+        status: number(status)?,
         bytes,
         ms,
-    })
+    }))
+}
+
+/// `text` as a number, where the Python version calls `int(text)`.
+fn number<T: std::str::FromStr>(text: &str) -> Result<T, NotANumber<'_>> {
+    text.parse().map_err(|_| NotANumber(text))
 }
 
 /// Nearest-rank percentile of an ascending slice.
@@ -59,7 +69,7 @@ mod tests {
     #[test]
     fn parses_a_request() {
         let line = r#"203.0.113.9 - - [12/Mar/2024:10:15:32 +0000] "GET /api/users?page=2 HTTP/1.1" 200 512 41ms"#;
-        let request = parse_line(line).unwrap();
+        let request = parse_line(line).unwrap().unwrap();
         assert_eq!(request.hour, "10");
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/api/users");
@@ -71,10 +81,18 @@ mod tests {
 
     #[test]
     fn rejects_malformed_lines() {
-        assert_eq!(parse_line("### log rotated ###"), None);
+        assert_eq!(parse_line("### log rotated ###"), Ok(None));
         let bad_status =
             r#"192.0.2.44 - - [12/Mar/2024:11:02:11 +0000] "GET / HTTP/1.1" 2OO 512 12ms"#;
-        assert_eq!(parse_line(bad_status), None);
+        assert_eq!(parse_line(bad_status), Ok(None));
+    }
+
+    #[test]
+    fn reports_numbers_that_are_not_numbers() {
+        let line = r#"203.0.113.77 - - [12/Mar/2024:12:47:02 +0000] "GET / HTTP/1.1" 200 1408 12xms"#;
+        assert_eq!(parse_line(line), Err(NotANumber("12x")));
+        let negative = r#"192.0.2.44 - - [12/Mar/2024:12:50:12 +0000] "GET / HTTP/1.1" 200 -5 21ms"#;
+        assert_eq!(parse_line(negative), Err(NotANumber("-5")));
     }
 
     #[test]

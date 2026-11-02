@@ -17,6 +17,7 @@ from steelix.frontend.scope import FunctionNode, FunctionScope, annotations_of
 from steelix.lower.context import Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
 from steelix.lower.names import FUNCTION_RESERVED, Renamer, context_name, rust_ident
+from steelix.lower.rustflow import fallible, statement_line
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
 from steelix.rustast.rewrite import count_path, replace_path
@@ -65,12 +66,14 @@ def lower_function(
     by_value = {name for name in scope.frees if name in module.frozen[scope.owner(name)]}
     info = FunctionInfo(fn, scope, locals_info, names, by_value)
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
-    lowering = StmtLowering(ctx)
+    first_line = _first_line(fn)
+    lowering = StmtLowering(ctx, line=first_line)
 
-    body: list[rs.Stmt] = []
+    guard: list[rs.Stmt] = []
     if fn in module.callgraph.recursive:
         enter = rs.Call(rs.Path("rt::RecursionGuard::enter"), (rs.Path("py"),))
-        body.append(rs.Let("_guard", init=rs.Try(enter)))
+        guard.append(rs.Let("_guard", init=rs.Try(enter)))
+    body: list[rs.Stmt] = []
     typed = {info.varargs, info.varkw} - {None}
     for param in scope.params:
         rust = names[param]
@@ -105,6 +108,7 @@ def lower_function(
         with lowering.exprs.fresh() as prelude:
             tail: rs.Expr | None = lowering.exprs.value(fn.body).result()
         body += lowering.flush_items() + prelude
+        # Its body is on the line of the `lambda`, where the frame starts.
     else:
         stmts = lowering.reachable(fn.body)
         tail = None
@@ -115,7 +119,9 @@ def lower_function(
             body += lowering.comments(stmts[-1])
             with lowering.exprs.fresh() as prelude:
                 tail = lowering.return_value(stmts[-1].value)
-            body += lowering.flush_items() + prelude
+            body += lowering.flush_items()
+            line = statement_line(stmts[-1])
+            body += lowering.mark(line, [*prelude, rs.Return(tail)]) + prelude
         else:
             for stmt in stmts:
                 body += lowering.stmt(stmt)
@@ -138,16 +144,35 @@ def lower_function(
         params.append(rs.Param(names[param], ty))
 
     doc = docstring(fn, module.filename) if isinstance(fn, ast.FunctionDef) else None
+    block = in_frame(ctx.context_name, scope.qualname, first_line, rs.Block(tuple(body), tail))
     return rs.Fn(
         name=rust_name,
         params=tuple(params),
         ret=RESULT,
-        body=bind_py(rs.Block(tuple(body), tail), ctx.context_name),
+        body=bind_py(rs.Block((*guard, *block.stmts), block.tail), ctx.context_name),
         lifetimes=("'py",),
         public=public,
         doc=tuple(doc.splitlines()) if doc else (),
         comments=(*comments, f"{module.filename}:{fn.lineno}"),
     )
+
+
+def _first_line(fn: FunctionNode) -> int:
+    """The first line of a function's code object: its first decorator."""
+    if isinstance(fn, ast.FunctionDef):
+        return min([fn.lineno, *(d.lineno for d in fn.decorator_list)])
+    return fn.lineno
+
+
+def in_frame(context: str, qualname: str, line: int, body: rs.Block) -> rs.Block:
+    """`body` run in a traceback frame: `rt::frame!(m, "name", line, |frame| ..)`
+    (design §9). A body that can not raise needs none."""
+    tail = [] if body.tail is None else [rs.Return(body.tail)]
+    if not fallible([*body.stmts, *tail]):
+        return body
+    param = "frame" if count_path(body, "frame") else "_"
+    args = (rs.Path(context), rs.StrLit(qualname), rs.IntLit(line), rs.Closure((param,), body))
+    return rs.Block((), rs.MacroCall("rt::frame", args))
 
 
 def _cell_declared_at_assignment(info: FunctionInfo, name: str) -> bool:
@@ -339,7 +364,9 @@ def attach_comment_lines(module: ast.Module, comments: dict[int, str]) -> dict[a
 def _header_end(stmt: ast.stmt) -> int:
     """The last line of the header of a compound statement, before its body."""
     end = stmt.lineno
-    pending = [c for c in ast.iter_child_nodes(stmt) if not isinstance(c, ast.stmt)]
+    pending = [
+        c for c in ast.iter_child_nodes(stmt) if not isinstance(c, ast.stmt | ast.excepthandler)
+    ]
     while pending:
         node = pending.pop()
         if isinstance(node, ast.expr | ast.arg):
@@ -352,6 +379,8 @@ def _child_blocks(stmt: ast.stmt) -> list[list[ast.stmt]]:
     match stmt:
         case ast.If(_, body, orelse) | ast.While(_, body, orelse) | ast.For(_, _, body, orelse):
             return [body, orelse]
-        case ast.FunctionDef(body=body):
+        case ast.FunctionDef(body=body) | ast.With(body=body):
             return [body]
+        case ast.Try(body, handlers, orelse, finalbody):
+            return [body, *(h.body for h in handlers), orelse, finalbody]
     return []
