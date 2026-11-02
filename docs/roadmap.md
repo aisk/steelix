@@ -84,6 +84,14 @@
 
 ## M3c 混合模式与真实应用
 
+开头先处理 M3b 之后 Fable review 发现的问题。
+
+- [ ] 直接调用的目标被替换成另一个没有对应参数的函数时，`Function::default` 会 panic，改成抛 `TypeError`
+- [ ] `run_main` 兜住 panic，转成 traceback 并以退出码 1 结束，而不是 Rust 的 101
+- [ ] 不带参数的 `dir()`、`vars()`、`locals()` 现在报 `SystemError: frame does not exist`，按 `globals()` 的方式处理
+- [ ] logsum 示例：README 补全行为差异（负数、下划线、非 ASCII 数字也会被当成格式错误），`access.log` 加覆盖这些情况的行
+- [ ] §15 改成两步走：先改逻辑但数据仍用 Python 容器（`downcast::<PyDict>()` 等，没有拷贝），等某个容器的生产方和所有读取方都改写后，再整体换成 Rust 类型。logsum 加一个只做第一步的函数作为对照。同时说明类的方法要以整个类为单位改写
+- [ ] §7 的措辞：保持全局变量动态查找是因为不影响可读性，而不是因为能完整支持 monkeypatch（直接调用本来就不支持）
 - [ ] 混合模式：不支持的函数和模块级语句保留 Python 源码，在模块的 globals 里执行（§13）
 - [ ] 转换覆盖率统计（原生转换的函数比例、每种不支持特性出现的次数）
 - [ ] 找一两个真实的小应用跑通，根据结果决定 M4、M5 的先后和范围
@@ -97,6 +105,7 @@
 - [ ] `with`（多个 item）
 - [ ] 异常经过时用 `add_note` 附加 Python 源位置
 - [ ] e2e 测试比较预期异常的类型和消息
+- [ ] 改写约定补充：改写后的适配层抛出的异常类型必须与原来一致，加 e2e 用例在改写过的函数外面 `except` 原来的异常类型
 
 ## M5 类
 
@@ -137,4 +146,4 @@
 
 ## 以后再说
 
-generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式
+generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）
