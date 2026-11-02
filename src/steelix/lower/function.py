@@ -299,15 +299,23 @@ def attach_comments(module: ast.Module, comments: dict[int, str]) -> dict[ast.st
     belong to the statement itself. Comments after the last statement of the
     module are keyed by the module node.
     """
+    return {
+        stmt: [comments[line] for line in lines]
+        for stmt, lines in attach_comment_lines(module, comments).items()
+    }
+
+
+def attach_comment_lines(module: ast.Module, comments: dict[int, str]) -> dict[ast.stmt, list[int]]:
+    """`attach_comments`, giving the line numbers of the comments."""
     lines = sorted(line for line in comments if not (line == 1 and comments[line].startswith("!")))
-    result: dict[ast.stmt, list[str]] = {}
+    result: dict[ast.stmt, list[int]] = {}
     position = 0
 
-    def take(until: int) -> list[str]:
+    def take(until: int) -> list[int]:
         nonlocal position
         taken = []
         while position < len(lines) and lines[position] <= until:
-            taken.append(comments[lines[position]])
+            taken.append(lines[position])
             position += 1
         return taken
 

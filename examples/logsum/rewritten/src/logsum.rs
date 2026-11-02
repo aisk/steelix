@@ -78,6 +78,7 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
         .try_iter()?
     {
         let line = line?;
+        py.check_signals()?;
         if !line.call_method0("strip")?.is_truthy()? {
             continue;
         }
@@ -152,6 +153,7 @@ pub fn print_statuses<'py>(
     let classes = PyDict::new(py).into_any();
     for request in requests.try_iter()? {
         let request = request?;
+        py.check_signals()?;
         name = m
             .global("STATUS_CLASSES")?
             .getattr("get")?
@@ -184,6 +186,7 @@ pub fn print_statuses<'py>(
     .try_iter()?
     {
         name = item?;
+        py.check_signals()?;
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -245,6 +248,7 @@ pub fn print_paths<'py>(
         .try_iter()?
     {
         let [path, count] = rt::unpack(&item?)?;
+        py.check_signals()?;
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -272,6 +276,7 @@ pub fn print_latency<'py>(
     let timed = PyList::empty(py).into_any();
     for item in requests.try_iter()? {
         request = item?;
+        py.check_signals()?;
         if !request.get_item("ms")?.is_none() {
             timed.getattr("append")?.call1((request.get_item("ms")?,))?;
         }
@@ -290,6 +295,7 @@ pub fn print_latency<'py>(
     )?;
     for pct in m.global("PERCENTILES")?.try_iter()? {
         let pct = pct?;
+        py.check_signals()?;
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -307,6 +313,7 @@ pub fn print_latency<'py>(
     let slow_requests = PyList::empty(py).into_any();
     for item2 in requests.try_iter()? {
         request = item2?;
+        py.check_signals()?;
         if !request.get_item("ms")?.is_none() && request.get_item("ms")?.ge(slow)? {
             slow_requests.call_method1("append", (&request,))?;
         }
@@ -337,6 +344,7 @@ pub fn print_latency<'py>(
     .try_iter()?
     {
         request = item3?;
+        py.check_signals()?;
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -370,6 +378,7 @@ pub fn print_hours<'py>(
     rt::builtins::print(py, ("requests per hour",))?;
     for hour in rt::builtin(py, "sorted")?.call1((&hours,))?.try_iter()? {
         let hour = hour?;
+        py.check_signals()?;
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -409,6 +418,7 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
     let clients = rt::builtin(py, "set")?.call0()?;
     for request in requests.try_iter()? {
         let request = request?;
+        py.check_signals()?;
         total_bytes = rt::iadd(&total_bytes, request.get_item("bytes")?)?;
         clients.getattr("add")?.call1((request.get_item("ip")?,))?;
     }

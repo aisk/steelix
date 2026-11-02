@@ -22,9 +22,11 @@ in their expression parts; their text is not checked.
 from __future__ import annotations
 import __future__
 
+import ast
 import re
 from dataclasses import dataclass, field
 
+from steelix.frontend.fallback import annotate_source
 from steelix.rustast import nodes as rs
 from steelix.rustast.pyo3 import must_erase
 
@@ -36,6 +38,7 @@ _PYO3_PRELUDE = frozenset({"Python", "Bound", "Py", "PyAny", "PyResult", "PyErr"
 _IDENT = re.compile(r"(?:r#)?[A-Za-z_][A-Za-z0-9_]*")
 _EXEC_LINE = re.compile(r"line = [1-9][0-9]*")
 _FUTURE_ANNOTATIONS = rs.Tokens(("future_annotations",))
+_FIRST_ANNOTATION = re.compile(r"first_annotation = (0|[1-9][0-9]*)")
 _BOUND_TYPE = re.compile(r"Bound<'\w+, (Py\w+)>")
 
 # Constructors of typed values, by path.
@@ -234,6 +237,8 @@ class _Verifier:
                 pass
             case rs.MacroCall("rt::exec_python", args):
                 self.exec_python(args, scope)
+            case rs.Call(rs.Path("rt::module_annotate"), args):
+                self.module_annotate(args, scope)
             case rs.Call(func, args):
                 self.expr(func, scope)
                 self.exprs(args, scope)
@@ -270,15 +275,23 @@ class _Verifier:
                 self.problem(f"unknown expression {type(expr).__name__}")
 
     def exec_python(self, args: tuple[rs.Expr, ...], scope: _Scope) -> None:
-        """`rt::exec_python!(m, line = N, [future_annotations,] r#"source"#)`:
-        the source must start on the line after `r#"` and compile at line N."""
+        """`rt::exec_python!(m, line = N, [future_annotations | first_annotation
+        = I,] r#"source"#)`: the source must start on the line after `r#"` and
+        compile at line N."""
         match args:
             case (
                 rs.Path() as module,
                 rs.Tokens((str(line),)),
                 *options,
                 rs.RawStrLit(source),
-            ) if _EXEC_LINE.fullmatch(line) and options in ([], [_FUTURE_ANNOTATIONS]):
+            ) if _EXEC_LINE.fullmatch(line) and (
+                options in ([], [_FUTURE_ANNOTATIONS])
+                or (
+                    len(options) == 1
+                    and isinstance(options[0], rs.Tokens)
+                    and _FIRST_ANNOTATION.fullmatch(str(options[0].parts[0]))
+                )
+            ):
                 self.expr(module, scope)
             case _:
                 self.problem("malformed `rt::exec_python!` call")
@@ -287,12 +300,47 @@ class _Verifier:
             self.problem("the source of `rt::exec_python!` must start on a new line")
             return
         number = int(line.removeprefix("line = "))
-        flags = __future__.annotations.compiler_flag if options else 0
+        flags = __future__.annotations.compiler_flag if options == [_FUTURE_ANNOTATIONS] else 0
         padded = "\n" * (number - 2) + source
+        if source[1:2].isspace():
+            # An indented statement from a block, compiled in `if True:`.
+            if number < 2:
+                self.problem("an indented `rt::exec_python!` source must start after line 1")
+                return
+            padded = "\n" * (number - 2) + "if True:" + source
         try:
             compile(padded, "<exec_python>", "exec", flags=flags, dont_inherit=True)
         except SyntaxError as err:
             self.problem(f"the source of `rt::exec_python!` does not compile: {err}")
+
+    def module_annotate(self, args: tuple[rs.Expr, ...], scope: _Scope) -> None:
+        """`rt::module_annotate(m, &[(line, "name: annotation"), ..])`: the
+        annotations must compile on their lines, in order."""
+        match args:
+            case (rs.Path() as module, rs.Ref(rs.Array(entries))) if entries:
+                self.expr(module, scope)
+            case _:
+                self.problem("malformed `rt::module_annotate` call")
+                return
+        annotations: list[tuple[int, str]] = []
+        for entry in entries:
+            match entry:
+                case rs.Tuple((rs.IntLit(line), rs.StrLit(text))) if line > 0:
+                    annotations.append((line, text))
+                case _:
+                    self.problem("malformed `rt::module_annotate` entry")
+                    return
+        if annotations != sorted(annotations, key=lambda a: a[0]):
+            self.problem("the annotations of `rt::module_annotate` are out of order")
+        try:
+            tree = ast.parse(annotate_source(annotations))
+        except SyntaxError as err:
+            self.problem(f"the annotations of `rt::module_annotate` do not compile: {err}")
+            return
+        if len(tree.body) != len(annotations) or not all(
+            isinstance(s, ast.AnnAssign) and s.simple for s in tree.body
+        ):
+            self.problem("`rt::module_annotate` takes one `name: annotation` per entry")
 
     def exprs(self, exprs: tuple[rs.Expr, ...], scope: _Scope) -> None:
         for expr in exprs:

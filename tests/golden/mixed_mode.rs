@@ -5,7 +5,8 @@
 //! - line 35, `def evens`: yield
 //! - line 48, `assign` statement: list comprehension
 //! - line 54, `try` statement: try statement
-//! - line 61, `if` statement: function definition outside module top level
+//! - line 62, `def pick`: function definition outside module top level
+//! - line 65, `def pick`: function definition outside module top level
 //! - line 74, `def twice`: function redefinition
 //! - line 87, `assign` statement: dict comprehension
 //! - line 96, `def chunks`: yield from
@@ -78,7 +79,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     m.set_global("events", PyList::empty(py))?;
     rt::def!(m, log(event))?;
     log(m, &rt::str(py, "native statement before the class"))?;
-    // Kept as Python: class definition at 17:1
+    // mixed_mode.py:17, kept as Python: class definition at 17:1
     rt::exec_python!(
         m,
         line = 17,
@@ -98,7 +99,7 @@ class Counter:
 "#
     )?;
     rt::def!(m, double(x))?;
-    // Kept as Python: yield at 38:13
+    // mixed_mode.py:35, kept as Python: yield at 38:13
     rt::exec_python!(
         m,
         line = 35,
@@ -111,7 +112,7 @@ def evens(limit):
     )?;
     rt::def!(m, use_counter(start))?;
     log(m, &rt::str(py, "native statement after the class"))?;
-    // Kept as Python: list comprehension at 48:11
+    // mixed_mode.py:48, kept as Python: list comprehension at 48:11
     rt::exec_python!(
         m,
         line = 48,
@@ -154,7 +155,7 @@ squares = [double(n) for n in range(4)]
             .call_method0("splitlines")?
             .get_item(0)?,),
     )?;
-    // Kept as Python: try statement at 54:1
+    // mixed_mode.py:54, kept as Python: try statement at 54:1
     rt::exec_python!(
         m,
         line = 54,
@@ -172,22 +173,30 @@ except ImportError:
             .call1(([("kept", true)].into_py_dict(py)?,))?,),
     )?;
     m.set_global("FLAG", true)?;
-    // Kept as Python: function definition outside module top level at 62:5
-    rt::exec_python!(
-        m,
-        line = 61,
-        r#"
-if FLAG:
+    if m.global("FLAG")?.is_truthy()? {
+        // mixed_mode.py:62, kept as Python: function definition outside module top level at 62:5
+        rt::exec_python!(
+            m,
+            line = 62,
+            r#"
     def pick():
         return "first"
-else:
+"#
+        )?;
+    } else {
+        // mixed_mode.py:65, kept as Python: function definition outside module top level at 65:5
+        rt::exec_python!(
+            m,
+            line = 65,
+            r#"
     def pick():
         return "second"
 "#
-    )?;
+        )?;
+    }
     rt::builtins::print(py, (m.global("pick")?.call0()?,))?;
     rt::def!(m, twice())?;
-    // Kept as Python: function redefinition at 74:1
+    // mixed_mode.py:74, kept as Python: function redefinition at 74:1
     rt::exec_python!(
         m,
         line = 74,
@@ -199,7 +208,7 @@ def twice():
     rt::builtins::print(py, (m.global("twice")?.call0()?,))?;
     rt::def!(m, set_mode(mode))?;
     set_mode(m, &rt::str(py, "set by native code"))?;
-    // Kept as Python: dict comprehension at 87:9
+    // mixed_mode.py:87, kept as Python: dict comprehension at 87:9
     rt::exec_python!(
         m,
         line = 87,
@@ -209,7 +218,7 @@ MODES = {k: MODE for k in "ab"}
     )?;
     rt::builtins::print(py, (m.global("MODES")?,))?;
     rt::def!(m, trace(r#fn))?;
-    // Kept as Python: yield from at 98:5
+    // mixed_mode.py:96, kept as Python: yield from at 98:5
     rt::exec_python!(
         m,
         line = 96,
@@ -226,7 +235,7 @@ def chunks(items):
     )?;
     rt::builtins::print(py, (m.global("events")?,))?;
     // `:=` in a comprehension binds a global, here shadowing a builtin.
-    // Kept as Python: list comprehension at 105:1, assignment expression at 105:3
+    // mixed_mode.py:105, kept as Python: list comprehension at 105:1, assignment expression at 105:3
     rt::exec_python!(
         m,
         line = 105,

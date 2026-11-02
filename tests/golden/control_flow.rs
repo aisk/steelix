@@ -11,6 +11,7 @@ pub fn collatz_steps<'py>(
     let mut n = n.clone();
     let mut steps = rt::int(py, 0);
     while n.ne(1)? {
+        py.check_signals()?;
         if n.rem(2)?.eq(0)? {
             n = n.floor_div(2)?;
         } else {
@@ -42,9 +43,11 @@ pub fn count_up<'py>(
     m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut i = start.clone();
-    let mut total = rt::int(m.py(), 0);
+    let mut total = rt::int(py, 0);
     while i.lt(m.global("LIMIT")?)? {
+        py.check_signals()?;
         total = total.add(&i)?;
         i = i.add(m.global("STEP")?)?;
     }
@@ -56,8 +59,10 @@ pub fn first_square_above<'py>(
     m: &rt::Module<'py>,
     bound: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut k = rt::int(m.py(), 0);
+    let py = m.py();
+    let mut k = rt::int(py, 0);
     loop {
+        py.check_signals()?;
         k = k.add(1)?;
         if k.mul(&k)?.gt(bound)? {
             return Ok(k);
@@ -99,6 +104,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(py, (first_square_above(m, &rt::int(py, 50))?,))?;
     m.set_global("n", 10)?;
     while m.global("n")?.gt(0)? {
+        py.check_signals()?;
         if m.global("n")?.rem(4)?.eq(0)? {
             rt::builtins::print(py, ("four", m.global("n")?))?;
         } else if m.global("n")?.rem(3)?.eq(0)? {

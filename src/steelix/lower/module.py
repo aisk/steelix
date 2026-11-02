@@ -5,8 +5,8 @@ against an existing module object. It does not know whether it runs inside an
 extension module or as `__main__` of an executable; the emitted `lib.rs` /
 `main.rs` decides that.
 
-In mixed mode (the default) top-level statements that can not be lowered are
-kept as Python source and run in place by `rt::exec_python!` (design §13).
+In mixed mode (the default) module level statements that can not be lowered
+are kept as Python source and run in place by `rt::exec_python!` (design §13).
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from steelix.frontend.desugar import desugar
 from steelix.frontend.fallback import (
     FallbackPlan,
     first_line,
-    last_line,
-    python_source,
+    module_annotations,
+    python_runs,
     source_lines,
 )
 from steelix.frontend.parse import ParsedModule
@@ -30,7 +30,12 @@ from steelix.frontend.scope import analyze_scopes, has_future_annotations
 from steelix.frontend.subset import Issue, find_unsupported
 from steelix.lower.context import Context, ModuleContext
 from steelix.lower.docstrings import docstring
-from steelix.lower.function import attach_comments, bind_py, lower_function
+from steelix.lower.function import (
+    attach_comment_lines,
+    attach_comments,
+    bind_py,
+    lower_function,
+)
 from steelix.lower.names import CONTEXT, MODULE_RESERVED, Renamer
 from steelix.lower.stmt import StmtLowering
 from steelix.rustast import nodes as rs
@@ -49,12 +54,14 @@ def lower_module(parsed: ParsedModule, *, fallback: bool = True) -> LoweredModul
     raises `UnsupportedError` instead of being kept as Python."""
     tree = parsed.tree
     desugar(tree)
-    plan = FallbackPlan(find_unsupported(tree, parsed.filename))
+    plan = FallbackPlan()
+    for stmt, issues in find_unsupported(tree, parsed.filename).items():
+        plan.add(stmt, issues)
     _keep_redefinitions(tree, plan, parsed.filename)
     if not fallback:
         for stmt in tree.body:
-            if plan.is_python(stmt):
-                raise plan.python[stmt][0].error()
+            for kept in plan.within(stmt):
+                raise plan.python[kept][0].error()
     while True:
         try:
             return _lower(parsed, plan)
@@ -87,6 +94,8 @@ def _lower(parsed: ParsedModule, plan: FallbackPlan) -> LoweredModule:
     callgraph = build_call_graph(tree, bindings, scopes)
     defs = [s for s in tree.body if isinstance(s, ast.FunctionDef) and s not in python]
     fn_names = Renamer([d.name for d in defs], MODULE_RESERVED)
+    future_annotations = has_future_annotations(tree)
+    annotations = [] if future_annotations else _simple_annotations(tree)
     module = ModuleContext(
         parsed.filename,
         bindings,
@@ -94,7 +103,11 @@ def _lower(parsed: ParsedModule, plan: FallbackPlan) -> LoweredModule:
         fn_names,
         scopes,
         comments=attach_comments(tree, parsed.comments),
-        future_annotations=has_future_annotations(tree),
+        future_annotations=future_annotations,
+        plan=plan,
+        annotation_index={a: i for i, a in enumerate(annotations)},
+        source_lines=source_lines(parsed.source),
+        leading_comments=_leading_comments(tree, parsed, plan),
     )
 
     items: list[rs.Item] = []
@@ -123,68 +136,92 @@ def _lower_exec_module(
             rs.Path(ctx.context()), "set_global", (rs.StrLit("__doc__"), rs.StrLit(doc))
         )
         body.append(rs.ExprStmt(rs.Try(setter)))
+    body += _module_annotations(ctx, tree, parsed)
 
-    lines = source_lines(parsed.source)
-    previous_end = 0
-    chunk: list[ast.stmt] = []
-    for index, stmt in enumerate(tree.body):
-        ctx.statement_index = index
-        if plan.is_python(stmt) and stmt not in ctx.flow.unreachable:
-            if not chunk:
-                body += _leading_comments(parsed, previous_end, first_line(stmt))
-            chunk.append(stmt)
-            previous_end = last_line(stmt)
+    index = {id(stmt): i for i, stmt in enumerate(tree.body)}
+    unreachable = ctx.flow.unreachable
+    stmts = [s for s in tree.body if not (plan.is_python(s) and s in unreachable)]
+    for run in python_runs(stmts, plan):
+        if isinstance(run, list):
+            body += lowering.exec_python(run)
             continue
-        if chunk:
-            body += _exec_python(module, lines, chunk, plan)
-            chunk = []
-        previous_end = last_line(stmt)
-        if isinstance(stmt, ast.FunctionDef):
+        ctx.statement_index = index[id(run)]
+        if isinstance(run, ast.FunctionDef):
             # The comments before a `def` went to its Rust fn.
-            if stmt not in ctx.flow.unreachable:
-                body += lowering.module_def(stmt, module.fn_names[stmt.name])
-        elif not plan.is_python(stmt):
-            body += lowering.stmt(stmt)
-    if chunk:
-        body += _exec_python(module, lines, chunk, plan)
+            if run not in unreachable:
+                body += lowering.module_def(run, module.fn_names[run.name])
+        else:
+            body += lowering.stmt(run)
     body += [rs.Comment(c) for c in module.comments.get(tree, [])]  # type: ignore[call-overload]
+    # Not after a loop that never ends.
+    ok = rs.Call(rs.Path("Ok"), (rs.Tuple(()),))
 
     return rs.Fn(
         name="exec_module",
         params=(rs.Param(CONTEXT, "&rt::Module<'_>"),),
         ret="PyResult<()>",
-        body=bind_py(rs.Block(tuple(body), rs.Call(rs.Path("Ok"), (rs.Tuple(()),))), CONTEXT),
+        body=bind_py(rs.Block(tuple(body), ok if ctx.flow.end_reachable else None), CONTEXT),
         doc=(f"Executes the body of `{parsed.filename}` in the module `{CONTEXT}`.",),
     )
 
 
-def _leading_comments(parsed: ParsedModule, after: int, before: int) -> list[rs.Stmt]:
-    """Comments on the lines between two statements, which belong to the
-    second one. Comments inside a statement kept as Python stay in its source."""
+def _simple_annotations(tree: ast.Module) -> list[ast.AnnAssign]:
+    """The module level annotations that go into `__annotate__`: those of a
+    plain name (not `(x): int` or `x.y: int`)."""
+    return [a for a in module_annotations(tree) if a.simple and isinstance(a.target, ast.Name)]
+
+
+def _module_annotations(ctx: Context, tree: ast.Module, parsed: ParsedModule) -> list[rs.Stmt]:
+    """What CPython sets up for module level annotations before the first
+    statement runs. The annotated assignments are kept as Python, possibly in
+    several `rt::exec_python!` blocks, but annotations are per module.
+
+    * `__annotate__` evaluating all annotations (they are only returned once
+      their assignment has run), or with `from __future__ import annotations`
+    * the `__annotations__` dict that each assignment adds its annotation to.
+    """
+    module = ctx.module
+    if module.future_annotations:
+        if not module_annotations(tree):
+            return []
+        ctx.module.uses.add("pyo3::types::PyDict")
+        create = rs.MethodCall(
+            rs.Path(ctx.context()),
+            "set_global",
+            (rs.StrLit("__annotations__"), rs.Call(rs.Path("PyDict::new"), (rs.Path("py"),))),
+        )
+        return [
+            rs.Comment("The module's `__annotations__`, which CPython creates before running it"),
+            rs.ExprStmt(rs.Try(create)),
+        ]
+    if not module.annotation_index:
+        return []
+    entries = []
+    for node in module.annotation_index:
+        assert isinstance(node.target, ast.Name)
+        text = ast.get_source_segment(parsed.source, node.annotation)
+        assert text is not None
+        entry = (rs.IntLit(node.annotation.lineno), rs.StrLit(f"{node.target.id}: {text}"))
+        entries.append(rs.Tuple(entry))
+    call = rs.Call(
+        rs.Path("rt::module_annotate"), (rs.Path(ctx.context()), rs.Ref(rs.Array(tuple(entries))))
+    )
     return [
-        rs.Comment(text)
-        for line, text in sorted(parsed.comments.items())
-        if after < line < before and not (line == 1 and text.startswith("!"))
+        rs.Comment("The module's `__annotate__`, which CPython defines before running it"),
+        rs.ExprStmt(rs.Try(call)),
     ]
 
 
-def _exec_python(
-    module: ModuleContext, lines: list[str], stmts: list[ast.stmt], plan: FallbackPlan
-) -> list[rs.Stmt]:
-    """`rt::exec_python!(m, line = N, r#"..."#)?;` for consecutive statements
-    kept as Python, with a comment saying why."""
-    features: dict[str, str] = {}
-    for stmt in stmts:
-        for issue in plan.python[stmt]:
-            location = issue.location
-            features.setdefault(issue.feature, f"{location.line}:{location.col + 1}")
-    reasons = ", ".join(f"{feature} at {where}" for feature, where in features.items())
-    args: list[rs.Expr] = [rs.Path(CONTEXT), rs.Tokens((f"line = {first_line(stmts[0])}",))]
-    if module.future_annotations:
-        args.append(rs.Tokens(("future_annotations",)))
-    args.append(rs.RawStrLit("\n" + python_source(lines, stmts)))
-    call = rs.Try(rs.MacroCall("rt::exec_python", tuple(args)))
-    return [rs.Comment(f"Kept as Python: {reasons}"), rs.ExprStmt(call)]
+def _leading_comments(
+    tree: ast.Module, parsed: ParsedModule, plan: FallbackPlan
+) -> dict[ast.stmt, list[str]]:
+    """The comments before each statement kept as Python. Those inside it
+    stay in its source."""
+    attached = attach_comment_lines(tree, parsed.comments)
+    return {
+        stmt: [parsed.comments[line] for line in attached.get(stmt, []) if line < first_line(stmt)]
+        for stmt in plan.python
+    }
 
 
 def _python_summary(parsed: ParsedModule, tree: ast.Module, plan: FallbackPlan) -> tuple[str, ...]:
@@ -196,12 +233,10 @@ def _python_summary(parsed: ParsedModule, tree: ast.Module, plan: FallbackPlan) 
         "`rt::exec_python!` in `exec_module` (steelix does not lower them yet):",
         "",
     ]
-    for stmt in tree.body:
-        issues = plan.python.get(stmt)
-        if issues is None:
-            continue
-        features = ", ".join(dict.fromkeys(issue.feature for issue in issues))
-        out.append(f"- line {first_line(stmt)}, {_describe(stmt)}: {features}")
+    for top in tree.body:
+        for stmt in plan.within(top):
+            features = ", ".join(dict.fromkeys(issue.feature for issue in plan.python[stmt]))
+            out.append(f"- line {first_line(stmt)}, {_describe(stmt)}: {features}")
     return tuple(out)
 
 

@@ -5,10 +5,12 @@ use steelix_runtime as rt;
 // A module level comment before a function.
 // comments.py:7
 pub fn total<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     // Sum the items one by one.
-    let mut result = rt::int(m.py(), 0);
+    let mut result = rt::int(py, 0);
     for item in items.try_iter()? {
         let item = item?;
+        py.check_signals()?;
         // Skip negative numbers.
         if item.lt(0)? {
             continue;

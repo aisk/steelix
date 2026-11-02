@@ -43,6 +43,7 @@ pub fn check<'py>(
     }
     let mut n = rt::int(py, 0);
     loop {
+        py.check_signals()?;
         let rhs6 = f(m, &rt::int(py, 2))?;
         if !(n.lt(&rhs6)? && rhs6.lt(d)?) {
             break;

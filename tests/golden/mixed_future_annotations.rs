@@ -17,7 +17,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
     m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
     rt::def!(m, native(x: "'int'") -> "'str'")?;
-    // Kept as Python: yield at 9:5, class definition at 12:1, annotated assignment at 13:5
+    // mixed_future_annotations.py:8, kept as Python: yield at 9:5
     rt::exec_python!(
         m,
         line = 8,
@@ -25,8 +25,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         r#"
 def kept(x: int) -> Iterator[str]:
     yield str(x)
-
-
+"#
+    )?;
+    // mixed_future_annotations.py:12, kept as Python: class definition at 12:1, annotated assignment at 13:5
+    rt::exec_python!(
+        m,
+        line = 12,
+        future_annotations,
+        r#"
 class Box:
     size: Size
 "#

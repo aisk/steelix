@@ -32,7 +32,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .into_any()
             .is(m.globals().clone().into_any()),
     ))?;
-    // Kept as Python: locals() in a function at 10:19
+    // namespaces.py:8, kept as Python: locals() in a function at 10:19
     rt::exec_python!(
         m,
         line = 8,

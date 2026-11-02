@@ -124,23 +124,27 @@ def measure(tree: ast.Module, plan: FallbackPlan, filename: str) -> Coverage:
 
     lines_python = 0
     for stmt in tree.body:
-        issues = plan.python.get(stmt, [])
-        native = stmt not in plan.python
-        if not native:
-            lines_python += last_line(stmt) - first_line(stmt) + 1
+        kept = plan.within(stmt)
+        issues = [issue for node in kept for issue in plan.python[node]]
+        python_nodes = {id(node) for k in kept for node in ast.walk(k)}
+        lines_python += sum(last_line(k) - first_line(k) + 1 for k in kept)
         for issue in issues:
             entry = stats(issue.feature)
             entry.occurrences += 1
             entry.locations.append(str(issue.location))
-        functions = outermost_functions(stmt)
-        for fn in functions:
-            blockers = _blockers(fn, issues)
+        for fn in outermost_functions(stmt):
+            container = next((k for k in kept if fn in ast.walk(k)), None)
+            native = container is None
+            blockers = [] if container is None else _blockers(fn, plan.python[container])
             units.append(Unit("function", _qualname(stmt, fn), fn.lineno, native, blockers))
             for feature in blockers:
                 stats(feature).functions += 1
             if len(blockers) == 1:
                 stats(blockers[0]).only += 1
         if not isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            # A split `if` / `for` / `while` runs natively, even if some
+            # statements in it are kept.
+            native = id(stmt) not in python_nodes
             blockers = list(dict.fromkeys(i.feature for i in issues if i.owner is None))
             name = stmt.name if isinstance(stmt, ast.ClassDef) else type(stmt).__name__
             units.append(Unit("statement", name, first_line(stmt), native, blockers))

@@ -43,6 +43,7 @@ pub use module::Module;
 pub use ops::{
     iadd, iand, ifloordiv, ilshift, imatmul, imod, imul, ior, ipow, irshift, isub, itruediv, ixor,
 };
+pub use python::module_annotate;
 pub use unpack::{unpack, unpack_star};
 
 /// Re-exported so that macros can name PyO3 items through `$crate`.
@@ -99,8 +100,12 @@ pub fn none(py: Python<'_>) -> Bound<'_, PyAny> {
 }
 
 /// Reads a builtin such as `len`, raising `NameError` if it does not exist.
+///
+/// Like `LOAD_GLOBAL`, it looks in the namespace of the `builtins` module,
+/// not at its attributes: `__annotations__` or `__dict__` are attributes of
+/// every module object but not builtins.
 pub fn builtin<'py>(py: Python<'py>, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
-    match builtins_module(py)?.getattr_opt(interned(py, name))? {
+    match builtins_module(py)?.dict().get_item(interned(py, name))? {
         Some(value) => Ok(value),
         None => Err(PyNameError::new_err(format!(
             "name '{name}' is not defined"

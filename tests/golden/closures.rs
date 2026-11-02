@@ -41,6 +41,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let funcs = PyList::empty(py).into_any();
     for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
         i.set(item?)?;
+        py.check_signals()?;
         // closures.py:23
         fn show_<'py>(m: &rt::Module<'py>, i: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
             i.get()
@@ -66,6 +67,7 @@ pub fn early_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let funcs = PyList::empty(py).into_any();
     for i in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
         let i = i?;
+        py.check_signals()?;
         // closures.py:34
         fn lambda<'py>(m: &rt::Module<'py>, i: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
             i.mul(10)

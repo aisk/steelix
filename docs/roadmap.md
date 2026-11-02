@@ -98,18 +98,20 @@
 - [x] 转换覆盖率统计：`steelix transpile` 打印摘要，`--report` 写 JSON，`steelix coverage` 合并多个模块（§13）
 - [x] 真实应用：标准库的 6 个命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool）在混合模式下与 CPython 一致，放进 `tests/apps/`。修复了发现的 3 个编译问题，数据和建议的 M4、M5、M8 顺序见 `coverage.md`
 
-## M3d 混合模式之后的小修
+## M3d 混合模式之后的小修 ✅
 
 来自 M3c 之后的 Fable review，都有复现。
 
-- [ ] 模块级嵌套语句的细粒度保留：`if`/`for`/`while`/`if __name__ == "__main__"` 里只有某个子语句不支持时，只保留那个子语句，其余仍然原生（模块作用域就是 globals，不需要同步局部变量；注意被保留的子语句里的 `break`/`continue`）
-- [ ] 原生的 `while`/`for` 循环里调用 `PyErr_CheckSignals`，现在纯原生循环按 Ctrl-C 停不下来
-- [ ] 每个被保留的 `def`/`class` 单独一个 `exec_python!`，各自带源位置和原因，只合并连续的简单语句。§13/§15 补充如何把保留为 Python 的函数手工改成原生
-- [ ] 对自身模块的 `setattr`/`delattr`（`sys.modules[__name__]`、`__main__` 等）关闭直接调用，与 design.md §7 的描述一致。`exec` 同理
-- [ ] `rt::builtin` 改为查 builtins 的字典，而不是对 builtins 模块 `getattr`（现在 `__annotations__` 等名字会读到模块对象的属性）
-- [ ] 模块注解分散在多个保留块时合并，而不是只保留最后一块
-- [ ] 带参数的 `vars(obj)` 不再关闭整个模块的直接调用
-- [ ] §12 记录原生函数没有 Python 帧对 `logging`（`%(lineno)d`、`%(funcName)s`）和 `warnings` 的影响，`tests/apps` 加一个记录行号的用例
+- [x] 模块级嵌套语句的细粒度保留：`if`/`for`/`while`/`if __name__ == "__main__"` 里只有某个子语句不支持时，只保留那个子语句，其余仍然原生（模块作用域就是 globals，不需要同步局部变量；注意被保留的子语句里的 `break`/`continue`）
+- [x] 原生的 `while`/`for` 循环里调用 `PyErr_CheckSignals`，现在纯原生循环按 Ctrl-C 停不下来
+- [x] 每个被保留的 `def`/`class` 单独一个 `exec_python!`，各自带源位置和原因，只合并连续的简单语句。§13/§15 补充如何把保留为 Python 的函数手工改成原生
+- [x] 对自身模块的 `setattr`/`delattr`（`sys.modules[__name__]`、`__main__` 等）关闭直接调用，与 design.md §7 的描述一致。`exec` 同理
+- [x] `rt::builtin` 改为查 builtins 的字典，而不是对 builtins 模块 `getattr`（现在 `__annotations__` 等名字会读到模块对象的属性）
+- [x] 模块注解分散在多个保留块时合并，而不是只保留最后一块
+- [x] 带参数的 `vars(obj)` 不再关闭整个模块的直接调用
+- [x] §12 记录原生函数没有 Python 帧对 `logging`（`%(lineno)d`、`%(funcName)s`）和 `warnings` 的影响，`tests/apps` 加一个记录行号的用例（放在了 `tests/cases/frames_logging.py`，期望的差异写在 `tests/test_e2e.py` 的 `KNOWN_DIFFERENCES`）
+
+另外修复了两个顺带发现的问题：原生代码里只有一个参数的 `exec(src)`/`eval(src)` 没有帧可用，报 `SystemError`，现在在模块级显式传入 globals，函数里的保留为 Python；模块级不会结束的原生循环后面不再生成 `Ok(())`（unreachable 警告）。bin 模式下未捕获的 `KeyboardInterrupt` 和 CPython 一样以 `SIGINT` 结束进程。
 
 ## M4 异常与上下文管理
 

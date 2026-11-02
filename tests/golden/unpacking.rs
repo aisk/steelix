@@ -67,6 +67,7 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     {
         let [i, items] = rt::unpack(&item3?)?;
         let [x, y] = rt::unpack(&items)?;
+        py.check_signals()?;
         total = total.add(i.mul(x.add(&y)?)?)?;
     }
     rt::builtins::print(py, (&total,))?;
@@ -78,6 +79,7 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let [key2, value3] = rt::unpack(&item4?)?;
         key = Some(key2);
         value = value3;
+        py.check_signals()?;
         rt::builtins::print(py, (rt::local(&key, "key")?, &value))?;
     }
     rt::builtins::print(py, (rt::local(&key, "key")?,))?;
@@ -131,6 +133,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         let [k, v] = rt::unpack(&item?)?;
         m.set_global("k", k)?;
         m.set_global("v", v)?;
+        py.check_signals()?;
         rt::builtins::print(py, (m.global("k")?, m.global("v")?))?;
     }
     Ok(())

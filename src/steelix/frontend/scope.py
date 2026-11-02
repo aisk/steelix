@@ -73,15 +73,18 @@ class ModuleScopes:
         return self.functions[fn]
 
 
-def walk_scope(node: ast.AST) -> Iterator[ast.AST]:
+def walk_scope(node: ast.AST, skip: Collection[ast.AST] = ()) -> Iterator[ast.AST]:
     """Like `ast.walk`, but only the nodes evaluated in the scope of `node`.
 
     Nested `def` and `lambda` nodes are yielded themselves, together with the
     parts evaluated where they are defined (defaults and decorators), but not
     their bodies. Annotations are evaluated lazily in their own scope (PEP
     649) and are skipped too. The order follows `symtable`, which visits
-    defaults before decorators and both before the function itself.
+    defaults before decorators and both before the function itself. Nodes in
+    `skip` (statements kept as Python) are left out with everything in them.
     """
+    if node in skip:
+        return
     match node:
         case ast.FunctionDef(args=args, decorator_list=decorators):
             yield from _walk_all([*args.defaults, *_present(args.kw_defaults), *decorators])
@@ -92,7 +95,7 @@ def walk_scope(node: ast.AST) -> Iterator[ast.AST]:
         case _:
             yield node
             for child in ast.iter_child_nodes(node):
-                yield from walk_scope(child)
+                yield from walk_scope(child, skip)
 
 
 def _walk_all(nodes: list[ast.expr]) -> Iterator[ast.AST]:
@@ -109,8 +112,8 @@ def scope_body(fn: FunctionNode) -> list[ast.AST]:
     return list(fn.body) if isinstance(fn, ast.FunctionDef) else [fn.body]
 
 
-def nested_functions(nodes: list[ast.AST]) -> list[FunctionNode]:
-    return [n for node in nodes for n in walk_scope(node) if isinstance(n, FunctionNode)]
+def nested_functions(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> list[FunctionNode]:
+    return [n for node in nodes for n in walk_scope(node, skip) if isinstance(n, FunctionNode)]
 
 
 def params_of(args: ast.arguments) -> tuple[str, ...]:
@@ -142,12 +145,11 @@ def analyze_scopes(
     filename: str,
     python: Collection[ast.stmt] = (),
 ) -> ModuleScopes:
-    """Scopes of the functions in `module`, except in the top-level
-    statements `python` that are kept as Python source."""
+    """Scopes of the functions in `module`, except in the statements
+    `python` that are kept as Python source."""
     table = symtable.symtable(source, filename, "exec")
     functions: dict[FunctionNode, FunctionScope] = {}
-    body = [stmt for stmt in module.body if stmt not in python]
-    top_level = _link(table, list(body), None, filename, functions)
+    top_level = _link(table, list(module.body), None, filename, functions, python)
     for scope in functions.values():
         for name in scope.frees:
             scope.owner(name).cells.add(name)
@@ -164,15 +166,17 @@ def _link(
     parent: FunctionScope | None,
     filename: str,
     functions: dict[FunctionNode, FunctionScope],
+    skip: Collection[ast.AST] = (),
 ) -> list[FunctionScope]:
-    """Match the function tables nested in `table` with the AST nodes."""
+    """Match the function tables nested in `table` with the AST nodes,
+    except those in `skip`."""
     tables: dict[tuple[str, int], list[symtable.Function]] = {}
     for child in table.get_children():
         if child.get_type() == symtable.SymbolTableType.FUNCTION:
             assert isinstance(child, symtable.Function)
             tables.setdefault((child.get_name(), child.get_lineno()), []).append(child)
     scopes = []
-    for node in nested_functions(body):
+    for node in nested_functions(body, skip):
         name = node.name if isinstance(node, ast.FunctionDef) else "lambda"
         child = tables[(name, node.lineno)].pop(0)
         scope = _function_scope(child, node, parent)

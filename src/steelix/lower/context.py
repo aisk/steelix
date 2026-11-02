@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.bindings import LocalsInfo, ModuleBindings
 from steelix.frontend.callgraph import CallGraph
+from steelix.frontend.fallback import FallbackPlan
 from steelix.frontend.scope import FunctionNode, FunctionScope, ModuleScopes
 from steelix.lower.names import CONTEXT, FUNCTION_RESERVED, RUST_KEYWORDS, Renamer
 from steelix.rustast import nodes as rs
@@ -25,6 +26,16 @@ class ModuleContext:
     """Python comments to emit before each statement."""
     future_annotations: bool = False
     """`from __future__ import annotations`: annotations are strings."""
+    plan: FallbackPlan = field(default_factory=FallbackPlan)
+    """The statements kept as Python source (design §13)."""
+    source_lines: list[str] = field(default_factory=list)
+    """The lines of the Python source, for the statements kept as Python."""
+    annotation_index: dict[ast.AnnAssign, int] = field(default_factory=dict)
+    """The index of each module level annotation in the module's
+    `__annotate__` (`name: annotation` assignments in module scope)."""
+    leading_comments: dict[ast.stmt, list[str]] = field(default_factory=dict)
+    """The comments before each statement kept as Python (those inside it
+    stay in its source)."""
     frozen: dict[FunctionScope, set[str]] = field(default_factory=dict)
     names: dict[FunctionScope, Renamer] = field(default_factory=dict)
     """Rust names of each lowered function's parameters and locals."""

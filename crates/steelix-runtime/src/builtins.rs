@@ -8,5 +8,5 @@ use pyo3::prelude::*;
 
 /// `print(*args)`
 pub fn print<'py>(py: Python<'py>, args: impl PyCallArgs<'py>) -> PyResult<Bound<'py, PyAny>> {
-    crate::builtins_module(py)?.getattr("print")?.call1(args)
+    crate::builtin(py, "print")?.call1(args)
 }

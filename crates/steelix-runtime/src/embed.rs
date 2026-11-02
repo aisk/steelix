@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use std::panic::{self, AssertUnwindSafe};
 
+use pyo3::exceptions::PyKeyboardInterrupt;
 use pyo3::ffi;
 use pyo3::panic::PanicException;
 use pyo3::prelude::*;
@@ -36,7 +37,9 @@ pub struct Script {
 ///
 /// The exit code follows CPython: `SystemExit` exits with its code, any other
 /// uncaught exception prints a traceback and exits with 1, and a failure while
-/// finalizing exits with 120.
+/// finalizing exits with 120. An uncaught `KeyboardInterrupt` (Ctrl-C) ends
+/// the process with `SIGINT` after finalizing, so that the shell sees an
+/// interrupted program.
 ///
 /// A Rust panic (a bug in hand-written code, or in steelix) is reported like
 /// an uncaught Python exception, as PyO3's `PanicException`, and also exits
@@ -44,6 +47,7 @@ pub struct Script {
 pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> ExitCode {
     // SAFETY: called once, before anything else touches the interpreter.
     unsafe { initialize(executable, script) };
+    let mut interrupted = false;
     let failed = Python::attach(|py| {
         let run = || {
             let main = py.import("__main__")?;
@@ -56,6 +60,7 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
         match result {
             Ok(()) => false,
             Err(err) => {
+                interrupted = err.is_instance_of::<PyKeyboardInterrupt>(py);
                 // For `SystemExit` this does not return: CPython finalizes and
                 // exits with the requested code itself.
                 err.restore(py);
@@ -66,12 +71,27 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
     });
     // SAFETY: the main thread still holds the GIL taken by initialization.
     let finalized = unsafe { ffi::Py_FinalizeEx() };
+    if interrupted {
+        exit_sigint();
+    }
     if failed {
         ExitCode::FAILURE
     } else if finalized < 0 {
         ExitCode::from(120)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// Ends the process with `SIGINT`, like CPython does after an uncaught
+/// `KeyboardInterrupt`. Returns only if that fails.
+fn exit_sigint() {
+    // SAFETY: plain libc calls; the interpreter is finalized, nothing else
+    // depends on the `SIGINT` handler any more.
+    unsafe {
+        if libc::signal(libc::SIGINT, libc::SIG_DFL) != libc::SIG_ERR {
+            libc::kill(libc::getpid(), libc::SIGINT);
+        }
     }
 }
 

@@ -17,7 +17,7 @@ pub fn native<'py>(m: &rt::Module<'py>, values: &Bound<'py, PyAny>) -> PyResult<
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::def!(m, native(values))?;
-    // Kept as Python: list comprehension at 9:12
+    // mixed_uncaught.py:8, kept as Python: list comprehension at 9:12
     rt::exec_python!(
         m,
         line = 8,

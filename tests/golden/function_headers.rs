@@ -22,6 +22,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
     .try_iter()?
     {
         let name = name?;
+        py.check_signals()?;
         rt::builtins::print(py, (&name, data.get_item(&name)?))?;
     }
     let n = rt::Cell::new(py, "n", 0)?;
@@ -33,6 +34,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
         .call0()?
         .lt(2)?
     {
+        py.check_signals()?;
         n.set(rt::iadd(&n.get()?, 1)?)?;
     }
     // function_headers.py:12
@@ -101,6 +103,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     .try_iter()?
     {
         m.set_global("name", item?)?;
+        py.check_signals()?;
         rt::builtins::print(py, (m.global("name")?,))?;
     }
     report(m, &m.global("totals")?)?;

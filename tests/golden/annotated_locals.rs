@@ -13,6 +13,7 @@ pub fn describe<'py>(
     let mut total = rt::int(py, 0);
     for item in items.try_iter()? {
         let item = item?;
+        py.check_signals()?;
         total = rt::iadd(&total, &item)?;
     }
     if count.is_truthy()? {

@@ -376,6 +376,7 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::builtins::print(py, (&data,))?;
     let mut n = rt::int(py, 0);
     loop {
+        py.check_signals()?;
         let item8 = trace(m, &rt::str(py, "n"), &n)?;
         if !trace(
             m,
@@ -418,6 +419,7 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     .try_iter()?
     {
         let item = item?;
+        py.check_signals()?;
         rt::builtins::print(py, ("item", &item))?;
     }
     Ok(rt::none(py))

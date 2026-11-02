@@ -296,11 +296,13 @@ def test_python_kept_def_is_called_through_globals() -> None:
     )
     assert "pub fn gen" not in out
     assert 'm.global("gen")?.call1((1,))' in out
-    assert "// Kept as Python: yield at 3:5\n" in out
+    assert "// m.py:2, kept as Python: yield at 3:5\n" in out
     assert "line = 2,\n" in out
 
 
-def test_consecutive_python_statements_share_one_block() -> None:
+def test_each_python_def_or_class_has_its_own_block() -> None:
+    """Consecutive simple statements kept as Python share a block; a `def`
+    or `class` gets its own, with its own location and reason."""
     out = lower(
         """
         x = 1
@@ -309,14 +311,22 @@ def test_consecutive_python_statements_share_one_block() -> None:
             # inside the class
             pass
         ys = [i for i in range(3)]  # squares
+        zs = {i: i for i in ys}
+        def gen():
+            yield 1
         print(x)
         """
     )
-    assert out.count("rt::exec_python!(") == 1
-    assert "    // about the class\n" in out
+    assert out.count("rt::exec_python!(") == 3
+    assert "    // about the class\n    // m.py:4, kept as Python: class definition at 4:1\n" in out
     assert "// inside the class" not in out
-    source = "class A:\n    # inside the class\n    pass\nys = [i for i in range(3)]  # squares\n"
-    assert f'"\n{source}"' in out
+    assert '"\nclass A:\n    # inside the class\n    pass\n"' in out
+    simple = "ys = [i for i in range(3)]  # squares\nzs = {i: i for i in ys}\n"
+    assert f'"\n{simple}"' in out
+    assert (
+        "// m.py:7, kept as Python: list comprehension at 7:6, dict comprehension at 8:6\n" in out
+    )
+    assert "// m.py:9, kept as Python: yield at 10:5\n" in out
 
 
 def test_python_statement_after_semicolon() -> None:
@@ -337,7 +347,7 @@ def test_unsupported_found_while_lowering_is_kept_as_python() -> None:
             return locals()
         """
     out = lower(source)
-    assert "// Kept as Python: locals() in a function at 3:12" in out
+    assert "// m.py:2, kept as Python: locals() in a function at 3:12" in out
     with pytest.raises(UnsupportedError) as info:
         lower(source, fallback=False)
     assert info.value.feature == "locals() in a function"
@@ -352,3 +362,114 @@ def test_future_annotations_reach_python_code() -> None:
         """
     )
     assert "line = 3,\n        future_annotations,\n" in out
+
+
+def kept_lines(source: str) -> list[int]:
+    """The first lines of the statements kept as Python."""
+    out = lower(source)
+    return [
+        int(line.split("line = ")[1].rstrip(",")) for line in out.splitlines() if "line = " in line
+    ]
+
+
+def test_module_level_if_keeps_only_unsupported_children() -> None:
+    out = lower(
+        """
+        import sys
+        if len(sys.argv) > 1:
+            x = 1
+            def f():
+                return x
+        else:
+            ys = [i for i in range(3)]
+            print(ys)
+        """
+    )
+    assert 'if m.global("sys")?.getattr("argv")?.len()? > 1 {' in out
+    assert 'm.set_global("x", 1)?;' in out
+    assert 'rt::builtins::print(m.py(), (m.global("ys")?,))?;' in out
+    # Indented as in the file.
+    assert 'r#"\n    def f():\n        return x\n"#' in out
+    assert 'r#"\n    ys = [i for i in range(3)]\n"#' in out
+
+
+def test_unsupported_header_keeps_the_whole_statement() -> None:
+    assert kept_lines(
+        """
+        if [i for i in range(3)]:
+            print(1)
+        for x in (i for i in range(3)):
+            print(x)
+        """
+    ) == [2, 4]
+
+
+def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
+    # `break` alone does not compile, so a loop with a kept statement
+    # containing one is kept whole.
+    assert kept_lines(
+        """
+        for i in range(3):
+            print(i)
+            try:
+                break
+            finally:
+                pass
+        """
+    ) == [2]
+    # Jumps in a kept loop belong to it; native jumps stay native.
+    assert kept_lines(
+        """
+        for i in range(3):
+            if i:
+                ys = [j for j in range(i)]
+                break
+            for j in range(i):
+                try:
+                    continue
+                finally:
+                    pass
+            else:
+                print(i)
+        """
+    ) == [4, 6]
+
+
+def test_jump_in_kept_loop_else_keeps_the_outer_loop() -> None:
+    assert kept_lines(
+        """
+        while True:
+            for j in range(3):
+                pass
+            else:
+                try:
+                    break
+                finally:
+                    pass
+        """
+    ) == [2]
+
+
+def test_unsupported_found_while_lowering_in_a_block_keeps_the_child() -> None:
+    out = lower(
+        """
+        if True:
+            print(1)
+            f = lambda: locals()
+        """
+    )
+    assert 'm.global("print")?.call1((1,))?;' in out
+    assert "// m.py:4, kept as Python: locals() in a function at 4:17" in out
+    assert 'r#"\n    f = lambda: locals()\n"#' in out
+
+
+def test_exec_without_namespace_gets_the_module_globals() -> None:
+    out = lower(
+        """
+        exec("y = 1")
+        def f():
+            return eval("y")
+        """
+    )
+    assert 'm.global("exec")?\n        .call1(("y = 1", m.globals().clone().into_any()))?;' in out
+    assert "// m.py:3, kept as Python: eval() without a namespace in a function at 4:12" in out

@@ -74,6 +74,51 @@ def test_dynamic_modules_disable_direct_calls(source: str) -> None:
     assert b.direct_function("f") is None
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import sys\nsetattr(sys.modules[__name__], "f", len)',
+        'import sys\ndelattr(sys.modules["__main__"], "f")',
+        'from sys import modules\nsetattr(modules[__name__], "f", len)',
+        'import sys\nsetattr(sys.modules.get(__name__), "f", len)',
+        'import __main__\nsetattr(__main__, "f", len)',
+        "import __main__ as me\nme.f = len",
+        "import sys\nme = sys.modules[__name__]\nalso = me\ndef g():\n    also.f = len",
+        'import sys\nsys.modules[__name__].__dict__["f"] = len',
+        'import sys\nvars(sys.modules[__name__])["f"] = len',
+        'import types\nsetattr(types, "f", len)',
+        'exec("f = len")',
+        'import sys\ntry:\n    setattr(sys.modules[__name__], "f", len)\nexcept OSError:\n    pass',
+        "def g(src):\n    return eval(src)",
+    ],
+)
+def test_patching_the_own_module_disables_direct_calls(source: str) -> None:
+    tree, _ = parse("def f(): pass\n" + source)
+    b = analyze_module_bindings(tree)
+    assert b.patches_itself
+    assert b.direct_function("f") is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import sys\nsetattr(sys.modules["json"], "dumps", len)',
+        'import sys\nsetattr(sys, "g", len)',
+        "import sys\nprint(sys.modules[__name__].f)",
+        'exec("x = 1", {})',
+        'exec("x = 1", globals=dict(a=1))',
+        "x = vars(object())",
+        "def g(obj):\n    return vars(obj)",
+    ],
+)
+def test_other_namespaces_keep_direct_calls(source: str) -> None:
+    tree, _ = parse("def f(): pass\n" + source)
+    b = analyze_module_bindings(tree)
+    assert not b.patches_itself
+    assert not b.dynamic
+    assert b.direct_function("f") is not None
+
+
 def test_parameter_named_globals_is_not_namespace_access() -> None:
     tree, _ = parse("def f(globals):\n    return globals\n")
     assert not analyze_module_bindings(tree).dynamic

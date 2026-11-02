@@ -40,7 +40,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             outer(m, &rt::int(py, 0))?,
         ),
     )?;
-    // Kept as Python: list comprehension at 16:7
+    // param_shadows_function.py:16, kept as Python: list comprehension at 16:7
     rt::exec_python!(
         m,
         line = 16,

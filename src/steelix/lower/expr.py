@@ -851,6 +851,21 @@ class ExprLowering:
                 # In a function they read the calling frame, which transpiled
                 # code does not have.
                 raise self.ctx.unsupported(f"{name}() in a function", node)
+        if (
+            name in ("exec", "eval")
+            and not bindings.is_module_bound(name)
+            and len(args) == 1
+            and not isinstance(args[0], ast.Starred)
+            and not node.keywords
+        ):
+            # Without a namespace they run in the calling frame, which
+            # transpiled code does not have. At module level that is the
+            # globals dict, which can be passed explicitly.
+            if not self.ctx.at_module_level or bindings.is_module_bound("globals"):
+                raise self.ctx.unsupported(f"{name}() without a namespace in a function", node)
+            namespace = ast.copy_location(ast.Call(ast.Name("globals", ast.Load()), [], []), node)
+            explicit = ast.copy_location(ast.Call(node.func, [args[0], namespace], []), node)
+            return self.call(node.func, explicit.args, [], explicit)
         resolution = resolve_call(bindings, name, node, module_index=self.ctx.statement_index)
         if isinstance(resolution, Direct):
             return self.direct_call(resolution, node)

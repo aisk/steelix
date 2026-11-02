@@ -10,9 +10,11 @@ pub fn skip_rows<'py>(
     let py = m.py();
     'outer: for row in rows.try_iter()? {
         let row = row?;
+        py.check_signals()?;
         'for_else: {
             for cell in row.try_iter()? {
                 let cell = cell?;
+                py.check_signals()?;
                 if cell.lt(0)? {
                     break 'for_else;
                 }
@@ -33,9 +35,11 @@ pub fn first_complete<'py>(
     'for_else: {
         for row in rows.try_iter()? {
             let row = row?;
+            py.check_signals()?;
             'for_else2: {
                 for cell in row.try_iter()? {
                     let cell = cell?;
+                    py.check_signals()?;
                     if cell.is_none() {
                         break 'for_else2;
                     }
@@ -55,10 +59,12 @@ pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bo
     let mut n = n.clone();
     let mut i: Bound<'py, PyAny>;
     'outer: while n.gt(0)? {
+        py.check_signals()?;
         n = rt::isub(&n, 1)?;
         i = rt::int(py, 0);
         'while_else: {
             while i.lt(&n)? {
+                py.check_signals()?;
                 if i.eq(2)? {
                     break 'while_else;
                 }
@@ -77,12 +83,15 @@ pub fn nested<'py>(m: &rt::Module<'py>, groups: &Bound<'py, PyAny>) -> PyResult<
     let py = m.py();
     'outer2: for group in groups.try_iter()? {
         let group = group?;
+        py.check_signals()?;
         'for_else: {
             'outer: for row in group.try_iter()? {
                 let row = row?;
+                py.check_signals()?;
                 'for_else2: {
                     for cell in row.try_iter()? {
                         let cell = cell?;
+                        py.check_signals()?;
                         if cell.eq(0)? {
                             break 'for_else2;
                         }

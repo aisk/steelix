@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,28 @@ EXCEPTION_TYPE_ONLY = "# steelix-test: compare-exception-type-only"
 # raises: the binary prints what CPython prints up to that point, then fails
 # with this message (`ADDRESS` stands for an object address).
 EXPECT_ERROR = re.compile(r"^# steelix-test: expect-error (.*)$", re.MULTILINE)
+# Documented differences in stdout (design §12): CPython's line on the left
+# is printed as the pattern on the right by the transpiled program. A change
+# that removes the difference (such as frames for native functions) fails
+# the test, so that the entry gets removed.
+KNOWN_DIFFERENCES: dict[str, dict[str, str]] = {
+    "frames_logging": {
+        "WARNING frames_logging.py:16 step: native step 1": (
+            r"WARNING __init__\.py:\d+ warning: native step 1"
+        ),
+        # No Python frame at all.
+        "UserWarning frames_logging.py:37: from native code": (
+            r"UserWarning <sys>:0: from native code"
+        ),
+        # The kept function's call of the native one.
+        "UserWarning frames_logging.py:37: from native code, called by kept code": (
+            r"UserWarning frames_logging\.py:49: from native code, called by kept code"
+        ),
+    },
+}
+# A case that runs until it is interrupted: the test sends SIGINT once the
+# program has printed its first line.
+INTERRUPT = "# steelix-test: interrupt after the first line of output"
 
 
 @dataclass
@@ -46,6 +69,23 @@ def run(args: list[str], cwd: Path) -> Outcome:
     return Outcome(proc.stdout, proc.stderr, proc.returncode)
 
 
+def run_interrupted(args: list[str], cwd: Path) -> Outcome:
+    """Run `args`, and press Ctrl-C (send SIGINT) after its first line of output."""
+    proc = subprocess.Popen(
+        args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    assert proc.stdout is not None
+    first = proc.stdout.readline()
+    proc.send_signal(signal.SIGINT)
+    try:
+        stdout, stderr = proc.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        pytest.fail(f"{args[0]} kept running after SIGINT")
+    return Outcome(first + stdout, stderr, proc.returncode)
+
+
 @pytest.fixture(scope="session")
 def bin_workspace() -> Workspace:
     workspace = make_workspace("bin", CASES, Mode.BIN, from_golden=False)
@@ -57,18 +97,25 @@ def bin_workspace() -> Workspace:
 @pytest.mark.parametrize("case", CASES)
 def test_bin_matches_python(case: str, bin_workspace: Workspace, tmp_path: Path) -> None:
     source = CASES_DIR / f"{case}.py"
-    expected = run([str(PYTHON), str(source)], tmp_path)
-    binary = E2E_DIR / "target" / "debug" / case
-    actual = run([str(binary)], tmp_path)
-
     text = source.read_text()
+    runner = run_interrupted if INTERRUPT in text else run
+    expected = runner([str(PYTHON), str(source)], tmp_path)
+    binary = E2E_DIR / "target" / "debug" / case
+    actual = runner([str(binary)], tmp_path)
+    if runner is run_interrupted:
+        # Killed by SIGINT after the `KeyboardInterrupt` traceback, as CPython does.
+        assert expected.returncode == -signal.SIGINT
+        assert expected.last_stderr_line == "KeyboardInterrupt"
     if match := EXPECT_ERROR.search(text):
         assert expected.stdout.startswith(actual.stdout), actual.stderr
         assert actual.returncode == 1
         pattern = re.escape(match.group(1)).replace("ADDRESS", "0x[0-9a-f]+")
         assert re.fullmatch(pattern, actual.last_stderr_line), actual.stderr
         return
-    assert actual.stdout == expected.stdout
+    if case in KNOWN_DIFFERENCES:
+        assert_known_differences(expected.stdout, actual.stdout, KNOWN_DIFFERENCES[case])
+    else:
+        assert actual.stdout == expected.stdout
     assert actual.returncode == expected.returncode
     if not expected.stderr:
         assert actual.stderr == ""
@@ -77,6 +124,19 @@ def test_bin_matches_python(case: str, bin_workspace: Workspace, tmp_path: Path)
         assert actual.last_stderr_line.split(":")[0] == exception_type
     else:
         assert actual.last_stderr_line == expected.last_stderr_line
+
+
+def assert_known_differences(expected: str, actual: str, differences: dict[str, str]) -> None:
+    """`actual` is `expected`, except for the lines in `differences`, which
+    must be there and match their patterns instead."""
+    expected_lines, actual_lines = expected.splitlines(), actual.splitlines()
+    assert len(actual_lines) == len(expected_lines), actual
+    assert set(differences) <= set(expected_lines)
+    for want, got in zip(expected_lines, actual_lines, strict=True):
+        if want in differences:
+            assert re.fullmatch(differences[want], got), f"{got!r} (CPython: {want!r})"
+        else:
+            assert got == want
 
 
 UNCAUGHT = [case for case in CASES if "uncaught" in case or case == "typed_receivers"]

@@ -1,8 +1,9 @@
 """Binding analyses that `symtable` does not provide.
 
 * Module level: how many times each global name is bound, and whether the
-  module does anything (`import *`, `globals()`) that makes the set of globals
-  unknowable. This decides which calls can be direct Rust calls (design §7).
+  module does anything (`import *`, `globals()`, `setattr` on its own module
+  object, `exec`) that makes the set of globals unknowable. This decides
+  which calls can be direct Rust calls (design §7).
 * Function level: definite-assignment analysis deciding how each local variable
   is declared in Rust (design §5).
 """
@@ -39,7 +40,8 @@ MODULE_DUNDERS = frozenset(
     }
 )
 
-# Builtins that expose the calling scope's namespace.
+# Builtins that expose the calling scope's namespace: `globals` always,
+# `vars` and `locals` when called without arguments.
 _NAMESPACE_BUILTINS = frozenset({"globals", "vars", "locals"})
 
 
@@ -57,11 +59,14 @@ class ModuleBindings:
     """The module calls `globals()` / `vars()` / `locals()`."""
     writes_defaults: bool = False
     """The module may assign `__defaults__` / `__kwdefaults__` of a function."""
+    patches_itself: bool = False
+    """The module may bind its globals through its own module object
+    (`setattr(sys.modules[__name__], ..)`) or with `exec` / `eval`."""
 
     @property
     def dynamic(self) -> bool:
         """Globals can be bound by means invisible to the analysis."""
-        return self.star_import or self.namespace_access
+        return self.star_import or self.namespace_access or self.patches_itself
 
     def is_module_bound(self, name: str) -> bool:
         return name in self.counts or name in MODULE_DUNDERS
@@ -142,8 +147,96 @@ def analyze_module_bindings(
 
     namespace_access = _uses_namespace_builtins(module, set())
     writes_defaults = _writes_defaults(module)
+    patches_itself = _patches_itself(module, {s.name for s in module.body if _is_def(s)})
 
-    return ModuleBindings(counts, defs, star_import, namespace_access, writes_defaults)
+    return ModuleBindings(
+        counts, defs, star_import, namespace_access, writes_defaults, patches_itself
+    )
+
+
+def _is_def(stmt: ast.stmt) -> bool:
+    return isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+
+
+def _patches_itself(module: ast.Module, def_names: set[str]) -> bool:
+    """Whether code anywhere in the module (native or kept as Python) may
+    bind its globals behind the analysis' back. Conservative, and only for
+    the usual spellings (design §12 lists what is not detected):
+
+    * `setattr` / `delattr`, an attribute assignment or deletion, `.__dict__`
+      or `vars(..)` on the module object: `sys.modules[__name__]`,
+      `sys.modules["__main__"]` (or `.get(..)`), an imported `__main__`, or a
+      name assigned one of those
+    * `setattr` / `delattr` with a string literal naming a module level `def`
+    * `exec` / `eval` without an explicit namespace (`globals()` is caught as
+      namespace access)
+    """
+    refs: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            refs.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "__main__"
+            )
+    # Names assigned the module object, also through other such names.
+    while True:
+        found = {
+            target.id
+            for node in ast.walk(module)
+            if isinstance(node, ast.Assign | ast.NamedExpr) and _is_module_object(node.value, refs)
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            if isinstance(target, ast.Name)
+        }
+        if found <= refs:
+            break
+        refs |= found
+
+    for node in ast.walk(module):
+        match node:
+            case ast.Call(ast.Name("setattr" | "delattr"), [obj, *rest]):
+                if _is_module_object(obj, refs):
+                    return True
+                match rest:
+                    case [ast.Constant(str() as name), *_] if name in def_names:
+                        return True
+            case ast.Call(ast.Name("exec" | "eval"), args, keywords):
+                if len(args) < 2 and not any(k.arg == "globals" for k in keywords):
+                    return True
+            case ast.Call(ast.Name("vars"), [obj]) if _is_module_object(obj, refs):
+                return True
+            case ast.Attribute(obj, _, ast.Store() | ast.Del()) if _is_module_object(obj, refs):
+                return True
+            case ast.Attribute(obj, "__dict__") if _is_module_object(obj, refs):
+                return True
+    return False
+
+
+def _is_module_object(expr: ast.expr, refs: set[str]) -> bool:
+    """Whether `expr` is a usual spelling of the module's own module object."""
+    match expr:
+        case ast.Name(name):
+            return name in refs
+        case ast.Subscript(modules, key) if _is_sys_modules(modules):
+            return _is_own_name(key)
+        case ast.Call(ast.Attribute(modules, "get"), [key, *_]) if _is_sys_modules(modules):
+            return _is_own_name(key)
+    return False
+
+
+def _is_sys_modules(expr: ast.expr) -> bool:
+    """`sys.modules`, also when imported under another name or with `from`."""
+    return (
+        isinstance(expr, ast.Attribute)
+        and expr.attr == "modules"
+        or (isinstance(expr, ast.Name) and expr.id == "modules")
+    )
+
+
+def _is_own_name(expr: ast.expr) -> bool:
+    return (
+        isinstance(expr, ast.Name)
+        and expr.id == "__name__"
+        or (isinstance(expr, ast.Constant) and expr.value == "__main__")
+    )
 
 
 def _comprehension_walrus_targets(node: ast.AST) -> list[str]:
@@ -181,7 +274,8 @@ def is_immutable_constant(expr: ast.expr) -> bool:
 
 
 def _uses_namespace_builtins(node: ast.AST, local_names: set[str]) -> bool:
-    """Whether `globals` / `vars` / `locals` is read where it can be the builtin."""
+    """Whether `globals`, or `vars` / `locals` without arguments, is used
+    where it can be the builtin. `vars(obj)` reads another namespace."""
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
         args = node.args
         inner = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
@@ -197,6 +291,15 @@ def _uses_namespace_builtins(node: ast.AST, local_names: set[str]) -> bool:
         return any(_uses_namespace_builtins(n, local_names) for n in outer) or any(
             _uses_namespace_builtins(stmt, inner) for stmt in body
         )
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in ("vars", "locals")
+        and (node.args or node.keywords)
+    ):
+        # `vars(obj)`: only the arguments can use the namespace.
+        children: list[ast.AST] = [*node.args, *node.keywords]
+        return any(_uses_namespace_builtins(c, local_names) for c in children)
     if (
         isinstance(node, ast.Name)
         and isinstance(node.ctx, ast.Load)

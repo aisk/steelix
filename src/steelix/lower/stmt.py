@@ -10,6 +10,7 @@ import ast
 from dataclasses import dataclass
 
 from steelix.frontend.bindings import is_constant_true
+from steelix.frontend.fallback import first_line, python_runs, python_source
 from steelix.lower.context import Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
 from steelix.lower.function import cell_declared_at, lower_nested
@@ -48,9 +49,41 @@ class StmtLowering:
 
     def block(self, stmts: list[ast.stmt]) -> rs.Block:
         out: list[rs.Stmt] = []
-        for stmt in self.reachable(stmts):
-            out += self.stmt(stmt)
+        for run in python_runs(self.reachable(stmts), self.ctx.module.plan):
+            if isinstance(run, list):
+                out += self.exec_python(run)
+            else:
+                out += self.stmt(run)
         return rs.Block(tuple(out))
+
+    def exec_python(self, stmts: list[ast.stmt]) -> list[rs.Stmt]:
+        """`rt::exec_python!(m, line = N, r#"..."#)?;` for statements kept as
+        Python (design §13), after a comment saying where they are and why
+        they are kept."""
+        module = self.ctx.module
+        features: dict[str, str] = {}
+        for stmt in stmts:
+            for issue in module.plan.python[stmt]:
+                location = issue.location
+                features.setdefault(issue.feature, f"{location.line}:{location.col + 1}")
+        reasons = ", ".join(f"{feature} at {where}" for feature, where in features.items())
+        line = first_line(stmts[0])
+        args: list[rs.Expr] = [rs.Path(self.ctx.context()), rs.Tokens((f"line = {line}",))]
+        if module.future_annotations:
+            args.append(rs.Tokens(("future_annotations",)))
+        annotations = [
+            module.annotation_index[node]
+            for stmt in stmts
+            for node in ast.walk(stmt)
+            if isinstance(node, ast.AnnAssign) and node in module.annotation_index
+        ]
+        if annotations:
+            args.append(rs.Tokens((f"first_annotation = {min(annotations)}",)))
+        args.append(rs.RawStrLit("\n" + python_source(module.source_lines, stmts)))
+        call = rs.Try(rs.MacroCall("rt::exec_python", tuple(args)))
+        comments = [rs.Comment(text) for text in module.leading_comments.get(stmts[0], [])]
+        header = rs.Comment(f"{module.filename}:{line}, kept as Python: {reasons}")
+        return [*comments, header, rs.ExprStmt(call)]
 
     def reachable(self, stmts: list[ast.stmt]) -> list[ast.stmt]:
         return [s for s in stmts if s not in self.ctx.flow.unreachable]
@@ -233,15 +266,22 @@ class StmtLowering:
             cond = None if constant_true else self.exprs.condition(stmt.test)
         items = self.flush_items()
         body, target = self.loop_body(stmt.body, label)
+        check = self.check_signals()
         if cond is None:
-            loop: rs.Stmt = rs.Loop(body, target.label)
+            loop: rs.Stmt = rs.Loop(rs.Block((check, *body.stmts)), target.label)
         elif not prelude:
-            loop = rs.While(cond, body, target.label)
+            loop = rs.While(cond, rs.Block((check, *body.stmts)), target.label)
         else:
             # The test needs statements before it on every iteration.
             exit_ = rs.If(negate(cond), rs.Block((rs.Break(),)))
-            loop = rs.Loop(rs.Block((*prelude, exit_, *body.stmts)), target.label)
+            loop = rs.Loop(rs.Block((check, *prelude, exit_, *body.stmts)), target.label)
         return items + self.with_else(stmt, loop, label)
+
+    def check_signals(self) -> rs.Stmt:
+        """`py.check_signals()?;` at the start of every loop iteration, where
+        CPython's eval loop would run pending signal handlers: without it, a
+        native loop can not be stopped with Ctrl-C (`KeyboardInterrupt`)."""
+        return _try_stmt(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals", ()))
 
     def for_stmt(self, stmt: ast.For) -> list[rs.Stmt]:
         label = self.loop_label(stmt, "for_else")
@@ -268,7 +308,8 @@ class StmtLowering:
                 head = self.store(stmt, target, item, declare=scoped)
             head = prelude + head
         body, target = self.loop_body(stmt.body, label)
-        loop = rs.For(pat, iterator, rs.Block((*head, *body.stmts)), target.label)
+        check = self.check_signals()
+        loop = rs.For(pat, iterator, rs.Block((*head, check, *body.stmts)), target.label)
         return items + self.with_else(stmt, loop, label)
 
     def assert_stmt(self, test: ast.expr, msg: ast.expr | None) -> rs.Stmt:
