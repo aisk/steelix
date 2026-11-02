@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from steelix.frontend.bindings import ModuleBindings
 from steelix.frontend.resolve import Direct, Lookup, resolve_global
-from steelix.frontend.scope import ModuleScopes
+from steelix.frontend.scope import FunctionScope, ModuleScopes
 
 
 @dataclass
@@ -48,13 +48,7 @@ def build_call_graph(
                     if target.fn not in callees:
                         callees.append(target.fn)
         for node in _walk_body(fn):
-            if (
-                isinstance(node, ast.Name)
-                and isinstance(node.ctx, ast.Load)
-                and not scope.is_local(node.id)
-                and id(node) not in callee_names
-                and (resolve_global(bindings, node.id) is Lookup.GLOBAL or node.id == "globals")
-            ):
+            if _uses_globals(node, scope, bindings) and id(node) not in callee_names:
                 needs_globals.add(fn)
         edges[fn] = callees
 
@@ -68,6 +62,22 @@ def build_call_graph(
                 changed = True
 
     return CallGraph(edges, _in_cycles(edges), needs_globals)
+
+
+def _uses_globals(node: ast.AST, scope: FunctionScope, bindings: ModuleBindings) -> bool:
+    """Whether lowering `node` refers to the module globals."""
+    match node:
+        case ast.Name(name, ast.Load()):
+            return not scope.is_local(name) and (
+                resolve_global(bindings, name) is Lookup.GLOBAL or name == "globals"
+            )
+        case ast.Name(name):
+            # Stores and deletes of names declared `global`.
+            return not scope.is_local(name)
+        case ast.Import() | ast.ImportFrom():
+            # `__import__` receives the importing module's globals.
+            return True
+    return False
 
 
 def _walk_body(fn: ast.FunctionDef):

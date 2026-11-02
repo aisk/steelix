@@ -64,9 +64,9 @@ pub fn describe<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "len")?.call1((rt::str_surrogatepass(py, b"a\xed\xa0\x80b")?,))?,
-            rt::builtin(py, "len")?.call1((rt::bytes(py, b""),))?,
-            rt::builtin(py, "abs")?.call1((-3,))?,
+            rt::str_surrogatepass(py, b"a\xed\xa0\x80b")?.len()?,
+            rt::bytes(py, b"").len()?,
+            rt::int(py, -3).abs()?,
         ),
     )?;
     Ok(rt::none(py))

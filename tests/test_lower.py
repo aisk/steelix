@@ -34,21 +34,24 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
 @pytest.mark.parametrize(
     ("source", "feature", "line", "col"),
     [
-        ("for i in x:\n    pass\n", "for loop", 1, 1),
-        ("x = 1\nx += 1\n", "augmented assignment", 2, 1),
-        ("import os\n", "import", 1, 1),
         ("def f(a=1):\n    pass\n", "default argument", 1, 9),
         ("def f(*, a):\n    pass\n", "keyword-only parameter", 1, 1),
         ("def f():\n    def g():\n        pass\n", "nested function", 2, 5),
-        ("print(x.y)\n", "attribute access", 1, 7),
         ("print(f(a=1))\n", "keyword argument", 1, 9),
-        ("x = 1 < 2 < 3\n", "chained comparison", 1, 5),
-        ("x = a in b\n", "'in' comparison", 1, 5),
-        ("x = not a\n", "unary operator", 1, 5),
-        ("x = [1]\n", "list display", 1, 5),
-        ("while x:\n    pass\nelse:\n    pass\n", "while/else", 4, 5),
+        ("print(*xs)\n", "argument unpacking", 1, 7),
+        ("x = lambda: 1\n", "lambda", 1, 5),
+        ("x = [i for i in y]\n", "list comprehension", 1, 5),
+        ("x = [*a]\n", "unpacking in a display", 1, 6),
+        ("x = {**a}\n", "unpacking in a display", 1, 8),
+        ("x: int = 1\n", "annotated assignment", 1, 1),
+        ("from . import x\n", "relative import", 1, 1),
+        ("from os import *\n", "star import", 1, 1),
+        ("raise E\n", "raise", 1, 1),
+        ("with a:\n    pass\n", "with statement", 1, 1),
         ("class A:\n    pass\n", "class definition", 1, 1),
         ("try:\n    pass\nexcept E:\n    pass\n", "try statement", 1, 1),
+        ("if (y := 1):\n    pass\n", "assignment expression", 1, 5),
+        ("x = t'{a}'\n", "t-string", 1, 5),
         ("x = 1j\n", "complex constant", 1, 5),
     ],
 )
@@ -109,3 +112,119 @@ def test_option_local_and_none_return() -> None:
 def test_globals_builtin_reads_the_module_dict() -> None:
     out = lower("x = globals()\n")
     assert 'globals.set_item("x", globals.clone().into_any())?;' in out
+
+
+def test_pure_operands_need_no_temporaries() -> None:
+    out = lower(
+        """
+        def f(x, xs, d, i):
+            d[i] = x
+            return x in xs
+        """
+    )
+    assert "d.set_item(i, x)?;" in out
+    assert "Ok(rt::bool(py, xs.contains(x)?))" in out
+    assert "let " not in out.split("pub fn exec_module")[0]
+
+
+def test_value_is_evaluated_before_the_assignment_target() -> None:
+    out = lower(
+        """
+        def f(g, h):
+            g()[h()] = g()
+        """
+    )
+    assert "let value = g.call0()?;" in out
+    assert "g.call0()?.set_item(h.call0()?, &value)?;" in out
+
+
+def test_in_evaluates_the_item_first() -> None:
+    out = lower("def f(g, h):\n    return g() in h()\n")
+    assert "let item = g.call0()?;" in out
+    assert "h.call0()?.contains(&item)?" in out
+
+
+def test_method_lookup_happens_before_arguments() -> None:
+    out = lower(
+        """
+        def f(o, g, x):
+            o.m(x, 1)
+            o.m(g())
+        """
+    )
+    assert 'o.call_method1("m", (x, 1))?;' in out
+    assert 'o.getattr("m")?.call1((g.call0()?,))?;' in out
+
+
+def test_augmented_assignment_evaluates_target_parts_once() -> None:
+    out = lower(
+        """
+        def f(a, g, v):
+            a[g()] += v
+            a.x -= v
+            n = 0
+            n *= v
+        """
+    )
+    assert "let index = g.call0()?;" in out
+    assert "a.set_item(&index, rt::iadd(&a.get_item(&index)?, v)?)?;" in out
+    assert 'a.setattr("x", rt::isub(&a.getattr("x")?, v)?)?;' in out
+    assert "n = rt::imul(&n, v)?;" in out
+
+
+def test_conditions_use_rust_operators() -> None:
+    out = lower(
+        """
+        def f(a, b, xs):
+            if a and not b or a is None:
+                return 1
+            if 0 < len(xs) <= 3 and a not in xs:
+                return 2
+        """
+    )
+    assert "if a.is_truthy()? && !b.is_truthy()? || a.is_none() {" in out
+    # The middle operand of a chain is evaluated once.
+    assert "let len = xs.len()?;\n    if 0 < len && len <= 3 && !xs.contains(a)? {" in out
+
+
+def test_builtin_special_cases_respect_rebinding() -> None:
+    out = lower(
+        """
+        def f(x):
+            return len(x)
+        """
+    )
+    assert "Ok(rt::int(py, x.len()?))" in out
+    out = lower(
+        """
+        def f(x):
+            return len(x)
+        len = repr
+        """
+    )
+    assert 'rt::global(globals, "len")?.call1((x,))' in out
+
+
+def test_for_loop_variable_scoped_to_the_body() -> None:
+    out = lower(
+        """
+        def f(xs):
+            for x in xs:
+                print(x)
+        """
+    )
+    assert "for x in xs.try_iter()? {\n        let x = x?;" in out
+
+
+def test_imports_bind_names() -> None:
+    out = lower(
+        """
+        import os.path
+        import a.b.c as d
+        from x.y import z as w, v
+        """
+    )
+    assert 'globals.set_item("os", rt::import(globals, "os.path")?)?;' in out
+    assert 'globals.set_item("d", rt::import_module(globals, "a.b.c")?)?;' in out
+    assert 'let y = rt::import_names(globals, "x.y", &["z", "v"])?;' in out
+    assert 'globals.set_item("w", rt::import_from(&y, "z")?)?;' in out

@@ -116,7 +116,7 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`getattr`、`call` 等方法
 - 函数体是普通的 Rust fn，显式接收 `py: Python<'py>`，参数用 `&Bound`。需要动态查找全局变量的函数（以及直接调用了这类函数的函数）额外接收 `globals: &Bound<'py, PyDict>`，放在 `py` 之后
 - 模块体生成 `exec_module(m)`，只依赖传入的模块对象，与输出模式无关
-- 模块级变量的读写走 globals 字典：`rt::global(globals, "LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `globals.set_item("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，其余用 `rt::builtin(py, "len")?`
+- 模块级变量的读写走 globals 字典：`rt::global(globals, "LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `globals.set_item("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "max")?`
 - 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
 - 函数末尾的 `return` 写成尾表达式，返回值本身是 `PyResult` 时不再包一层 `Ok(..?)`
 - 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(globals, fib(n))?`。需要 globals 的写成 `rt::def!(globals, scale(globals, x))`，Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
@@ -138,8 +138,26 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
   - 可能重复赋值（另做一遍"可能已赋值"分析，循环取不动点）时才加 `mut`，与 rustc 的判断一致，不产生 `unused_mut`
   - 被重新赋值的参数在开头遮蔽成 `let mut n = n.clone();`
 - 自行做定值分析，规则与 rustc 一致或更保守（条件一律视为不透明，`while True` 没有 `break` 时之后不可达）。能确定已赋值的变量用 `Bound`，不能确定的用 `Option<Bound>`：声明为 `let mut x: Option<Bound<'py, PyAny>> = None;`，赋值写 `x = Some(..)`，读取写 `rt::local(&x, "x")?`，未赋值时抛和 CPython 一样的 `UnboundLocalError`
-- 不可达的语句（`return` 之后等）直接丢弃，函数末尾可达时补 `Ok(rt::none(py))`
-- `del x` 让变量变成未赋值状态，所以该变量必须是 `Option`
+- 不可达的语句（`return`、`break`、`continue` 之后，没有 `break` 的 `while True` 之后）直接丢弃，函数末尾可达时补 `Ok(rt::none(py))`。模块级代码也做同样的可达性分析，避免 rustc 报 unreachable 警告
+- 定值分析覆盖 `for`/`while`（在循环头取不动点）、`break`/`continue`、循环 `else`、解包赋值、增量赋值（先读后写）、`import`（绑定局部变量）和 `del`
+- `del x` 让变量变成未赋值状态，所以被 `del` 的局部变量（包括参数）一律是 `Option`。删除时能确定已赋值就写 `x = None;`，否则写 `rt::del_local(&mut x, "x")?;`，未赋值时抛 `UnboundLocalError`。被 `del` 的参数在开头遮蔽成 `let mut a: Option<..> = Some(a.clone());`
+- `Option` 变量如果第一次出现是顶层赋值，也在那里声明：`let mut x = Some(..);`
+- 循环变量：如果一个名字只被某个 `for` 的目标绑定（可以是嵌套元组），并且只在这个循环体内读取，就在每次迭代开头声明，不提前声明也不需要 `mut`
+
+  ```rust
+  for x in xs.try_iter()? {
+      let x = x?;
+      ..
+  }
+  for item in pairs.try_iter()? {
+      let [key, value] = rt::unpack(&item?)?;
+      ..
+  }
+  ```
+
+  否则（循环后还要读，或者别处也赋值）照常赋值给事先声明的变量：`for item in xs.try_iter()? { x = item?; .. }`
+- 解包赋值的目标都是普通局部变量时，第一次出现写成 `let [a, b] = rt::unpack(&value)?;`，之后写成解构赋值 `[a, b] = rt::unpack(&value)?;`。目标里有属性、下标、全局变量或 `Option` 变量时，先解包到临时变量，再按顺序逐个赋值
+- 函数顶层第一次出现的 `import` 也直接 `let os = rt::import(globals, "os")?;`
 - 被内层函数捕获的变量（cell）单独处理，见第 6 节
 
 ## 6. 函数对象、闭包与默认参数
@@ -168,6 +186,27 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 - **直接调用的条件**：名字在模块内只绑定一次（`def` 算一次），且模块里没有 `from x import *`、`globals()`、对自身模块的 `setattr`。否则走 globals 字典动态查找
 - 直接调用无法感知其他模块的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。应用场景里别的模块很少 patch 应用自身的函数，所以影响不大。以后如有需要再提供 `--dynamic-globals` 选项让所有全局调用都走动态查找
 - 应用场景下 `importlib.reload` 也很少见，不用 static 保存模块对象主要是为了让同一份生成代码既能作为 `__main__` 运行，也能被别的模块按真实名字 import
+- 函数里用 `global` 声明的名字照常走 globals 字典：读 `rt::global(globals, "x")?`，写 `globals.set_item("x", ..)?`，删 `rt::del_global(globals, "x")?`（不存在时抛 `NameError`）。这类函数需要 `globals` 参数
+
+### import 语句（M2）
+
+M2 支持标准库和第三方库的绝对 import，语义与字节码 `IMPORT_NAME`/`IMPORT_FROM` 一致：通过 `builtins.__import__` 导入并传入模块的 globals，所以替换了 `__import__` 的 hook 也能工作。生成代码如下
+
+```rust
+// import os.path
+globals.set_item("os", rt::import(globals, "os.path")?)?;
+// import collections.abc as cabc
+globals.set_item("cabc", rt::import_module(globals, "collections.abc")?)?;
+// from json import dumps, loads as parse
+let json = rt::import_names(globals, "json", &["dumps", "loads"])?;
+globals.set_item("dumps", rt::import_from(&json, "dumps")?)?;
+globals.set_item("parse", rt::import_from(&json, "loads")?)?;
+```
+
+- 没有用 `py.import`：`PyImport_Import` 返回最内层的子模块而不是顶层包，也没有 `fromlist` 语义（`from pkg import submodule` 需要它导入子模块）
+- `rt::import_from` 与 `IMPORT_FROM` 一样先 `getattr`，失败时回退到 `sys.modules["pkg.name"]`（循环 import），再失败时抛文字一致的 `ImportError`，并设置 `name`、`path`、`name_from`
+- 函数内的 import 绑定局部变量，同样需要 `globals` 参数
+- 相对 import 和 `from x import *` 暂不支持（M6）
 
 ## 8. 表达式与求值顺序
 
@@ -179,6 +218,41 @@ Rust 方法调用的形状会改变求值顺序，例如 `x in y` 写成 `y.cont
 - 比较：在 `if`/`while` 条件里用 `lt` 等返回 bool 的方法；需要值时（`m = a < b`，numpy 之类会返回非 bool）用 `rich_compare`。链式比较中间操作数只求值一次
 - 增量赋值：PyO3 没有 in-place 运算方法，用 runtime 的 `rt::iadd` 等（基于 `PyNumber_InPlaceAdd`），`a[i] += v`、`o.x += v` 中的 `a`、`i`、`o` 只求值一次
 - `and`/`or`：值语义的 block 表达式，在条件里优化成 `&&`/`||`
+
+### 实现（M2）
+
+lowering 给每个子表达式记录它在 Rust 里的形态（`lower/expr.py` 的 `Value`）：拥有的 `Bound`、`&Bound` 参数、局部变量、可以直接作为 `IntoPyObject` 的字面量、代表 Python bool 的 Rust `bool`（`in`、`is`、`not`、`isinstance`），以及代表 int 的 Rust 整数（`len`）。每个使用点选最可读的写法，例如条件里直接用 Rust `bool`，`len(xs) > 3` 直接写 `xs.len()? > 3`。
+
+临时变量是语句前面的 `let`（prelude）。只有 Rust 的求值顺序与 Python 不同、或者一个值要用两次时才引入：
+
+- 只在操作数"不纯"时需要。纯的是局部变量、参数和字面量，它们没有副作用也不会失败。全局变量读取不纯（可能抛 `NameError`，也可能被前面的调用改掉）
+- 某个操作数需要 prelude 时，Python 顺序里排在它前面的不纯操作数也一起提升到它的 prelude 之前（`operands`），否则 prelude 会抢先执行
+- 临时变量尽量按表达式命名（`let item = ..`、`let index = ..`、全局变量或属性的名字），只使用一次的临时变量直接 move，不 clone
+- 只在条件成立时执行的代码有自己的 prelude，放进对应的 block：`and`/`or` 的右侧、条件表达式的分支、链式比较后面的部分。`while` 条件需要 prelude 时生成 `loop { prelude; if !cond { break; } .. }`，`elif` 条件需要 prelude 时生成 `else { prelude; if cond { .. } }`
+
+```rust
+// data[trace("i", 1)] = trace("v", 5)
+let value = trace(py, &rt::str(py, "v"), &rt::int(py, 5))?;
+data.set_item(trace(py, &rt::str(py, "i"), &rt::int(py, 1))?, &value)?;
+// g() in h()
+let item = g.call0()?;
+h.call0()?.contains(&item)?
+```
+
+具体写法
+
+- 方法调用：参数都是纯的时写 `o.call_method1("m", (x, 1))?`，否则写 `o.getattr("m")?.call1((f()?,))?`，保证先查找方法
+- `in`/`not in` 用 `contains`，`is` 用 `Bound::is`，与 `None` 比较用 `is_none()`。它们的结果是 Rust `bool`，需要对象时才 `rt::bool(py, ..)`
+- `and`/`or` 在条件里是 `&&`/`||`，右侧有 prelude 时写成 block。需要值时生成 `if` 表达式，左操作数先放进临时变量，决定结果时直接 move 出来；左操作数是 Rust `bool` 时不需要临时变量。左操作数是常量时在转换时就决定。作为语句的 `a or f()` 生成 `if !a.is_truthy()? { f()?; }`
+- 链式比较：`a < b < c` 在条件里是 `a.lt(&b)? && b.lt(c)?`；需要值时第一个比较结果放进临时变量，`if result.is_truthy()? { b.rich_compare(c, ..)? } else { result }`
+- 一元运算用 PyO3 的 `neg`/`pos`/`bitnot`，`not` 是 `!cond`
+- 增量赋值的 runtime 函数按 `operator` 模块命名：`rt::iadd`、`rt::itruediv`、`rt::ior` 等。`x += v` 写成 `x = rt::iadd(&x, v)?;`
+- 容器字面量用 PyO3 的构造函数：`PyList::new(py, [1, 2, 3])?`、`PyTuple::new(..)`、`PySet::new(..)`、`[("a", 1)].into_py_dict(py)?`，空的用 `PyList::empty(py)`、`PyDict::new(py)`。元素都是同类型的字面量时直接写，否则统一写成 `&Bound`。所有元素先求值再构造，与 `BUILD_LIST`/`BUILD_MAP` 一致
+- 下标 `get_item`/`set_item`/`del_item`，属性 `getattr`/`setattr`/`delattr`。切片用 `rt::slice(py, start, stop)?` 和 `rt::slice_step(..)`，省略的部分是 `py.None()`，因为 `PySlice::new` 只接受整数，而 Python 的切片对象保留 `None`
+- 解包用 `rt::unpack`（固定个数，返回数组）和 `rt::unpack_star`（返回 `([前], 列表, [后])`），按 CPython 的 `UNPACK_SEQUENCE` 逐步迭代，错误信息一致
+- f-string：每个字段是 `rt::format(&value, "spec")?`（`PyObject_Format`，没有 spec 时传 `""`），`!r`/`!s`/`!a` 是 `repr()?`/`str()?`/`rt::ascii(..)?`，嵌套的 spec 本身也是 f-string。多段时用 `rt::fstring(py, (a, " = ", b))?` 拼接（`"".join`），超过 12 段时嵌套
+- `assert` 写成 `if !cond { return Err(PyAssertionError::new_err(msg)); }`，消息只在失败时求值
+- 少数 builtin 有逐字等价的 PyO3 写法，直接使用：`len`、`isinstance`、`str`、`repr`、`bool`、`abs`、`type`（单参数）、`iter`（单参数），以及 M1 的 `print`。只在名字只可能是 builtin（模块里没有绑定它，也没有 `import *`/`globals()`）时生效，其余 builtin 走 `rt::builtin(py, "max")?` 动态查找。`range` 的特化留到后面
 
 ## 9. 异常
 
@@ -215,7 +289,12 @@ pub mod point {
   - `SystemExit` 和未捕获异常交给 `PyErr_Print` 处理，退出码与 CPython 一致
   - build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython
   - M1 把构建时解释器的路径写死在二进制里，只适合在本机运行。分发到别的机器需要单独设计（见下）
-  - 已知差异：`sys.argv[0]` 是二进制路径，`sys.path[0]` 不是脚本所在目录，`__file__` 未设置
+  - 与 `python app.py` 一致的脚本信息（M2），在转换时确定并写进 `main.rs` 的 `rt::embed::Script`
+    - `sys.argv[0]` 是传给 `steelix transpile` 的脚本路径，保持原样（相对路径仍是相对路径），后面接程序收到的参数。这样 `argparse` 的程序名、按 `argv[0]` 打印的用法说明都和原来一致，相当于在转换时的目录里执行 `python app.py`。二进制自己的真实命令行放在 `sys.orig_argv`
+    - `sys.path[0]` 是脚本所在目录（解析符号链接），所以脚本旁边还没转换的 Python 模块照样能 import，这在 M6 之前很有用
+    - `__main__` 的 `__file__` 是脚本的绝对路径（3.9 起 CPython 也是绝对路径），`__cached__` 是 `None`
+    - 这些路径指向源码位置，和解释器路径一样只适合在本机运行，M7 再处理
+  - 已知差异：`__main__` 的 `__loader__` 不是 `SourceFileLoader`
 - **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块
 
 ### 分发（待设计）
@@ -243,6 +322,11 @@ pub mod point {
 - 直接调用的递归受 C 栈大小限制而不是 `sys.getrecursionlimit()`，`RecursionError` 的信息是 `Stack overflow (used N kB) ...` 而不是 `maximum recursion depth exceeded`
 - 模块级代码里，`def` 执行之前的调用走 globals 查找（会得到 `NameError`）；但函数体里的直接调用不检查被调函数的 `def` 是否已经执行过
 - `builtins.print` 等在参数求值之后才查找（Python 是先查找名字再求值参数），只有参数求值过程中替换了这个 builtin 才看得出区别
+- 特化的 builtin（`len`、`isinstance`、`str`、`repr`、`bool`、`abs`、`type`、`iter`）直接调用对应的 C API，不在运行时查找 `builtins` 模块，所以 `builtins.len = ..` 这样的 monkeypatch 对它们无效。模块级重新绑定这些名字（`len = ..`、`def len`）则会被识别，不再特化
+- 字面量每次求值都创建新对象，而 Python 的常量在同一段代码里共享。只有比较 `str`、大整数常量的 identity 时才看得出区别，例如 `d["k"] += 1` 里 `__getitem__` 和 `__setitem__` 收到的是两个相等但不同的 `"k"`
+- f-string 中带转换但没有 spec 的字段（`{x!r}`）直接使用 `repr()`/`str()`/`ascii()` 的结果，CPython 对非精确 `str` 的结果还会再调用一次 `format`。只有 `__repr__`/`__str__` 返回带自定义 `__format__` 的 `str` 子类时才有区别
+- `ImportError` 的文字只覆盖常见情况，CPython 对循环 import 中"partially initialized module"和模块名遮蔽标准库的特殊提示没有复刻。模块级 import 传给 `__import__` 的 `locals` 是 `None`（CPython 传模块的 dict）
+- warning（例如 `DeprecationWarning`）的输出里没有源码行
 
 ## 13. 不支持特性的处理
 
@@ -253,7 +337,7 @@ pub mod point {
 
 - **单元测试**：rustast 打印、作用域与绑定分析等纯 Python 逻辑
 - **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动
-- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables` 两个 allow），把可读性问题挡在快照阶段
+- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码，以及 stderr 最后一行（异常类型和消息，不比较 traceback）。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分

@@ -20,7 +20,7 @@ class FunctionScope:
     locals: frozenset[str]
     """Local names including parameters."""
     globals: frozenset[str]
-    """Names this function reads from module globals or builtins."""
+    """Names this function uses from module globals or builtins."""
 
     def is_local(self, name: str) -> bool:
         return name in self.locals
@@ -61,8 +61,7 @@ def _function_scope(
     locals_ = set(table.get_locals())
     globals_ = set()
     for symbol in table.get_symbols():
-        if symbol.is_declared_global():
-            raise UnsupportedError("global statement", SourceLocation.of(filename, node))
+        # Includes names declared with a `global` statement.
         if symbol.is_global():
             globals_.add(symbol.get_name())
     return FunctionScope(
@@ -71,3 +70,7 @@ def _function_scope(
         locals=frozenset(locals_),
         globals=frozenset(globals_),
     )
+
+
+MODULE_SCOPE = FunctionScope(name="<module>", params=(), locals=frozenset(), globals=frozenset())
+"""Module level code has no locals: every name is a global."""

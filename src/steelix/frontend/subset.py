@@ -11,19 +11,10 @@ import ast
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
 
-_COMPARE_OPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
-
 # Human readable names for the error message, by AST node type.
 _FEATURES: dict[type[ast.AST], str] = {
-    ast.For: "for loop",
     ast.AsyncFor: "async for",
-    ast.AugAssign: "augmented assignment",
     ast.AnnAssign: "annotated assignment",
-    ast.Break: "break",
-    ast.Continue: "continue",
-    ast.Import: "import",
-    ast.ImportFrom: "import",
-    ast.Global: "global statement",
     ast.Nonlocal: "nonlocal statement",
     ast.Try: "try statement",
     ast.TryStar: "try/except*",
@@ -32,23 +23,12 @@ _FEATURES: dict[type[ast.AST], str] = {
     ast.AsyncWith: "async with",
     ast.ClassDef: "class definition",
     ast.AsyncFunctionDef: "async function",
-    ast.Delete: "del statement",
-    ast.Assert: "assert",
     ast.Match: "match statement",
     ast.TypeAlias: "type alias",
-    ast.BoolOp: "and/or",
-    ast.UnaryOp: "unary operator",
-    ast.IfExp: "conditional expression",
     ast.Lambda: "lambda",
     ast.NamedExpr: "assignment expression",
-    ast.Attribute: "attribute access",
-    ast.Subscript: "subscript",
-    ast.Slice: "slice",
+    ast.Slice: "slice outside a subscript",
     ast.Starred: "starred expression",
-    ast.List: "list display",
-    ast.Tuple: "tuple display",
-    ast.Dict: "dict display",
-    ast.Set: "set display",
     ast.ListComp: "list comprehension",
     ast.SetComp: "set comprehension",
     ast.DictComp: "dict comprehension",
@@ -56,7 +36,6 @@ _FEATURES: dict[type[ast.AST], str] = {
     ast.Await: "await",
     ast.Yield: "yield",
     ast.YieldFrom: "yield from",
-    ast.JoinedStr: "f-string",
     ast.TemplateStr: "t-string",
 }
 
@@ -107,9 +86,16 @@ class SubsetChecker:
                 self.check_expr(value)
             case ast.Assign(targets, value):
                 for target in targets:
-                    if not isinstance(target, ast.Name):
-                        raise self.unsupported(target)
+                    self.check_target(target)
                 self.check_expr(value)
+            case ast.AugAssign(target, _, value):
+                if not isinstance(target, ast.Name | ast.Attribute | ast.Subscript):
+                    raise self.unsupported(target)
+                self.check_target(target)
+                self.check_expr(value)
+            case ast.Delete(targets):
+                for target in targets:
+                    self.check_target(target, starred=False)
             case ast.Return(value):
                 if value is not None:
                     self.check_expr(value)
@@ -118,11 +104,26 @@ class SubsetChecker:
                 self.check_body(body)
                 self.check_body(orelse)
             case ast.While(test, body, orelse):
-                if orelse:
-                    raise self.fail("while/else", orelse[0])
                 self.check_expr(test)
                 self.check_body(body)
-            case ast.Pass():
+                self.check_body(orelse)
+            case ast.For(target, iter_, body, orelse):
+                self.check_target(target)
+                self.check_expr(iter_)
+                self.check_body(body)
+                self.check_body(orelse)
+            case ast.Import():
+                pass
+            case ast.ImportFrom(_, names, level):
+                if level:
+                    raise self.fail("relative import", stmt)
+                if any(alias.name == "*" for alias in names):
+                    raise self.fail("star import", stmt)
+            case ast.Assert(test, msg):
+                self.check_expr(test)
+                if msg is not None:
+                    self.check_expr(msg)
+            case ast.Pass() | ast.Break() | ast.Continue() | ast.Global():
                 pass
             case ast.FunctionDef():
                 raise self.fail("function definition outside module top level", stmt)
@@ -133,48 +134,99 @@ class SubsetChecker:
         for stmt in body:
             self.check_stmt(stmt)
 
+    def check_target(self, target: ast.expr, starred: bool = True) -> None:
+        """Assignment, `for` and `del` targets."""
+        match target:
+            case ast.Name():
+                pass
+            case ast.Attribute(value):
+                self.check_expr(value)
+            case ast.Subscript(value, index):
+                self.check_expr(value)
+                self.check_index(index)
+            case ast.Tuple(elts) | ast.List(elts):
+                for elt in elts:
+                    if isinstance(elt, ast.Starred):
+                        if not starred:
+                            raise self.unsupported(elt)
+                        self.check_target(elt.value)
+                    else:
+                        self.check_target(elt, starred)
+            case _:
+                raise self.unsupported(target)
+
+    def check_index(self, index: ast.expr) -> None:
+        """The part between the brackets of a subscript, where slices may appear."""
+        match index:
+            case ast.Slice(lower, upper, step):
+                for part in (lower, upper, step):
+                    if part is not None:
+                        self.check_expr(part)
+            case ast.Tuple(elts):
+                for elt in elts:
+                    self.check_index(elt)
+            case _:
+                self.check_expr(index)
+
     def check_expr(self, expr: ast.expr) -> None:
         match expr:
             case ast.Constant(value):
-                if not isinstance(value, int | float | str | bytes | None):
+                if value is not Ellipsis and not isinstance(
+                    value, int | float | str | bytes | None
+                ):
                     raise self.fail(f"{type(value).__name__} constant", expr)
-            case ast.UnaryOp(ast.USub(), ast.Constant(value)) if _is_number(value):
-                pass  # a negative literal
             case ast.Name():
                 pass
+            case ast.UnaryOp(_, operand):
+                self.check_expr(operand)
             case ast.BinOp(left, _, right):
                 self.check_expr(left)
                 self.check_expr(right)
-            case ast.Compare(left, ops, comparators):
-                if len(ops) > 1:
-                    raise self.fail("chained comparison", expr)
-                if not isinstance(ops[0], _COMPARE_OPS):
-                    raise self.fail(f"'{_compare_text(ops[0])}' comparison", expr)
+            case ast.BoolOp(_, values):
+                for value in values:
+                    self.check_expr(value)
+            case ast.Compare(left, _, comparators):
                 self.check_expr(left)
-                self.check_expr(comparators[0])
+                for comparator in comparators:
+                    self.check_expr(comparator)
+            case ast.IfExp(test, body, orelse):
+                self.check_expr(test)
+                self.check_expr(body)
+                self.check_expr(orelse)
             case ast.Call(func, args, keywords):
-                if not isinstance(func, ast.Name):
-                    raise self.fail("call of a non-name expression", func)
+                self.check_expr(func)
                 if keywords:
                     raise self.fail("keyword argument", keywords[0])
                 for arg in args:
                     if isinstance(arg, ast.Starred):
                         raise self.fail("argument unpacking", arg)
                     self.check_expr(arg)
+            case ast.Attribute(value):
+                self.check_expr(value)
+            case ast.Subscript(value, index):
+                self.check_expr(value)
+                self.check_index(index)
+            case ast.List(elts) | ast.Tuple(elts) | ast.Set(elts):
+                for elt in elts:
+                    if isinstance(elt, ast.Starred):
+                        raise self.fail("unpacking in a display", elt)
+                    self.check_expr(elt)
+            case ast.Dict(keys, values):
+                for key, value in zip(keys, values, strict=True):
+                    if key is None:
+                        raise self.fail("unpacking in a display", value)
+                    self.check_expr(key)
+                    self.check_expr(value)
+            case ast.JoinedStr(values):
+                for value in values:
+                    if isinstance(value, ast.FormattedValue):
+                        self.check_expr(value.value)
+                        if value.format_spec is not None:
+                            self.check_expr(value.format_spec)
             case _:
                 raise self.unsupported(expr)
 
 
-def _is_number(value: object) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
-
-
-def _compare_text(op: ast.cmpop) -> str:
-    return {ast.In: "in", ast.NotIn: "not in", ast.Is: "is", ast.IsNot: "is not"}.get(
-        type(op), type(op).__name__
-    )
-
-
 def check_supported(module: ast.Module, filename: str) -> None:
-    """Raise `UnsupportedError` for the first construct outside the M1 subset."""
+    """Raise `UnsupportedError` for the first construct outside the supported subset."""
     SubsetChecker(filename).check_module(module)

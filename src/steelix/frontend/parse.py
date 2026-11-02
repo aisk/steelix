@@ -21,6 +21,8 @@ class ParsedModule:
     tree: ast.Module
     comments: dict[int, str] = field(default_factory=dict)
     """Comments by line number, kept for later source mapping."""
+    path: Path | None = None
+    """The file as it was named on the command line, if read from disk."""
 
 
 def parse_source(source: str, name: str, filename: str | None = None) -> ParsedModule:
@@ -31,7 +33,9 @@ def parse_source(source: str, name: str, filename: str | None = None) -> ParsedM
 
 def parse_file(path: Path) -> ParsedModule:
     source = path.read_text(encoding="utf-8")
-    return parse_source(source, path.stem, path.name)
+    parsed = parse_source(source, path.stem, path.name)
+    parsed.path = path
+    return parsed
 
 
 def _collect_comments(source: str) -> dict[int, str]:

@@ -89,6 +89,44 @@ class Tuple(Expr):
 
 
 @dataclass(frozen=True)
+class Array(Expr):
+    elems: tuple[Expr, ...]
+
+
+@dataclass(frozen=True)
+class Unary(Expr):
+    """A prefix operator: `!x`."""
+
+    op: str
+    expr: Expr
+
+
+@dataclass(frozen=True)
+class Binary(Expr):
+    """A binary operator: `&&`, `||` or a comparison such as `!=`."""
+
+    op: str
+    lhs: Expr
+    rhs: Expr
+
+
+@dataclass(frozen=True)
+class BlockExpr(Expr):
+    """`{ stmts; tail }` used as an expression."""
+
+    block: Block
+
+
+@dataclass(frozen=True)
+class IfExpr(Expr):
+    """`if cond { .. } else { .. }` used as an expression."""
+
+    cond: Expr
+    then: Block
+    orelse: Block | IfExpr
+
+
+@dataclass(frozen=True)
 class Raw(Expr):
     """Verbatim tokens, used for macro arguments such as `name = "x"`."""
 
@@ -105,6 +143,7 @@ class Stmt:
 @dataclass(frozen=True)
 class Let(Stmt):
     name: str
+    """A variable name or a pattern such as `[a, b]`."""
     mutable: bool = False
     ty: str | None = None
     init: Expr | None = None
@@ -141,6 +180,31 @@ class While(Stmt):
 
 @dataclass(frozen=True)
 class Loop(Stmt):
+    body: Block
+
+
+@dataclass(frozen=True)
+class For(Stmt):
+    pat: str
+    iter: Expr
+    body: Block
+
+
+@dataclass(frozen=True)
+class Break(Stmt):
+    label: str | None = None
+
+
+@dataclass(frozen=True)
+class Continue(Stmt):
+    pass
+
+
+@dataclass(frozen=True)
+class LabeledBlock(Stmt):
+    """`'label: { .. }`, left early with `break 'label`."""
+
+    label: str
     body: Block
 
 

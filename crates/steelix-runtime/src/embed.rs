@@ -11,20 +11,36 @@ use pyo3::prelude::*;
 /// The `exec_module` function generated for a Python module.
 pub type ExecModule = fn(&Bound<'_, PyModule>) -> PyResult<()>;
 
+/// The Python script a program was transpiled from, as `python app.py` would
+/// see it.
+pub struct Script {
+    /// `sys.argv[0]`: the script path as it was given to `steelix transpile`.
+    pub argv0: &'static str,
+    /// `__file__` of `__main__`: the absolute path of the script.
+    pub file: &'static str,
+    /// `sys.path[0]`: the directory of the script, with symlinks resolved.
+    pub dir: &'static str,
+}
+
 /// Initializes Python, runs `exec_module` as the `__main__` module and shuts
 /// the interpreter down again, like `python app.py` does.
 ///
 /// `executable` is the interpreter whose installation (and virtual
 /// environment) provides the standard library and `site-packages`.
+/// `sys.argv` is the script path followed by the program's arguments, and the
+/// real command line is in `sys.orig_argv`.
 ///
 /// The exit code follows CPython: `SystemExit` exits with its code, any other
 /// uncaught exception prints a traceback and exits with 1, and a failure while
 /// finalizing exits with 120.
-pub fn run_main(executable: &str, exec_module: ExecModule) -> ExitCode {
+pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> ExitCode {
     // SAFETY: called once, before anything else touches the interpreter.
-    unsafe { initialize(executable) };
+    unsafe { initialize(executable, script) };
     let failed = Python::attach(|py| {
-        let result = py.import("__main__").and_then(|main| exec_module(&main));
+        let result = py.import("__main__").and_then(|main| {
+            prepare_main(&main, script)?;
+            exec_module(&main)
+        });
         match result {
             Ok(()) => false,
             Err(err) => {
@@ -50,7 +66,7 @@ pub fn run_main(executable: &str, exec_module: ExecModule) -> ExitCode {
 /// Initializes the interpreter with `PyConfig` instead of PyO3's
 /// `auto-initialize`, so that `sys.executable`, `sys.path` and `sys.argv`
 /// look like they do for `python app.py`.
-unsafe fn initialize(executable: &str) {
+unsafe fn initialize(executable: &str, script: &Script) {
     let mut config = MaybeUninit::<ffi::PyConfig>::uninit();
     // SAFETY: `PyConfig_InitPythonConfig` fully initializes the struct.
     unsafe {
@@ -66,19 +82,52 @@ unsafe fn initialize(executable: &str) {
             executable.as_ptr(),
         ));
 
-        let args: Vec<CString> = std::env::args_os()
+        let orig_args: Vec<CString> = std::env::args_os()
             .map(|arg| CString::new(arg.into_vec()).expect("argument contains NUL"))
             .collect();
-        let mut argv: Vec<*const c_char> = args.iter().map(|arg| arg.as_ptr()).collect();
+        let script_name = CString::new(script.argv0).expect("script path contains NUL");
+        // `sys.argv` as for `python app.py args...`: the script replaces the
+        // executable's own path.
+        let mut argv: Vec<*const c_char> = std::iter::once(script_name.as_ptr())
+            .chain(orig_args.iter().skip(1).map(|arg| arg.as_ptr()))
+            .collect();
         check(ffi::PyConfig_SetBytesArgv(
             config,
             argv.len() as ffi::Py_ssize_t,
             argv.as_mut_ptr(),
         ));
+        let mut orig_argv = Vec::with_capacity(orig_args.len());
+        for arg in &orig_args {
+            let wide = ffi::Py_DecodeLocale(arg.as_ptr(), std::ptr::null_mut());
+            assert!(!wide.is_null(), "can not decode command line argument");
+            orig_argv.push(wide);
+        }
+        check(ffi::PyConfig_SetWideStringList(
+            config,
+            &mut config.orig_argv,
+            orig_argv.len() as ffi::Py_ssize_t,
+            orig_argv.as_mut_ptr(),
+        ));
+        for wide in orig_argv {
+            ffi::PyMem_RawFree(wide.cast());
+        }
 
         check(ffi::Py_InitializeFromConfig(config));
         ffi::PyConfig_Clear(config);
     }
+}
+
+/// Sets up `sys.path[0]` and the `__main__` globals that `python app.py`
+/// provides before running the script.
+fn prepare_main(main: &Bound<'_, PyModule>, script: &Script) -> PyResult<()> {
+    let py = main.py();
+    py.import("sys")?
+        .getattr("path")?
+        .call_method1("insert", (0, script.dir))?;
+    let globals = main.dict();
+    globals.set_item("__file__", script.file)?;
+    globals.set_item("__cached__", py.None())?;
+    Ok(())
 }
 
 /// Exits the process like CPython does when initialization fails.

@@ -11,7 +11,11 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
-from steelix.frontend.bindings import analyze_locals, analyze_module_bindings
+from steelix.frontend.bindings import (
+    analyze_locals,
+    analyze_module_bindings,
+    analyze_module_flow,
+)
 from steelix.frontend.callgraph import build_call_graph
 from steelix.frontend.parse import ParsedModule
 from steelix.frontend.scope import FunctionScope, analyze_scopes
@@ -74,16 +78,21 @@ def _lower_function(
     )
     module.param_names[fn] = [names[p] for p in scope.params]
     info = FunctionInfo(fn, scope, locals_info, names)
-    ctx = Context(module, info)
+    ctx = Context(module, locals_info, info)
     lowering = StmtLowering(ctx)
 
     body: list[rs.Stmt] = []
     if fn in module.callgraph.recursive:
         body.append(rs.Let("_guard", init=rs.Path("rt::RecursionGuard::enter(py)?")))
     for param in scope.params:
-        if param in locals_info.assigned_params:
-            rust = names[param]
-            body.append(rs.Let(rust, mutable=True, init=rs.MethodCall(rs.Path(rust), "clone")))
+        rust = names[param]
+        clone = rs.MethodCall(rs.Path(rust), "clone")
+        if param in locals_info.optional:
+            # A deleted parameter can be unassigned later on.
+            some = rs.Call(rs.Path("Some"), (clone,))
+            body.append(rs.Let(rust, True, f"Option<{BOUND}>", some))
+        elif param in locals_info.assigned_params:
+            body.append(rs.Let(rust, mutable=True, init=clone))
     for name in locals_info.declared_at_top:
         rust = names[name]
         if name in locals_info.optional:
@@ -97,7 +106,9 @@ def _lower_function(
         # A final `return` becomes the tail expression.
         for stmt in stmts[:-1]:
             body += lowering.stmt(stmt)
-        tail = lowering.return_value(stmts[-1].value)
+        with lowering.exprs.fresh() as prelude:
+            tail = lowering.return_value(stmts[-1].value)
+        body += prelude
     else:
         for stmt in stmts:
             body += lowering.stmt(stmt)
@@ -122,7 +133,7 @@ def _lower_function(
 
 
 def _lower_exec_module(module: ModuleContext, tree: ast.Module, parsed: ParsedModule) -> rs.Fn:
-    ctx = Context(module)
+    ctx = Context(module, analyze_module_flow(tree))
     lowering = StmtLowering(ctx)
     body: list[rs.Stmt] = []
 
@@ -135,6 +146,8 @@ def _lower_exec_module(module: ModuleContext, tree: ast.Module, parsed: ParsedMo
 
     for index, stmt in enumerate(tree.body):
         ctx.statement_index = index
+        if stmt in ctx.flow.unreachable:
+            continue
         if isinstance(stmt, ast.FunctionDef):
             body.append(rs.ExprStmt(rs.Try(_def_macro(module, ctx, stmt, parsed))))
         else:

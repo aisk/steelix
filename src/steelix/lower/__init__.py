@@ -1,10 +1,9 @@
 """Lowering: translate analysed Python AST into the Rust AST.
 
-Planned modules:
+Modules:
     context.py   per-module / per-function lowering state (scopes, temp names, labels)
-    module.py    module body -> `#[pymodule]` init function and item list
-    function.py  `def` / `lambda` -> Rust functions and closures
-    stmt.py      statements
-    expr.py      expressions
-    builtins.py  special handling for builtins such as print, len, range, isinstance
+    module.py    module body -> `exec_module(m)` and one Rust fn per `def`
+    stmt.py      statements, assignment targets, loops, imports
+    expr.py      expressions, evaluation order temporaries, builtin special cases
+    names.py     name hygiene
 """

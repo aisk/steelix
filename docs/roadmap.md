@@ -26,21 +26,23 @@
 - [x] 测试框架：golden 快照与 `--update-golden`、`cargo check` 层、e2e 差分测试（显式设置 `PYO3_PYTHON`，共享 target 目录，pytest marker `e2e`）
 - [x] bin 模式：`PyConfig` 初始化、以 `__main__` 执行、`Py_FinalizeEx`、退出码、rpath（§11）
 
-## M2 核心语句与表达式
+## M2 核心语句与表达式 ✅
 
-- [ ] 按 Python 求值顺序生成临时变量，赋值先求值右边（§8）
-- [ ] `for` + `try_iter`（赋值给已声明的变量），`range` 特化留到后面
-- [ ] `break`/`continue`、循环 `else`（带标签 block）
-- [ ] 增量赋值，runtime 的 `rt::iadd` 等，目标只求值一次（§8）
-- [ ] 一元运算、`and`/`or` 值语义、条件表达式、`in`/`not in`/`is`/`is not`
-- [ ] 比较的值语义（`rich_compare`）与链式比较
-- [ ] list/tuple/dict/set 字面量、下标、切片、属性读写、`del`
-- [ ] 解包赋值 `a, b = ...`、`a, *rest = ...`
-- [ ] f-string（`format` + 拼接）
-- [ ] `global`、模块全局变量读写、`pass`、`assert`
-- [ ] 常用 builtins 映射（len、str、int、isinstance、range 等），其余走 `builtins` 动态查找
-- [ ] 简单的 `import x`、`import x.y as z`、`from x import y`（标准库与第三方库）
-- [ ] bin 模式贴近 `python app.py`：`sys.argv[0]` 用脚本名，`sys.path[0]` 为脚本所在目录，设置 `__file__`
+- [x] 按 Python 求值顺序生成临时变量，赋值先求值右边（§8）
+- [x] `for` + `try_iter`（赋值给已声明的变量，只在循环体内使用的循环变量在每次迭代开头 `let`），`range` 特化留到后面
+- [x] `break`/`continue`、循环 `else`（带标签 block）
+- [x] 增量赋值，runtime 的 `rt::iadd` 等，目标只求值一次（§8）
+- [x] 一元运算、`and`/`or` 值语义、条件表达式、`in`/`not in`/`is`/`is not`
+- [x] 比较的值语义（`rich_compare`）与链式比较
+- [x] list/tuple/dict/set 字面量、下标、切片、属性读写、`del`
+- [x] 解包赋值 `a, b = ...`、`a, *rest = ...`
+- [x] f-string（`format` + 拼接）
+- [x] `global`、模块全局变量读写、`pass`、`assert`
+- [x] 常用 builtins 映射（`len`、`isinstance`、`str`、`repr`、`bool`、`abs`、`type`、`iter`），其余走 `builtins` 动态查找。`int`、`range` 没有逐字等价的 PyO3 写法，暂不特化
+- [x] 简单的 `import x`、`import x.y as z`、`from x import y`（标准库与第三方库）
+- [x] bin 模式贴近 `python app.py`：`sys.argv[0]` 用脚本名，`sys.path[0]` 为脚本所在目录，设置 `__file__`
+
+容器字面量里的 `*x`/`**d` 展开、`AnnAssign` 仍然报 `UnsupportedError`，分别留给 M8 和 M3。
 
 ## M3 函数与闭包
 

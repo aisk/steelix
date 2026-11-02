@@ -9,7 +9,7 @@ from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.bindings import LocalsInfo, ModuleBindings
 from steelix.frontend.callgraph import CallGraph
 from steelix.frontend.scope import FunctionScope
-from steelix.lower.names import Renamer
+from steelix.lower.names import FUNCTION_RESERVED, RUST_KEYWORDS, Renamer
 
 
 @dataclass
@@ -44,6 +44,8 @@ class Context:
     """Lowering state for one Rust function body: a `def` or `exec_module`."""
 
     module: ModuleContext
+    flow: LocalsInfo
+    """Reachability (and, in functions, the declarations of locals)."""
     function: FunctionInfo | None = None
     """`None` while lowering module level code."""
     statement_index: int | None = None
@@ -51,6 +53,7 @@ class Context:
     uses_py: bool = False
     uses_globals: bool = False
     _temps: set[str] = field(default_factory=set)
+    _labels: set[str] = field(default_factory=set)
 
     @property
     def at_module_level(self) -> bool:
@@ -65,10 +68,15 @@ class Context:
         return "globals"
 
     def temp(self, base: str) -> str:
-        """A fresh Rust name for a temporary that can not clash with locals."""
-        taken = set(self.module.fn_names.mapping.values())
+        """A fresh Rust name for a temporary that can not clash with locals,
+        functions or names the generated code relies on."""
+        taken = set(self.module.fn_names.mapping.values()) | FUNCTION_RESERVED
         if self.function is not None:
             taken.update(self.function.names.mapping.values())
+        if not base.isidentifier() or not base.isascii():
+            base = "value"
+        if base in RUST_KEYWORDS or base in ("_", "self", "Self", "crate", "super"):
+            base += "_"
         name = base
         n = 1
         while name in taken or name in self._temps:
@@ -76,6 +84,16 @@ class Context:
             name = f"{base}{n}"
         self._temps.add(name)
         return name
+
+    def label(self, base: str) -> str:
+        """A fresh loop or block label such as `'for_else`."""
+        name = base
+        n = 1
+        while name in self._labels:
+            n += 1
+            name = f"{base}{n}"
+        self._labels.add(name)
+        return "'" + name
 
     def unsupported(self, feature: str, node: ast.AST) -> UnsupportedError:
         return self.module.unsupported(feature, node)

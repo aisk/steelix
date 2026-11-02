@@ -34,6 +34,20 @@ def p(text: str) -> rs.Path:
         (rs.Tuple((p("a"), p("b"))), "(a, b)"),
         (rs.Tuple(()), "()"),
         (rs.MacroCall("rt::def", (p("globals"), rs.Raw("fib(n)"))), "rt::def!(globals, fib(n))"),
+        (rs.Array((rs.IntLit(1), rs.IntLit(2))), "[1, 2]"),
+        (rs.Unary("!", rs.Try(rs.MethodCall(p("x"), "is_truthy"))), "!x.is_truthy()?"),
+        (rs.Unary("!", rs.Binary("&&", p("a"), p("b"))), "!(a && b)"),
+        (rs.Binary("||", rs.Binary("&&", p("a"), p("b")), p("c")), "a && b || c"),
+        (rs.Binary("&&", rs.Binary("||", p("a"), p("b")), p("c")), "(a || b) && c"),
+        (rs.Binary(">", rs.Try(rs.MethodCall(p("xs"), "len")), rs.IntLit(3)), "xs.len()? > 3"),
+        (
+            rs.Binary("&&", p("a"), rs.BlockExpr(rs.Block((rs.Let("x", init=p("y")),), p("x")))),
+            "a && {\n    let x = y;\n    x\n}",
+        ),
+        (
+            rs.MethodCall(rs.IfExpr(p("c"), rs.Block((), p("a")), rs.Block((), p("b"))), "f"),
+            "(if c {\n    a\n} else {\n    b\n}).f()",
+        ),
     ],
 )
 def test_print_expr(expr: rs.Expr, expected: str) -> None:
@@ -60,6 +74,15 @@ def test_print_and_format_function() -> None:
             ),
             rs.While(rs.BoolLit(False), rs.Block()),
             rs.Loop(rs.Block((rs.Return(),))),
+            rs.LabeledBlock(
+                "'for_else",
+                rs.Block(
+                    (
+                        rs.For("x", p("xs"), rs.Block((rs.Break("'for_else"), rs.Continue()))),
+                        rs.Let("[a, mut b]", init=p("pair")),
+                    )
+                ),
+            ),
         ),
         tail=None,
     )
@@ -91,6 +114,13 @@ def test_print_and_format_function() -> None:
         "    while false {}\n"
         "    loop {\n"
         "        return;\n"
+        "    }\n"
+        "    'for_else: {\n"
+        "        for x in xs {\n"
+        "            break 'for_else;\n"
+        "            continue;\n"
+        "        }\n"
+        "        let [a, mut b] = pair;\n"
         "    }\n"
         "}\n"
     )

@@ -13,8 +13,14 @@ from steelix.rustast import nodes as rs
 INDENT = "    "
 
 # Precedence levels, higher binds tighter.
-_UNARY = 2
-_POSTFIX = 3
+_BLOCKLIKE = 0
+_OR = 1
+_AND = 2
+_COMPARE = 3
+_UNARY = 4
+_POSTFIX = 5
+
+_BINARY_PRECEDENCE = {"||": _OR, "&&": _AND}
 
 
 def print_file(file: rs.File) -> str:
@@ -92,6 +98,14 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
             return f"while {print_expr(cond)} {print_block(body, level)}"
         case rs.Loop(body):
             return f"loop {print_block(body, level)}"
+        case rs.For(pat, iter_, body):
+            return f"for {pat} in {print_expr(iter_)} {print_block(body, level)}"
+        case rs.Break(label):
+            return "break;" if label is None else f"break {label};"
+        case rs.Continue():
+            return "continue;"
+        case rs.LabeledBlock(label, body):
+            return f"{label}: {print_block(body, level)}"
         case rs.Comment(text):
             return f"// {text}".rstrip()
     raise TypeError(f"unknown statement {stmt!r}")
@@ -109,7 +123,7 @@ def _print_if(stmt: rs.If, level: int) -> str:
     raise TypeError(f"unknown else branch {stmt.orelse!r}")
 
 
-def print_expr(expr: rs.Expr) -> str:
+def print_expr(expr: rs.Expr, level: int = 0) -> str:
     match expr:
         case rs.Path(text) | rs.Raw(text):
             return text
@@ -137,6 +151,29 @@ def print_expr(expr: rs.Expr) -> str:
             if len(elems) == 1:
                 return f"({print_expr(elems[0])},)"
             return f"({_args(elems)})"
+        case rs.Array(elems):
+            return f"[{_args(elems)}]"
+        case rs.Unary(op, inner):
+            return f"{op}{_operand(inner, _UNARY)}"
+        case rs.Binary(op, lhs, rhs):
+            prec = _BINARY_PRECEDENCE.get(op, _COMPARE)
+            # Comparisons do not chain in Rust, so both sides bind tighter.
+            right = prec + 1
+            left = prec if prec != _COMPARE else prec + 1
+            # A block on the right needs no parentheses: `a && { .. }`.
+            rhs_text = (
+                print_expr(rhs)
+                if isinstance(rhs, rs.BlockExpr | rs.IfExpr)
+                else _operand(rhs, right)
+            )
+            return f"{_operand(lhs, left)} {op} {rhs_text}"
+        case rs.BlockExpr(block):
+            return print_block(block, level)
+        case rs.IfExpr(cond, then, orelse):
+            text = f"if {print_expr(cond)} {print_block(then, level)} else "
+            if isinstance(orelse, rs.IfExpr):
+                return text + print_expr(orelse, level)
+            return text + print_block(orelse, level)
     raise TypeError(f"unknown expression {expr!r}")
 
 
@@ -146,7 +183,11 @@ def _args(args: tuple[rs.Expr, ...]) -> str:
 
 def _precedence(expr: rs.Expr) -> int:
     match expr:
-        case rs.Ref():
+        case rs.BlockExpr() | rs.IfExpr():
+            return _BLOCKLIKE
+        case rs.Binary(op):
+            return _BINARY_PRECEDENCE.get(op, _COMPARE)
+        case rs.Ref() | rs.Unary():
             return _UNARY
         case rs.IntLit(value) if value < 0:
             return _UNARY

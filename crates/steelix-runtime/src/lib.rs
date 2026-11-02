@@ -8,13 +8,18 @@
 //! never through a glob import, so Python names such as `int` or `print` can
 //! not shadow runtime helpers.
 
+use pyo3::IntoPyObjectExt;
 use pyo3::exceptions::{PyNameError, PyUnboundLocalError};
+use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyString};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PySlice, PyString, PyTuple};
 
 mod function;
+mod import;
+mod ops;
+mod unpack;
 
 #[cfg(unix)]
 pub mod embed;
@@ -22,6 +27,11 @@ pub mod embed;
 pub mod builtins;
 
 pub use function::{Body, Function};
+pub use import::{import, import_from, import_module, import_names};
+pub use ops::{
+    iadd, iand, ifloordiv, ilshift, imatmul, imod, imul, ior, ipow, irshift, isub, itruediv, ixor,
+};
+pub use unpack::{unpack, unpack_star};
 
 /// Re-exported so that macros can name PyO3 items through `$crate`.
 pub use pyo3;
@@ -85,6 +95,18 @@ pub fn global<'py>(globals: &Bound<'py, PyDict>, name: &str) -> PyResult<Bound<'
     builtin(globals.py(), name)
 }
 
+/// Deletes a module global like `del name` does, raising `NameError` if it
+/// is not bound.
+pub fn del_global(globals: &Bound<'_, PyDict>, name: &str) -> PyResult<()> {
+    if globals.contains(name)? {
+        globals.del_item(name)
+    } else {
+        Err(PyNameError::new_err(format!(
+            "name '{name}' is not defined"
+        )))
+    }
+}
+
 /// Reads a builtin such as `len`, raising `NameError` if it does not exist.
 pub fn builtin<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
     match builtins_module(py)?.getattr_opt(name)? {
@@ -108,11 +130,96 @@ pub fn local<'a, 'py>(
     value: &'a Option<Bound<'py, PyAny>>,
     name: &str,
 ) -> PyResult<&'a Bound<'py, PyAny>> {
-    value.as_ref().ok_or_else(|| {
-        PyUnboundLocalError::new_err(format!(
-            "cannot access local variable '{name}' where it is not associated with a value"
-        ))
-    })
+    value.as_ref().ok_or_else(|| unbound_local(name))
+}
+
+/// Deletes a local variable like `del name` does, raising `UnboundLocalError`
+/// if it is not assigned.
+pub fn del_local(value: &mut Option<Bound<'_, PyAny>>, name: &str) -> PyResult<()> {
+    match value.take() {
+        Some(_) => Ok(()),
+        None => Err(unbound_local(name)),
+    }
+}
+
+fn unbound_local(name: &str) -> PyErr {
+    PyUnboundLocalError::new_err(format!(
+        "cannot access local variable '{name}' where it is not associated with a value"
+    ))
+}
+
+/// `start:stop` in a subscript: a `slice` object whose step is `None`.
+///
+/// `PySlice::new` only takes integers, but Python slices hold any object and
+/// keep omitted parts as `None`, which `__getitem__` implementations can see.
+pub fn slice<'py>(
+    py: Python<'py>,
+    start: impl IntoPyObject<'py>,
+    stop: impl IntoPyObject<'py>,
+) -> PyResult<Bound<'py, PySlice>> {
+    slice_step(py, start, stop, py.None())
+}
+
+/// `start:stop:step` in a subscript.
+pub fn slice_step<'py>(
+    py: Python<'py>,
+    start: impl IntoPyObject<'py>,
+    stop: impl IntoPyObject<'py>,
+    step: impl IntoPyObject<'py>,
+) -> PyResult<Bound<'py, PySlice>> {
+    let start = start.into_bound_py_any(py)?;
+    let stop = stop.into_bound_py_any(py)?;
+    let step = step.into_bound_py_any(py)?;
+    // SAFETY: valid object pointers; `PySlice_New` returns a new reference.
+    unsafe {
+        Bound::from_owned_ptr_or_err(
+            py,
+            ffi::PySlice_New(start.as_ptr(), stop.as_ptr(), step.as_ptr()),
+        )
+        .map(|slice| slice.cast_into_unchecked())
+    }
+}
+
+/// `format(value, spec)`, which an f-string replacement field `{value:spec}`
+/// calls. A field without a spec, `{value}`, passes `""`.
+pub fn format<'py>(
+    value: &Bound<'py, PyAny>,
+    spec: impl IntoPyObject<'py>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = value.py();
+    let spec = spec.into_bound_py_any(py)?;
+    if value.is_exact_instance_of::<PyString>() && spec.is_empty()? {
+        // `FORMAT_SIMPLE` returns exact strings unchanged.
+        return Ok(value.clone());
+    }
+    // SAFETY: valid object pointers; the result is a new reference or NULL.
+    unsafe { Bound::from_owned_ptr_or_err(py, ffi::PyObject_Format(value.as_ptr(), spec.as_ptr())) }
+}
+
+/// `ascii(value)`, the `!a` conversion of an f-string.
+pub fn ascii<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyString>> {
+    // SAFETY: valid object pointer; the result is a new `str` reference or NULL.
+    unsafe {
+        Bound::from_owned_ptr_or_err(value.py(), ffi::PyObject_ASCII(value.as_ptr()))
+            .map(|s| s.cast_into_unchecked())
+    }
+}
+
+/// Concatenates the pieces of an f-string, like `"".join(pieces)`.
+///
+/// ```ignore
+/// rt::fstring(py, ("x = ", rt::format(&x, ".2f")?, "!"))?
+/// ```
+pub fn fstring<'py>(
+    py: Python<'py>,
+    pieces: impl IntoPyObject<'py, Target = PyTuple>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let pieces = pieces.into_bound_py_any(py)?;
+    let empty = PyString::new(py, "");
+    // SAFETY: valid object pointers; the result is a new reference or NULL.
+    unsafe {
+        Bound::from_owned_ptr_or_err(py, ffi::PyUnicode_Join(empty.as_ptr(), pieces.as_ptr()))
+    }
 }
 
 /// Guards against unbounded recursion in functions that call each other

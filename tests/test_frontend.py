@@ -231,6 +231,112 @@ def test_unreachable_code_and_reassigned_params() -> None:
     assert not info.end_reachable
 
 
+def test_loop_variables_only_read_in_the_body_are_loop_scoped() -> None:
+    info, fn = locals_of(
+        """
+        def f(xs):
+            for x in xs:
+                print(x)
+            for k, (a, b) in xs:
+                print(k, a, b)
+            for y in xs:
+                pass
+            print(y)
+            for z in xs:
+                z = 1
+        """
+    )
+    assert set(info.loop_scoped) == {"x", "k", "a", "b"}
+    assert info.loop_scoped["x"] is fn.body[0]
+    assert "y" in info.optional and "y" not in info.loop_scoped
+    assert "z" not in info.loop_scoped
+    assert "x" not in info.declared_at_top
+
+
+def test_break_continue_and_loop_else() -> None:
+    info, fn = locals_of(
+        """
+        def f(xs):
+            for x in xs:
+                if x:
+                    found = x
+                    break
+                continue
+                print("unreachable")
+            else:
+                found = None
+            return found
+        """
+    )
+    loop = fn.body[0]
+    assert loop.body[2] in info.unreachable
+    assert info.optional == set()  # assigned before `break` and in `else`
+
+
+def test_while_true_with_break_is_left_through_the_break() -> None:
+    info, fn = locals_of(
+        """
+        def f():
+            while True:
+                x = 1
+                break
+            return x
+        """
+    )
+    assert info.optional == set()
+    assert info.end_reachable is False
+    assert info.mutable == set()  # the body runs at most once
+
+
+def test_deleted_locals_are_optional() -> None:
+    info, fn = locals_of(
+        """
+        def f(a):
+            x = 1
+            del x
+            del a
+            if a:
+                y = 2
+            del y
+        """
+    )
+    assert {"x", "a", "y"} <= info.optional
+    deletes = [t for s in fn.body if isinstance(s, ast.Delete) for t in s.targets]
+    assert {t.id for t in info.assigned_deletes} == {"x", "a"}  # type: ignore[attr-defined]
+    assert deletes[2] not in info.assigned_deletes
+
+
+def test_tuple_targets_and_imports_declare_in_place() -> None:
+    info, fn = locals_of(
+        """
+        def f(p):
+            a, *b = p
+            import os.path
+            c, a = p
+            return a, b, c, os
+        """
+    )
+    assert info.declared_at["a"] is fn.body[0]
+    assert info.declared_at["b"] is fn.body[0]
+    assert info.declared_at["os"] is fn.body[1]
+    assert info.declared_at_top == ["c"]  # `c, a` can not be a single `let`
+    assert info.mutable == {"a"}
+
+
+def test_global_statement_names_are_not_locals() -> None:
+    tree, source = parse(
+        """
+        def f():
+            global counter
+            counter = 1
+            del counter
+        """
+    )
+    scope = analyze_scopes(tree, source, "m.py").of(function(tree, "f"))
+    assert scope.locals == set()
+    assert "counter" in scope.globals
+
+
 # --- call graph --------------------------------------------------------------
 
 
@@ -250,13 +356,18 @@ def test_call_graph_cycles_and_globals() -> None:
             return selfish(n)
         def pure(x):
             return len(x)
+        def importer():
+            import os
+        def writer():
+            global SCALE
+            SCALE = 3
         """
     )
     b = analyze_module_bindings(tree)
     graph = build_call_graph(tree, b, analyze_scopes(tree, source, "m.py"))
     names = lambda fns: {f.name for f in fns}  # noqa: E731
     assert names(graph.recursive) == {"ping", "pong", "selfish"}
-    assert names(graph.needs_globals) == {"leaf", "middle"}
+    assert names(graph.needs_globals) == {"leaf", "middle", "importer", "writer"}
 
 
 # --- docstrings --------------------------------------------------------------
