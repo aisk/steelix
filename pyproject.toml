@@ -1,0 +1,34 @@
+[project]
+name = "steelix"
+version = "0.1.0"
+description = "Transpile Python into readable Rust code built on PyO3"
+readme = "README.md"
+authors = [
+    { name = "An Long", email = "aisk1988@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+steelix = "steelix:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["e2e: end-to-end tests that build generated crates with cargo (slow)"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["tests/cases"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,3 @@
+# Point PyO3 at the project's uv managed interpreter (run `uv sync` first).
+[env]
+PYO3_PYTHON = { value = ".venv/bin/python", relative = true }
