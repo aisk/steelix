@@ -75,6 +75,7 @@ steelix/
 │   └── emit/                  生成完整 crate
 ├── crates/
 │   └── steelix-runtime/       生成代码依赖的运行时（Function、异常 guard 等）
+├── examples/                  示例应用：转换的原样输出和手工改写的版本（第 15 节）
 └── tests/
     ├── cases/                 端到端用例（*.py），同时作为 golden 输入
     ├── golden/                期望生成的 .rs（快照测试）
@@ -102,20 +103,19 @@ use pyo3::prelude::*;
 use steelix_runtime as rt;
 
 // fib.py:1
-pub fn fib<'py>(py: Python<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let _guard = rt::RecursionGuard::enter(py)?;
+pub fn fib<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let _guard = rt::RecursionGuard::enter(m.py())?;
     if n.lt(2)? {
         return Ok(n.clone());
     }
-    fib(py, &n.sub(1)?)?.add(fib(py, &n.sub(2)?)?)
+    fib(m, &n.sub(1)?)?.add(fib(m, &n.sub(2)?)?)
 }
 
 /// Executes the body of `fib.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    rt::def!(globals, fib(n))?;
-    rt::builtins::print(py, (fib(py, &rt::int(py, 10))?,))?;
+    rt::def!(m, fib(n))?;
+    rt::builtins::print(py, (fib(m, &rt::int(py, 10))?,))?;
     Ok(())
 }
 ```
@@ -123,13 +123,13 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 要点
 
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`getattr`、`call` 等方法
-- 函数体是普通的 Rust fn，显式接收 `py: Python<'py>`，参数用 `&Bound`。需要动态查找全局变量的函数（以及直接调用了这类函数的函数）额外接收 `globals: &Bound<'py, PyDict>`，放在 `py` 之后
-- 模块体生成 `exec_module(m)`，只依赖传入的模块对象，与输出模式无关
-- 模块级变量的读写走 globals 字典：`rt::global(globals, "LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `globals.set_item("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "max")?`
+- 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
+- 模块体生成 `exec_module(m)`，只依赖传入的模块上下文，与输出模式无关
+- 模块级变量的读写走 globals 字典：`m.global("LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `m.set_global("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "max")?`
 - 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
 - 函数末尾的 `return` 写成尾表达式，返回值本身是 `PyResult` 时不再包一层 `Ok(..?)`
 - 带 `else` 且有 `break` 的循环包在带标签的 block 里，`break` 写成 `break 'for_else`，正常结束时执行 `else`。`else` 里的 `break`/`continue` 属于外层循环，要跨出这个 block，rustc 不允许不带标签的跳转跨出带标签的 block（E0695），所以只在这时给外层循环加标签 `'outer: for ..`，写成 `continue 'outer`。其余循环都不带标签
-- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(globals, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。需要 globals 的写成 `rt::def!(globals, scale(globals, x))`，Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
+- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(m, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
 - 模块级函数若只绑定一次，并且能在转换时绑定参数，调用时直接调用 Rust 函数（见第 6、7 节）
 - 嵌套函数和 lambda 是写在外层函数体里的 Rust fn，被捕获并会改变的变量是 `rt::Cell`（见第 6 节）
 - 会递归的函数（直接调用构成的调用图里有环）开头加 `let _guard = rt::RecursionGuard::enter(py)?;`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用（`PyObject_Call`）CPython 自己会检查，不需要 guard
@@ -169,7 +169,7 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
   否则（循环后还要读，或者别处也赋值）照常赋值给事先声明的变量：`for item in xs.try_iter()? { x = item?; .. }`
 - 解包赋值的目标都是普通局部变量时，第一次出现写成 `let [a, b] = rt::unpack(&value)?;`，之后写成解构赋值 `[a, b] = rt::unpack(&value)?;`。目标里有属性、下标、全局变量或 `Option` 变量时，先解包到临时变量，再按顺序逐个赋值
 - 函数内的带注解赋值 `x: int = v` 在分析之前改写成 `x = v`（`frontend/desugar.py`），因为局部变量的注解从不求值。没有值的 `x: int` 只让 `x` 成为局部变量，直接去掉
-- 函数顶层第一次出现的 `import` 也直接 `let os = rt::import(globals, "os")?;`
+- 函数顶层第一次出现的 `import` 也直接 `let os = rt::import(m, "os")?;`
 - 被内层函数捕获并且之后会改变的变量（cell）用 `rt::Cell`，不参与上面的处理，见第 6 节
 
 ## 6. 函数对象、闭包与默认参数
@@ -179,7 +179,7 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 因此 runtime 提供 `#[pyclass(frozen, dict, weakref)] Function`
 
 - 实现 `__call__`（按存储的签名描述绑定参数）和 `__get__`（像 Python 函数一样绑定方法，返回 `types.MethodType`），`repr` 是 `<function qualname at 0x..>`
-- 持有指向生成的 Rust fn 的指针（统一签名的适配闭包，由 `rt::function!` 生成）、所属模块的 globals、闭包的 cell。通过 `__traverse__` 让 GC 看到它们，模块 dict 和函数之间的循环引用可以回收
+- 持有指向生成的 Rust fn 的指针（统一签名的小闭包，由 `rt::function!` 生成，把绑定好的参数逐个传给 Rust fn）、所属模块的 globals、闭包的 cell。通过 `__traverse__` 让 GC 看到它们，模块 dict 和函数之间的循环引用可以回收
 - 元信息（`__name__`、`__qualname__`、`__doc__`、`__module__`、`__defaults__`、`__kwdefaults__`、`__annotations__`、`__annotate__`、`__type_params__`）放在 `Mutex` 里，都是可写的真实属性，赋值时做和 CPython 一样的类型检查（`__defaults__` 只接受 tuple 或 None 等）。M1 把它们放在实例 `__dict__` 里，但那样 `__defaults__` 无法做类型检查，调用时也要查 dict。`__dict__` 照常可写
 - `__module__` 取自 globals 的 `__name__`，与 CPython 一致；只读的 `__globals__`、`__closure__`（与 CPython 一样是 cell 的 tuple，没有闭包时是 None）
 - 生态工具需要的内省（M3）
@@ -194,47 +194,42 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 注册和创建函数对象用两个宏，签名的写法和 Python 一样
 
 ```rust
-rt::def!(globals, greet(name, greeting = "Hello", *, punct = "!"))?;
-rt::def!(globals, span(start, stop = py.None(), /, step = 1))?;
-rt::def!(globals, collect(first, *rest, sep = "-", **options))?;
+rt::def!(m, greet(name, greeting = "Hello", *, punct = "!"))?;
+rt::def!(m, span(start, stop = py.None(), /, step = 1))?;
+rt::def!(m, collect(first, *rest, sep = "-", **options))?;
 let increment = rt::function!(
-    globals,
+    m,
     increment[&count](step = 1),
     qualname = "make_counter.<locals>.increment"
 )?;
 ```
 
-- `rt::function!` 返回函数对象，`rt::def!` 再把它绑定到 globals 里的 `__name__`
+- `rt::function!` 返回函数对象，`rt::def!` 再把它绑定到 globals 里的 `__name__`。第一个参数是模块上下文，函数对象保存它的 globals，经过 Python 调用时再用它构造 `rt::Module` 传给 Rust fn
 - 签名里 `/`、`*`、`*args`、`**kwargs` 与 Python 相同。默认值是 Rust 表达式，在宏展开处（也就是 `def` 执行时）按 Python 顺序求值一次。Rust 名字与 Python 名字不同的参数写成 `py_ as "py"`，报错信息和 `inspect.signature` 里显示 Python 名字
 - 注解写成 `x: "int"`、`-> "str"`，是 Python 源码文本（见下面的注解一节）
 - 方括号里是闭包捕获的变量，`&count` 是 cell，不带 `&` 的是值（见闭包一节）
 - 可选的 `name = ".."`、`qualname = ".."`、`doc = ".."`。qualname 默认就是名字，嵌套函数是 `outer.<locals>.inner`，lambda 是 `<lambda>`
-- 生成的 Rust fn 参数顺序：`py`、需要时的 `globals`、捕获的变量、Python 参数。`*args` 的类型是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`，可以直接用 tuple/dict 的方法
+- 生成的 Rust fn 参数顺序：`m`、捕获的变量、Python 参数。`*args` 的类型是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`，可以直接用 tuple/dict 的方法
 
 ### 直接调用与默认参数
 
 模块级函数能在转换时绑定参数时直接调用 Rust fn（条件见第 7 节）：调用处没有 `*`/`**`，关键字参数都能对应到参数，并且不会因为参数不对抛 `TypeError`。否则通过函数对象调用，错误由 `Function` 抛出，文字和 CPython 完全一样。
 
 ```rust
-// greet("Bob")
-greet(
-    py,
-    &rt::str(py, "Bob"),
-    &rt::default(globals, "greet", "greeting")?,
-    &rt::default(globals, "greet", "punct")?,
-)?
+// greet("Bob")，greeting 的默认值是 "Hello"，punct 的默认值是 [] 之类的可变对象
+greet(m, &rt::str(py, "Bob"), &rt::str(py, "Hello"), &m.default("greet", "punct")?)?
 ```
 
 - 关键字参数按 Python 顺序求值，再按参数顺序传入，需要时先放进临时变量（第 8 节）
-- 省略的参数用 `rt::default(globals, "greet", "greeting")?` 在调用时从函数对象读取，所以给 `__defaults__`/`__kwdefaults__` 赋值后直接调用也能看到新值，可变默认参数在直接调用和经过 Python 的调用之间共享
+- 省略的参数如果默认值是不可变的字面量（`None`、bool、数字、字符串、bytes），并且模块里没有给 `__defaults__`/`__kwdefaults__` 赋值（也没有以字符串形式写出这两个名字，例如 `setattr`），直接在调用处写成字面量
+- 其余默认值用 `m.default("greet", "punct")?` 在调用时从函数对象读取，所以给 `__defaults__`/`__kwdefaults__` 赋值后直接调用也能看到新值，可变默认参数在直接调用和经过 Python 的调用之间共享
 - 多出来的位置参数和关键字参数在调用处构造成 `PyTuple`/`PyDict` 传给 `*args`/`**kwargs`
-- 需要读默认值的函数要接收 `globals` 参数
 
 ### 嵌套函数与 lambda
 
 嵌套函数和 lambda 提升为具名 Rust fn，作为 item 写在外层函数体里 Python 定义的位置，紧接着用 `rt::function!` 创建函数对象并绑定局部变量。读代码时函数体和 Python 里的位置一致。
 
-- Rust 名字就是 Python 名字，与外层函数的局部变量、临时变量或模块函数冲突时加 `_` 后缀（fn item 的名字和局部变量在同一个命名空间，`let show = rt::function!(globals, show_[&i]())?;`）。lambda 叫 `lambda`、`lambda2`
+- Rust 名字就是 Python 名字，与外层函数的局部变量、临时变量或模块函数冲突时加 `_` 后缀（fn item 的名字和局部变量在同一个命名空间，`let show = rt::function!(m, show_[&i]())?;`）。lambda 叫 `lambda`、`lambda2`
 - 嵌套函数一律通过函数对象调用（`go.get()?.call1((..))`），不做直接调用。嵌套函数的名字常常在循环里重新绑定，直接调用的分析不值得
 - 嵌套函数可以递归：函数名本身是外层函数的 cell，嵌套函数通过 cell 读到自己
 - lambda 的函数体是一个尾表达式
@@ -250,14 +245,14 @@ greet(
 
 ```rust
 pub fn make_counter<'py>(
-    py: Python<'py>,
-    globals: &Bound<'py, PyDict>,
+    m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let count = rt::Cell::new(py, "count", start)?;
     // closures.py:7
     fn increment<'py>(
-        py: Python<'py>,
+        m: &rt::Module<'py>,
         count: &rt::Cell<'py>,
         step: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
@@ -265,7 +260,7 @@ pub fn make_counter<'py>(
         count.get()
     }
     let increment = rt::function!(
-        globals,
+        m,
         increment[&count](step = 1),
         qualname = "make_counter.<locals>.increment"
     )?;
@@ -281,11 +276,11 @@ pub fn make_counter<'py>(
 按 Python 的顺序执行：从上到下求值装饰器表达式，再求值默认参数、创建函数对象，然后从下到上应用。装饰器先放进临时变量，每次应用一条语句，读起来和 Python 的顺序一致
 
 ```rust
-let decorator = trace(py, globals, &rt::str(py, "outer"))?;
-let decorator2 = trace(py, globals, &rt::str(py, "inner"))?;
-let function = rt::function!(globals, greet(name, punct = ..), doc = "Say hello.")?;
+let decorator = trace(m, &rt::str(py, "outer"))?;
+let decorator2 = trace(m, &rt::str(py, "inner"))?;
+let function = rt::function!(m, greet(name, punct = ..), doc = "Say hello.")?;
 let function = decorator2.call1((&function,))?;
-globals.set_item("greet", decorator.call1((&function,))?)?;
+m.set_global("greet", decorator.call1((&function,))?)?;
 ```
 
 被装饰的名字绑定的是装饰器的返回值，所以对它的调用一律走 globals 查找，不做直接调用。已验证 `functools.wraps`、`functools.lru_cache` 和用户自己的装饰器。
@@ -308,12 +303,16 @@ Python 注释保留为 `//` 注释，放在它所属的语句前面：单独一�
 - 一个 Python 项目生成一个 crate，每个 Python 模块对应一个 Rust `mod`，模块间可以循环引用
 - PyO3 0.30 使用多阶段初始化，执行顶层代码时模块已在 `sys.modules` 里，循环 import 能正常工作
 - 包只导出一个 `PyInit_*`。包初始化时安装一个 meta path finder，子模块在被 import 时才执行，保持 Python 的惰性 import 顺序和副作用
-- **全局变量不用进程级 static 保存模块对象**，因为 `importlib.reload` 或删除 `sys.modules` 后重新 import 会产生新的模块对象。globals 由 `Function` 持有并显式传给需要它的函数体
-- 可以缓存 import 得到的标准库模块对象（`PyOnceLock`），但不能缓存它们的属性，否则 monkeypatch 失效
+- **全局变量不用进程级 static 保存模块对象**，因为 `importlib.reload` 或删除 `sys.modules` 后重新 import 会产生新的模块对象。globals 由 `Function` 持有，包装成模块上下文 `rt::Module` 显式传给每个函数体。以后需要按模块保存的状态（例如混合模式里编译好的 Python 代码）也放在这里
+- **只绑定一次的全局名字仍然每次查 globals**（M3b 评估过）。`import os`、`LIMIT = 10` 这类名字在模块里只绑定一次（`ModuleBindings` 能数出来），可以考虑在函数里缓存它们的值，但没有这样做
+  - 别的模块可以改这些名字。测试里 `monkeypatch.setattr(app, "LIMIT", 1)`、`mock.patch("app.requests")` 很常见，缓存会让它们悄悄失效。函数在名字绑定之前被调用时还要抛 `NameError`
+  - 能保持语义的做法是用 dict watcher（`PyDict_AddWatcher`）在 globals 或 builtins 变化时让缓存失效，但每个使用点需要一个缓存槽（生成代码里多一个宏或 static），每个解释器最多只有 8 个 watcher，实现和审查的成本都高
+  - 可读性上没有收益：有了模块上下文，`m.global("LIMIT")?` 已经和 Python 的写法一一对应。函数被改写成原生 Rust 时，常量自然变成 Rust 的 `const`（第 15 节）
+  - 性能上，实测一次全局读取 44 ns，CPython 特化后的 `LOAD_GLOBAL` 约 1.5 ns。其中大部分是每次从 `&str` 新建并哈希一个 Python 字符串，所以 `m.global` 和 `rt::builtin` 只接受 `'static` 的名字，按地址缓存驻留字符串，降到 18 ns，语义不变。剩下的差距等专门做性能时再考虑 dict watcher
 - **直接调用的条件**：名字在模块内只绑定一次（`def` 算一次），没有装饰器，模块里没有 `from x import *`、`globals()`、对自身模块的 `setattr`，并且调用的参数能在转换时绑定（第 6 节）。否则走 globals 字典动态查找。调用名为 `globals`、`vars`、`locals` 的函数时保守地按 `globals()` 处理，即使这个名字是模块自己定义的函数
 - 直接调用无法感知其他模块的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。应用场景里别的模块很少 patch 应用自身的函数，所以影响不大。以后如有需要再提供 `--dynamic-globals` 选项让所有全局调用都走动态查找
 - 应用场景下 `importlib.reload` 也很少见，不用 static 保存模块对象主要是为了让同一份生成代码既能作为 `__main__` 运行，也能被别的模块按真实名字 import
-- 函数里用 `global` 声明的名字照常走 globals 字典：读 `rt::global(globals, "x")?`，写 `globals.set_item("x", ..)?`，删 `rt::del_global(globals, "x")?`（不存在时抛 `NameError`）。这类函数需要 `globals` 参数
+- 函数里用 `global` 声明的名字照常走 globals 字典：读 `m.global("x")?`，写 `m.set_global("x", ..)?`，删 `m.del_global("x")?`（不存在时抛 `NameError`）
 
 ### import 语句（M2）
 
@@ -321,18 +320,18 @@ M2 支持标准库和第三方库的绝对 import，语义与字节码 `IMPORT_N
 
 ```rust
 // import os.path
-globals.set_item("os", rt::import(globals, "os.path")?)?;
+m.set_global("os", rt::import(m, "os.path")?)?;
 // import collections.abc as cabc
-globals.set_item("cabc", rt::import_module(globals, "collections.abc")?)?;
+m.set_global("cabc", rt::import_module(m, "collections.abc")?)?;
 // from json import dumps, loads as parse
-let json = rt::import_names(globals, "json", &["dumps", "loads"])?;
-globals.set_item("dumps", rt::import_from(&json, "dumps")?)?;
-globals.set_item("parse", rt::import_from(&json, "loads")?)?;
+let json = rt::import_names(m, "json", &["dumps", "loads"])?;
+m.set_global("dumps", rt::import_from(&json, "dumps")?)?;
+m.set_global("parse", rt::import_from(&json, "loads")?)?;
 ```
 
 - 没有用 `py.import`：`PyImport_Import` 返回最内层的子模块而不是顶层包，也没有 `fromlist` 语义（`from pkg import submodule` 需要它导入子模块）
 - `rt::import_from` 与 `IMPORT_FROM` 一样先 `getattr`，失败时回退到 `sys.modules["pkg.name"]`（循环 import），再失败时抛文字一致的 `ImportError`，并设置 `name`、`path`、`name_from`
-- 函数内的 import 绑定局部变量，同样需要 `globals` 参数
+- 函数内的 import 绑定局部变量
 - 相对 import 和 `from x import *` 暂不支持（M6）
 
 ## 8. 表达式与求值顺序
@@ -361,8 +360,8 @@ lowering 给每个子表达式记录它在 Rust 里的形态（`lower/expr.py` �
 
 ```rust
 // data[trace("i", 1)] = trace("v", 5)
-let value = trace(py, &rt::str(py, "v"), &rt::int(py, 5))?;
-data.set_item(trace(py, &rt::str(py, "i"), &rt::int(py, 1))?, &value)?;
+let value = trace(m, &rt::str(py, "v"), &rt::int(py, 5))?;
+data.set_item(trace(m, &rt::str(py, "i"), &rt::int(py, 1))?, &value)?;
 // g() in h()
 let item = g.call0()?;
 h.call0()?.contains(&item)?
@@ -392,7 +391,7 @@ CPython 先求值被调用的对象，再按源码顺序求值位置参数（包
 
   ```rust
   rt::call!(r#fn, *args, **kwargs)?
-  rt::call!(rt::global(globals, "k")?, 1, 2, "self" = 3, r#type = 4)?
+  rt::call!(m.global("k")?, 1, 2, "self" = 3, r#type = 4)?
   ```
 
   关键字是 Rust 标识符时直接写，否则写成字符串字面量。`*x` 与 `LIST_EXTEND` 一样迭代，不可迭代时抛 `Value after * must be an iterable, not int`；`**m` 与 `DICT_MERGE` 一样合并，重复的关键字抛 `got multiple values for keyword argument`，不是 mapping 时抛 `argument after ** must be a mapping`，文字都与 CPython 一致
@@ -413,8 +412,8 @@ CPython 先求值被调用的对象，再按源码顺序求值位置参数（包
 
 ```rust
 pub mod point {
-    pub fn __init__<'py>(py: Python<'py>, slf: &Bound<'py, PyAny>, x: &Bound<'py, PyAny>) -> PyResult<()> { ... }
-    pub fn norm<'py>(py: Python<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> { ... }
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>, x: &Bound<'py, PyAny>) -> PyResult<()> { ... }
+    pub fn norm<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> { ... }
 }
 ```
 
@@ -453,9 +452,10 @@ pub mod point {
 
 - Rust 关键字用 `r#`（`type`、`match`、`loop`、`ref`、`move`、edition 2024 保留的 `gen` 等），PyO3 会去掉参数名的 `r#`
 - `self`、`super`、`crate` 不能做 raw identifier，`self` 改名为 `slf`
-- 生成代码自己使用的名字和 Python 名字冲突时，改名 Python 名字，加 `_` 后缀直到不冲突。函数体内保留 `py`、`globals`、`_guard`、`Ok`、`Err`、`Some`、`None`；模块级函数名保留 `exec_module`，以及 `exec_module` 自己的局部变量 `m`、`py`、`globals`（名为 `m` 的 Python 函数生成 `fn m_`）。不需要改名的名字优先保留原拼写，改名不会抢占它们
+- 生成代码自己使用的名字和 Python 名字冲突时，改名 Python 名字，加 `_` 后缀直到不冲突。函数体内保留 `py`、`_guard`、`Ok`、`Err`、`Some`、`None`；模块级函数名保留 `exec_module`、`m`、`module`、`py`，它们是生成的函数的局部变量（名为 `m` 的 Python 函数生成 `fn m_`）。不需要改名的名字优先保留原拼写，改名不会抢占它们
+- 模块上下文参数叫 `m`，和 `#[pymodule]` 函数的模块参数一样。函数里有名为 `m` 的 Python 局部变量（常见的是正则的 match 对象）时，保留局部变量的名字，这个函数的上下文参数改叫 `module`
 - 嵌套函数的 Rust fn 和外层函数的局部变量、临时变量在同一个命名空间，冲突时同样加 `_` 后缀
-- Python 可见的函数名由 `rt::def!` 去掉 `r#` 得到，改过名的用 `name = "..."` 显式给出。改过名的参数在签名里写成 `globals_ as "globals"`，报错信息、关键字参数和 `inspect.signature` 都用 Python 名字
+- Python 可见的函数名由 `rt::def!` 去掉 `r#` 得到，改过名的用 `name = "..."` 显式给出。改过名的参数在签名里写成 `py_ as "py"`，报错信息、关键字参数和 `inspect.signature` 都用 Python 名字
 - 含孤立代理（lone surrogate）的字符串不能写成 Rust `&str` 字面量，用 `rt::str_surrogatepass(py, b"...")?` 从 `surrogatepass` 编码的字节构造
 - 字面量的具体写法：i32 范围内的整数直接写，超出的加 `i64`/`i128` 后缀，更大的用 `rt::bigint(py, "...")?`；浮点数用 `repr` 的最短往返表示，`inf` 写 `f64::INFINITY`；`None` 作参数时写 `py.None()`；`bytes` 一律用 `rt::bytes(py, b"...")`，不依赖 PyO3 对字节数组的隐式转换
 - docstring 按 3.13+ 编译器的规则去缩进（与 `inspect.cleandoc` 不同，保留首尾空行），同时生成 `///` 和 `__doc__`
@@ -477,7 +477,8 @@ pub mod point {
 - 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，没有 `__code__`（依赖字节码的工具无法使用）。`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）
 - `del f.__defaults__` 等删除元信息属性的操作抛 `AttributeError`，CPython 是把它设为 None。赋值为 None 的行为一致
 - 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；FORWARDREF 格式创建的 `ForwardRef` 没有 `owner`。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
-- 直接调用时省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError`。默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
+- 直接调用时省略的参数，不可变字面量的默认值直接写在调用处，所以别的模块给这个函数的 `__defaults__`/`__kwdefaults__` 赋值时直接调用看不到，这和直接调用看不到 monkeypatch 是同一类差异。本模块里的赋值会被识别，这时改为读函数对象（第 6 节）。字面量每次调用都创建新对象，见上面关于常量 identity 的一条
+- 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError`。默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
 - 模块级的条件定义（`if` 里的 `def`）和重复定义暂不支持，报 `UnsupportedError`
 - 嵌套函数的调用总是经过函数对象（性能差异，语义相同）
 
@@ -495,13 +496,73 @@ pub mod point {
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码，以及 stderr 最后一行（异常类型和消息，不比较 traceback）。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
+- **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
 - 源码映射：函数和语句前的 `// file.py:LINE` 注释，异常经过时用 `add_note` 附加 Python 位置。对迁移的人来说行号很重要，优先级不低
 - CI：GitHub Actions 跑 ruff、pytest（含 e2e），后续补上
 
-## 15. 待定问题
+## 15. 把函数改写成原生 Rust（M3b）
+
+迁移的第 3 步是人逐个把生成的函数改写成地道的 Rust，程序的其余部分照常工作。`examples/logsum` 是完整的例子：`generated/` 是转换的原样输出，`rewritten/` 把其中两个函数改写成了原生 Rust，`tests/test_examples.py` 验证两者的输出都与 CPython 一致。
+
+### 转换放在哪里
+
+生成的函数本身就是面向 Python 的适配层。它的签名 `(m: &rt::Module<'py>, x: &Bound<'py, PyAny>, ..) -> PyResult<Bound<'py, PyAny>>` 是一个契约，有两类调用方依赖它：`rt::def!` 注册的函数对象（Python 代码、key 函数、装饰器都经过它调用），以及生成代码里的直接调用。改写时不改这个签名，而是
+
+1. 把逻辑写成一个新的普通 Rust 函数，参数和返回值用原生类型，不出现 `Bound`、`Python`、`PyResult`
+2. 生成的同名函数只留下类型转换：用 `extract` 把参数转成原生类型，调用新函数，再用 `into_bound_py_any`、`PyDict::set_item` 等把结果转回 Python 对象
+
+所以 `extract`/`into_pyobject` 只出现在适配层里，每个函数一个地方。
+
+```rust
+// logsum.py:66
+/// Nearest-rank percentile of an ascending list of numbers.
+pub fn percentile<'py>(
+    m: &rt::Module<'py>,
+    sorted_values: &Bound<'py, PyAny>,
+    pct: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let sorted_values: Vec<u64> = sorted_values.extract()?;
+    native::percentile(&sorted_values, pct.extract()?).into_bound_py_any(m.py())
+}
+```
+
+原生函数放进一个不依赖 PyO3 的模块，沿用 Python 的函数名。例子里是 `src/logsum/native.rs`，由 `src/logsum.rs` 开头的 `mod native;` 引入，不用改 `main.rs`。这样原生代码可以用 `cargo test` 单独测试，以后整个程序都变成原生代码时也不用再挪。
+
+没有为每个函数另外生成一个转发用的适配函数（比如注册 `count_words_py`，由它调用 `count_words`）。改写之前两者完全一样，每个函数多出一个空转发，生成代码变长；改写函数体的签名之后，生成代码里的直接调用全部编译失败，要逐个在调用处加转换。现在的约定下调用方不用动。也没有让 `rt::def!` 按 `FromPyObject`/`IntoPyObject` 自动转换参数和返回值（类似 `#[pyfunction]`），那样可以直接改函数签名，但转换藏在宏展开里，出错时报在宏里，直接调用同样会全部失败。
+
+### 改写步骤
+
+1. 选一个函数，读它的 Python 源码和调用方，确定参数和返回值的原生类型。可能是 `None` 的值用 `Option`，固定键的 dict 可以变成 struct。按调用图从叶子往上改写最省事
+2. 在原生模块里写新函数，顺手写单元测试
+3. 把生成的函数体换成转换加调用。原来返回 dict 或 tuple 的，在适配层里按原来的键和顺序构造，Python 一侧看到的结构不变
+4. 跑端到端测试，确认输出仍与 CPython 一致
+
+转换要与原来的 Python 语义对齐，对不齐的地方要有意识地决定。例如 `extract::<u64>()` 对负数抛 `OverflowError`、对 float 抛 `TypeError`，原来的 Python 代码也许接受它们；Rust 的 `split_whitespace`、`parse` 和 Python 的 `str.split`、`int()` 在非 ASCII 空白、带下划线的数字等边界上不同；`HashMap` 没有插入顺序，转回 Python 的 dict 顺序会变，如果下游依赖 dict 的顺序（直接遍历输出，或者排序时只比较部分键），就要用 `Vec` 或保持顺序的 map。
+
+### 调用方
+
+- 生成代码里的直接调用不用改，它们仍然调用适配层，每次调用付出一次转换
+- 两个函数都改写成原生代码后，原生函数之间直接调用，不经过适配层，也不需要 `m`
+- 原生函数要调用还没改写的函数时，它就还不是纯 Rust。要么先改写被调用的函数，要么让它接收 `m: &rt::Module<'py>`，在调用处转换参数后调用对方的适配层
+- 改变 Python 可见的签名（参数、默认值）时，要同时改 `rt::def!` 那一行和所有直接调用，和在 Python 里改函数签名是一样的工作
+
+### 经过 Python 调用的函数
+
+作为 key 函数传给 `sorted`、注册成回调、赋给别的变量或者被装饰（`@functools.lru_cache`）的函数，都经过 `rt::def!` 创建的函数对象调用。函数对象按 Python 的规则绑定参数，再调用生成的函数，也就是适配层。所以这些函数的改写方式完全一样，不需要额外处理。装饰器包装的仍然是函数对象，`functools.wraps` 看到的名字和 docstring 来自 `rt::def!` 那一行，不受改写影响。
+
+嵌套函数和 lambda 也一样：生成的 fn item 就是适配层，捕获的变量（`&Bound` 或 `&rt::Cell`）在适配层里取出、转换后传给原生函数。
+
+### 改写之后不再成立的东西
+
+- monkeypatch：原生函数内部不再经过 Python，替换它读的全局变量（`mock.patch("app.LIMIT")`）或它调用的函数都对它不起作用。替换函数本身的效果不变，只影响经过 Python 的调用（第 12 节）
+- 异常：原生函数里没有 Python 异常，失败用 `Option`/`Result` 表示，由适配层决定怎么转回去。原来抛 `ValueError` 的地方，要么在适配层里把 `Err` 转成同样的异常，要么有意改变行为。例子里的 `parse_line` 遇到无法解析的数字时返回 `None`（这一行算格式错误），原来的 Python 代码会抛 `ValueError`。panic 经过 PyO3 会变成 `PanicException`，不要用它表达预期中的错误
+- 数值语义：Python 的 int 没有上限，换成 `u64`/`usize` 后溢出在 debug 构建里 panic，在 release 构建里回绕。浮点运算的顺序变了，结果可能在最后一位上不同
+- 重新生成：改写过的模块文件从此由人维护，不能再用 steelix 覆盖。Python 源码有变化时，重新生成到别的目录，再把没有改写过的函数手工合并过来
+
+## 16. 待定问题
 
 1. 参数传递用 `&Bound` 还是 `Bound`。初版用 `&Bound`，如果生成的 clone 太多再调整
 2. ABI 策略：按版本编译还是 abi3。runtime 里的 ffi 调用尽量限制在 limited API 内，保留 abi3 的可能

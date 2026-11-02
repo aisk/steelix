@@ -19,8 +19,8 @@ from steelix.frontend.scope import analyze_scopes, has_future_annotations
 from steelix.frontend.subset import check_supported
 from steelix.lower.context import Context, ModuleContext
 from steelix.lower.docstrings import docstring
-from steelix.lower.function import attach_comments, lower_function
-from steelix.lower.names import MODULE_RESERVED, Renamer
+from steelix.lower.function import attach_comments, bind_py, lower_function
+from steelix.lower.names import CONTEXT, MODULE_RESERVED, Renamer
 from steelix.lower.stmt import StmtLowering
 from steelix.rustast import nodes as rs
 
@@ -76,7 +76,7 @@ def _lower_exec_module(module: ModuleContext, tree: ast.Module, parsed: ParsedMo
     doc = docstring(tree, parsed.filename)
     if doc is not None:
         setter = rs.MethodCall(
-            rs.Path(ctx.globals()), "set_item", (rs.StrLit("__doc__"), rs.StrLit(doc))
+            rs.Path(ctx.context()), "set_global", (rs.StrLit("__doc__"), rs.StrLit(doc))
         )
         body.append(rs.ExprStmt(rs.Try(setter)))
 
@@ -90,15 +90,10 @@ def _lower_exec_module(module: ModuleContext, tree: ast.Module, parsed: ParsedMo
             body += lowering.stmt(stmt)
     body += [rs.Comment(c) for c in module.comments.get(tree, [])]  # type: ignore[call-overload]
 
-    prologue: list[rs.Stmt] = []
-    if ctx.uses_py:
-        prologue.append(rs.Let("py", init=rs.MethodCall(rs.Path("m"), "py")))
-    if ctx.uses_globals:
-        prologue.append(rs.Let("globals", init=rs.Ref(rs.MethodCall(rs.Path("m"), "dict"))))
     return rs.Fn(
         name="exec_module",
-        params=(rs.Param("m", "&Bound<'_, PyModule>"),),
+        params=(rs.Param(CONTEXT, "&rt::Module<'_>"),),
         ret="PyResult<()>",
-        body=rs.Block(tuple(prologue + body), rs.Call(rs.Path("Ok"), (rs.Tuple(()),))),
-        doc=(f"Executes the body of `{parsed.filename}` in the module `m`.",),
+        body=bind_py(rs.Block(tuple(body), rs.Call(rs.Path("Ok"), (rs.Tuple(()),))), CONTEXT),
+        doc=(f"Executes the body of `{parsed.filename}` in the module `{CONTEXT}`.",),
     )

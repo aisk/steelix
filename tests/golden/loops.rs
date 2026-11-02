@@ -6,10 +6,11 @@ use steelix_runtime as rt;
 
 // loops.py:4
 pub fn find<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     items: &Bound<'py, PyAny>,
     target: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     'for_else: {
         for item in items.try_iter()? {
             let item = item?;
@@ -25,10 +26,10 @@ pub fn find<'py>(
 
 // loops.py:13
 pub fn first_even<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     numbers: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut result = rt::none(py);
+    let mut result = rt::none(m.py());
     for n in numbers.try_iter()? {
         let n = n?;
         if n.rem(2)?.is_truthy()? {
@@ -41,7 +42,10 @@ pub fn first_even<'py>(
 }
 
 // loops.py:23
-pub fn last_item<'py>(py: Python<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn last_item<'py>(
+    m: &rt::Module<'py>,
+    items: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
     let mut item: Option<Bound<'py, PyAny>> = None;
     for item2 in items.try_iter()? {
         item = Some(item2?);
@@ -50,7 +54,8 @@ pub fn last_item<'py>(py: Python<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bo
 }
 
 // loops.py:29
-pub fn count_down<'py>(py: Python<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn count_down<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut n = n.clone();
     'while_else: {
         while n.gt(0)? {
@@ -66,7 +71,8 @@ pub fn count_down<'py>(py: Python<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound
 }
 
 // loops.py:40
-pub fn pairs<'py>(py: Python<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn pairs<'py>(m: &rt::Module<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut total = rt::int(py, 0);
     for item in mapping.call_method0("items")?.try_iter()? {
         let [key, value] = rt::unpack(&item?)?;
@@ -77,7 +83,8 @@ pub fn pairs<'py>(py: Python<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<Boun
 }
 
 // loops.py:48
-pub fn nested<'py>(py: Python<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn nested<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     for row in rows.try_iter()? {
         let row = row?;
         'for_else: {
@@ -100,10 +107,11 @@ pub fn nested<'py>(py: Python<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<
 
 // loops.py:61
 pub fn search<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     rows: &Bound<'py, PyAny>,
     target: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut j: Bound<'py, PyAny>;
     let mut i = rt::int(py, 0);
     for row in rows.try_iter()? {
@@ -122,8 +130,8 @@ pub fn search<'py>(
 }
 
 // loops.py:73
-pub fn spin<'py>(py: Python<'py>, limit: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let mut k = rt::int(py, 0);
+pub fn spin<'py>(m: &rt::Module<'py>, limit: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let mut k = rt::int(m.py(), 0);
     loop {
         k = k.add(1)?;
         if k.ge(limit)? {
@@ -134,41 +142,40 @@ pub fn spin<'py>(py: Python<'py>, limit: &Bound<'py, PyAny>) -> PyResult<Bound<'
 }
 
 /// Executes the body of `loops.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item("__doc__", "for/while loops with break, continue and else.")?;
-    rt::def!(globals, find(items, target))?;
-    rt::def!(globals, first_even(numbers))?;
-    rt::def!(globals, last_item(items))?;
-    rt::def!(globals, count_down(n))?;
-    rt::def!(globals, pairs(mapping))?;
-    rt::def!(globals, nested(rows))?;
-    rt::def!(globals, search(rows, target))?;
-    rt::def!(globals, spin(limit))?;
-    find(py, PyList::new(py, [1, 2, 3])?.as_any(), &rt::int(py, 2))?;
-    find(py, PyList::new(py, [1, 2, 3])?.as_any(), &rt::int(py, 5))?;
+    m.set_global("__doc__", "for/while loops with break, continue and else.")?;
+    rt::def!(m, find(items, target))?;
+    rt::def!(m, first_even(numbers))?;
+    rt::def!(m, last_item(items))?;
+    rt::def!(m, count_down(n))?;
+    rt::def!(m, pairs(mapping))?;
+    rt::def!(m, nested(rows))?;
+    rt::def!(m, search(rows, target))?;
+    rt::def!(m, spin(limit))?;
+    find(m, PyList::new(py, [1, 2, 3])?.as_any(), &rt::int(py, 2))?;
+    find(m, PyList::new(py, [1, 2, 3])?.as_any(), &rt::int(py, 5))?;
     rt::builtins::print(
         py,
         (
-            first_even(py, PyList::new(py, [1, 3, 4, 6])?.as_any())?,
-            first_even(py, PyList::new(py, [1, 3])?.as_any())?,
+            first_even(m, PyList::new(py, [1, 3, 4, 6])?.as_any())?,
+            first_even(m, PyList::new(py, [1, 3])?.as_any())?,
         ),
     )?;
-    rt::builtins::print(py, (last_item(py, &rt::str(py, "abc"))?,))?;
+    rt::builtins::print(py, (last_item(m, &rt::str(py, "abc"))?,))?;
     rt::builtins::print(
         py,
         (
-            count_down(py, &rt::int(py, 5))?,
-            count_down(py, &rt::int(py, 1))?,
+            count_down(m, &rt::int(py, 5))?,
+            count_down(m, &rt::int(py, 1))?,
         ),
     )?;
     rt::builtins::print(
         py,
-        (pairs(py, [("a", 1), ("b", 2)].into_py_dict(py)?.as_any())?,),
+        (pairs(m, [("a", 1), ("b", 2)].into_py_dict(py)?.as_any())?,),
     )?;
     nested(
-        py,
+        m,
         PyList::new(
             py,
             [
@@ -183,7 +190,7 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         py,
         (
             search(
-                py,
+                m,
                 PyList::new(
                     py,
                     [
@@ -195,30 +202,27 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
                 &rt::int(py, 4),
             )?,
             search(
-                py,
+                m,
                 PyList::new(py, [PyList::new(py, [1])?.as_any()])?.as_any(),
                 &rt::int(py, 9),
             )?,
         ),
     )?;
-    rt::builtins::print(py, (spin(py, &rt::int(py, 4))?,))?;
-    globals.set_item("total", 0)?;
+    rt::builtins::print(py, (spin(m, &rt::int(py, 4))?,))?;
+    m.set_global("total", 0)?;
     for item in rt::builtin(py, "range")?.call1((5,))?.try_iter()? {
-        globals.set_item("x", item?)?;
-        if rt::global(globals, "x")?.eq(3)? {
+        m.set_global("x", item?)?;
+        if m.global("x")?.eq(3)? {
             continue;
         }
-        globals.set_item(
-            "total",
-            rt::global(globals, "total")?.add(rt::global(globals, "x")?)?,
-        )?;
+        m.set_global("total", m.global("total")?.add(m.global("x")?)?)?;
     }
-    rt::builtins::print(py, ("loop finished with x =", rt::global(globals, "x")?))?;
-    rt::builtins::print(py, (rt::global(globals, "total")?,))?;
+    rt::builtins::print(py, ("loop finished with x =", m.global("x")?))?;
+    rt::builtins::print(py, (m.global("total")?,))?;
     'for_else: {
         for item2 in PyList::new(py, ["alpha", "beta"])?.try_iter()? {
-            globals.set_item("word", item2?)?;
-            rt::builtins::print(py, (rt::global(globals, "word")?,))?;
+            m.set_global("word", item2?)?;
+            rt::builtins::print(py, (m.global("word")?,))?;
             break 'for_else;
         }
         rt::builtins::print(py, ("unreachable else",))?;

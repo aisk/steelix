@@ -3,10 +3,10 @@ use pyo3::prelude::*;
 use steelix_runtime as rt;
 
 // assert_error.py:1
-pub fn positive<'py>(py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn positive<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     if !x.gt(0)? {
         return Err(PyAssertionError::new_err((rt::fstring(
-            py,
+            m.py(),
             ("expected a positive number, got ", rt::format(x, "")?),
         )?
         .unbind(),)));
@@ -15,11 +15,10 @@ pub fn positive<'py>(py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'
 }
 
 /// Executes the body of `assert_error.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    rt::def!(globals, positive(x))?;
-    rt::builtins::print(py, (positive(py, &rt::int(py, 1))?,))?;
-    rt::builtins::print(py, (positive(py, &rt::int(py, -1))?,))?;
+    rt::def!(m, positive(x))?;
+    rt::builtins::print(py, (positive(m, &rt::int(py, 1))?,))?;
+    rt::builtins::print(py, (positive(m, &rt::int(py, -1))?,))?;
     Ok(())
 }

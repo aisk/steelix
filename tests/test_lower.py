@@ -85,8 +85,8 @@ def test_calls_before_def_go_through_globals() -> None:
         print(f(1))
         """
     )
-    assert 'rt::global(globals, "f")?.call1((1,))?' in out
-    assert "f(py, &rt::int(py, 1))?" in out
+    assert 'm.global("f")?.call1((1,))?' in out
+    assert "f(m, &rt::int(py, 1))?" in out
 
 
 def test_option_local_and_none_return() -> None:
@@ -106,7 +106,7 @@ def test_option_local_and_none_return() -> None:
 
 def test_globals_builtin_reads_the_module_dict() -> None:
     out = lower("x = globals()\n")
-    assert 'globals.set_item("x", globals.clone().into_any())?;' in out
+    assert 'm.set_global("x", m.globals().clone().into_any())?;' in out
 
 
 def test_pure_operands_need_no_temporaries() -> None:
@@ -118,7 +118,7 @@ def test_pure_operands_need_no_temporaries() -> None:
         """
     )
     assert "d.set_item(i, x)?;" in out
-    assert "Ok(rt::bool(py, xs.contains(x)?))" in out
+    assert "Ok(rt::bool(m.py(), xs.contains(x)?))" in out
     assert "let " not in out.split("pub fn exec_module")[0]
 
 
@@ -189,7 +189,7 @@ def test_builtin_special_cases_respect_rebinding() -> None:
             return len(x)
         """
     )
-    assert "Ok(rt::int(py, x.len()?))" in out
+    assert "Ok(rt::int(m.py(), x.len()?))" in out
     out = lower(
         """
         def f(x):
@@ -197,7 +197,7 @@ def test_builtin_special_cases_respect_rebinding() -> None:
         len = repr
         """
     )
-    assert 'rt::global(globals, "len")?.call1((x,))' in out
+    assert 'm.global("len")?.call1((x,))' in out
 
 
 def test_for_loop_variable_scoped_to_the_body() -> None:
@@ -219,7 +219,66 @@ def test_imports_bind_names() -> None:
         from x.y import z as w, v
         """
     )
-    assert 'globals.set_item("os", rt::import(globals, "os.path")?)?;' in out
-    assert 'globals.set_item("d", rt::import_module(globals, "a.b.c")?)?;' in out
-    assert 'let y = rt::import_names(globals, "x.y", &["z", "v"])?;' in out
-    assert 'globals.set_item("w", rt::import_from(&y, "z")?)?;' in out
+    assert 'm.set_global("os", rt::import(m, "os.path")?)?;' in out
+    assert 'm.set_global("d", rt::import_module(m, "a.b.c")?)?;' in out
+    assert 'let y = rt::import_names(m, "x.y", &["z", "v"])?;' in out
+    assert 'm.set_global("w", rt::import_from(&y, "z")?)?;' in out
+
+
+# --- the module context ------------------------------------------------------
+
+
+def test_py_is_bound_once_or_spelled_in_place() -> None:
+    out = lower(
+        """
+        def once():
+            return None
+
+        def twice(x):
+            return [x, 1, "a"]
+        """
+    )
+    assert "pub fn once<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {" in out
+    assert "Ok(rt::none(m.py()))" in out
+    assert "let py = m.py();\n    Ok(PyList::new(py, [x, &rt::int(py, 1)" in out
+
+
+def test_local_named_m_keeps_its_name() -> None:
+    out = lower(
+        """
+        import re
+
+        def first_word(text):
+            m = re.match("[a-z]+", text)
+            return m.group(0)
+        """
+    )
+    assert "module: &rt::Module<'py>," in out
+    assert 'let m = module\n        .global("re")?' in out
+    assert 'm.call_method1("group", (0,))' in out
+
+
+def test_literal_defaults_are_passed_in_place() -> None:
+    out = lower(
+        """
+        def f(a, b="x", c=None, d=[]):
+            return a
+
+        f(1)
+        """
+    )
+    args = ["&rt::int(py, 1)", '&rt::str(py, "x")', "&rt::none(py)", '&m.default("f", "d")?']
+    assert ",\n        ".join(args) in out
+
+
+def test_assigned_defaults_are_read_from_the_function() -> None:
+    out = lower(
+        """
+        def f(a, b="x"):
+            return a
+
+        f.__defaults__ = ("y",)
+        f(1)
+        """
+    )
+    assert 'f(m, &rt::int(py, 1), &m.default("f", "b")?)' in out

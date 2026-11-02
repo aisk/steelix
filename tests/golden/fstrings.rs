@@ -3,11 +3,12 @@ use steelix_runtime as rt;
 
 // fstrings.py:4
 pub fn describe<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     name: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
     width: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (rt::fstring(
@@ -87,18 +88,17 @@ pub fn describe<'py>(
 }
 
 /// Executes the body of `fstrings.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "f-strings with format specs, conversions and nested fields.",
     )?;
-    rt::def!(globals, describe(name, value, width))?;
+    rt::def!(m, describe(name, value, width))?;
     rt::builtins::print(
         py,
         (describe(
-            py,
+            m,
             &rt::str(py, "pi"),
             &rt::float(py, 3.14159),
             &rt::int(py, 10),
@@ -107,29 +107,29 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (describe(
-            py,
+            m,
             &rt::str(py, "ünïcode"),
             &rt::float(py, -1.5),
             &rt::int(py, 6),
         )?,),
     )?;
-    globals.set_item("n", 255)?;
+    m.set_global("n", 255)?;
     rt::builtins::print(
         py,
         (
             rt::fstring(
                 py,
                 (
-                    rt::format(&rt::global(globals, "n")?, "x")?,
+                    rt::format(&m.global("n")?, "x")?,
                     " ",
-                    rt::format(&rt::global(globals, "n")?, "#o")?,
+                    rt::format(&m.global("n")?, "#o")?,
                     " ",
-                    rt::format(&rt::global(globals, "n")?, ",")?,
+                    rt::format(&m.global("n")?, ",")?,
                     " ",
-                    rt::format(&rt::global(globals, "n")?, "b")?,
+                    rt::format(&m.global("n")?, "b")?,
                 ),
             )?,
-            rt::format(&rt::global(globals, "n")?, "")?,
+            rt::format(&m.global("n")?, "")?,
         ),
     )?;
     Ok(())

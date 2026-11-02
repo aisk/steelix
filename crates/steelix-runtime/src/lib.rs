@@ -14,13 +14,18 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PySlice, PyString, PyTuple};
+use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PySlice, PyString, PyTuple};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+use std::mem::ManuallyDrop;
 
 pub mod call;
 mod cell;
 #[doc(hidden)]
 pub mod function;
 mod import;
+mod module;
 mod ops;
 mod unpack;
 
@@ -30,8 +35,9 @@ pub mod embed;
 pub mod builtins;
 
 pub use cell::Cell;
-pub use function::{Body, Function, FunctionDef, Signature, default};
+pub use function::{Body, Function, FunctionDef, Signature};
 pub use import::{import, import_from, import_module, import_names};
+pub use module::Module;
 pub use ops::{
     iadd, iand, ifloordiv, ilshift, imatmul, imod, imul, ior, ipow, irshift, isub, itruediv, ixor,
 };
@@ -90,34 +96,53 @@ pub fn none(py: Python<'_>) -> Bound<'_, PyAny> {
     py.None().into_bound(py)
 }
 
-/// Reads a module global the way `LOAD_GLOBAL` does: the module's globals
-/// first, then builtins, raising `NameError` if neither has it.
-pub fn global<'py>(globals: &Bound<'py, PyDict>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-    if let Some(value) = globals.get_item(name)? {
-        return Ok(value);
-    }
-    builtin(globals.py(), name)
-}
-
-/// Deletes a module global like `del name` does, raising `NameError` if it
-/// is not bound.
-pub fn del_global(globals: &Bound<'_, PyDict>, name: &str) -> PyResult<()> {
-    if globals.contains(name)? {
-        globals.del_item(name)
-    } else {
-        Err(PyNameError::new_err(format!(
-            "name '{name}' is not defined"
-        )))
-    }
-}
-
 /// Reads a builtin such as `len`, raising `NameError` if it does not exist.
-pub fn builtin<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-    match builtins_module(py)?.getattr_opt(name)? {
+pub fn builtin<'py>(py: Python<'py>, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
+    match builtins_module(py)?.getattr_opt(interned(py, name))? {
         Some(value) => Ok(value),
         None => Err(PyNameError::new_err(format!(
             "name '{name}' is not defined"
         ))),
+    }
+}
+
+/// The interned Python string for a name spelled in generated code.
+///
+/// Looking a global up by `&str` would create (and hash) a new Python string
+/// every time, which costs several times the dictionary lookup itself
+/// (measured: 44 ns per global read, 18 ns with this cache). Names are
+/// `'static`, so their address and length identify them.
+///
+/// Like the strings of `pyo3::intern!`, they are never freed. The cache is
+/// per thread so that it needs no lock.
+pub(crate) fn interned<'py>(py: Python<'py>, name: &'static str) -> Bound<'py, PyString> {
+    type Names =
+        HashMap<(usize, usize), ManuallyDrop<Py<PyString>>, BuildHasherDefault<AddressHasher>>;
+    thread_local! {
+        static NAMES: RefCell<Names> = RefCell::default();
+    }
+    let key = (name.as_ptr() as usize, name.len());
+    NAMES.with_borrow_mut(|names| {
+        names
+            .entry(key)
+            .or_insert_with(|| ManuallyDrop::new(PyString::intern(py, name).unbind()))
+            .bind(py)
+            .clone()
+    })
+}
+
+#[derive(Default)]
+struct AddressHasher(u64);
+
+impl Hasher for AddressHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, _: &[u8]) {
+        unreachable!("only addresses are hashed")
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.0 = self.0.rotate_left(5) ^ n as u64;
     }
 }
 
@@ -268,14 +293,17 @@ impl Drop for RecursionGuard<'_> {
 /// `__defaults__` / `__kwdefaults__`; annotations are kept as Python source and
 /// evaluated lazily (PEP 649).
 ///
+/// The Rust function takes the module, the captured variables and then one
+/// argument per parameter, all as `&Bound` (`*args` and `**kwargs` as
+/// `&Bound<PyTuple>` and `&Bound<PyDict>`, captured cells as `&rt::Cell`).
+///
 /// ```ignore
-/// rt::function!(globals, greet(name, greeting = "Hello"))?;      // fn greet(py, name, greeting)
-/// rt::function!(globals, log(globals, msg, *, level = 20))?;      // fn log(py, globals, msg, level)
-/// rt::function!(globals, wrap(f, /, *args, **kwargs))?;          // fn wrap(py, f, args, kwargs)
-/// rt::function!(globals, area(r: "float") -> "float")?;           // annotations
-/// rt::function!(globals, slf as "self"(x), name = "method")?;     // Python names differ
+/// rt::function!(module, greet(name, greeting = "Hello"))?;       // fn greet(module, name, greeting)
+/// rt::function!(module, wrap(f, /, *args, **kwargs))?;           // fn wrap(module, f, args, kwargs)
+/// rt::function!(module, area(r: "float") -> "float")?;           // annotations
+/// rt::function!(module, slf as "self"(x), name = "method")?;     // Python names differ
 /// // A nested function capturing `n` by value and the shared cell `count`:
-/// rt::function!(globals, add[n, &count](x), qualname = "make.<locals>.add")?;
+/// rt::function!(module, add[n, &count](x), qualname = "make.<locals>.add")?;
 /// ```
 ///
 /// Options: `name = ".."` (defaults to the Rust name, or the last part of
@@ -289,8 +317,8 @@ macro_rules! function {
     (@caps $h:tt [$($c:tt)*] $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
         $crate::function!(@caps $h [$($c)* {value $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
     };
-    (@caps ($globals:expr, $f:ident, [$($g:tt)?], [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
-        $crate::function!(@params ($globals, $f, [$($g)?], [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
+    (@caps ($module:expr, $f:ident, [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
+        $crate::function!(@params ($module, $f, [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
     };
     // --- parameters, sorted into positional-only, positional, `*args`,
     // keyword-only and `**kwargs` ---
@@ -326,7 +354,7 @@ macro_rules! function {
         $crate::function!(@build $h [$($po)*] [$($p)*] [$($v)*] [$($k)*] [$($vk)*])
     };
     // --- the function object ---
-    (@build ($globals:expr, $f:ident, [$($g:tt)?], [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
+    (@build ($module:expr, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
         [$({$po:ident, $pon:expr, [$($pod:expr)?], [$($poa:literal)?]})*]
         [$({$p:ident, $pn:expr, [$($pd:expr)?], [$($pa:literal)?]})*]
         [$({$v:ident, $vn:expr, [], [$($va:literal)?]})?]
@@ -345,8 +373,8 @@ macro_rules! function {
             $($(($pon, $poa),)?)* $($(($pn, $pa),)?)* $($(($vn, $va),)?)?
             $($(($kn, $ka),)?)* $($(($vkn, $vka),)?)? $(("return", $ret),)?
         ];
-        let globals: &$crate::pyo3::Bound<'_, $crate::pyo3::types::PyDict> = $globals;
-        let py = $crate::pyo3::Bound::py(globals);
+        let module: &$crate::Module<'_> = $module;
+        let py = module.py();
         let defaults = ::std::vec![
             $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pod, py)?,)?)*
             $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pd, py)?,)?)*
@@ -355,7 +383,7 @@ macro_rules! function {
             $($(($kn, $crate::pyo3::IntoPyObjectExt::into_bound_py_any($kd, py)?),)?)*
         ];
         let closure = ::std::vec![$($crate::function!(@capture $ck $c),)*];
-        let body: $crate::Body = |py, globals, closure, args| {
+        let body: $crate::Body = |module, closure, args| {
             let [$($c),*] = closure else {
                 unreachable!("the closure has one cell per captured variable")
             };
@@ -365,9 +393,9 @@ macro_rules! function {
             };
             $(let $v = $crate::function::as_tuple($v);)?
             $(let $vk = $crate::function::as_dict($vk);)?
-            $crate::function!(@call [$($g)?] $f(py, globals; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
+            $crate::function!(@call $f(module; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
         };
-        $crate::Function::create(globals, $crate::FunctionDef {
+        $crate::Function::create(module, $crate::FunctionDef {
             name: $crate::function!(@opt name [$($key = $value),*]),
             qualname: $crate::function!(@opt qualname [$($key = $value),*]),
             rust_name: stringify!($f),
@@ -390,13 +418,10 @@ macro_rules! function {
     (@captured cell $c:ident, $cn:expr) => {
         let $c = $crate::Cell::free($c, $cn);
     };
-    // `py` and `globals` are passed in as tokens so that they keep the hygiene
-    // context of the closure parameters above.
-    (@call [] $f:ident($py:ident, $globals:ident; $($c:ident),*; $($p:ident,)*)) => {
-        $f($py, $(&$c,)* $($p),*)
-    };
-    (@call [$g:tt] $f:ident($py:ident, $globals:ident; $($c:ident),*; $($p:ident,)*)) => {
-        $f($py, $globals, $(&$c,)* $($p),*)
+    // `module` is passed in as a token so that it keeps the hygiene context
+    // of the closure parameter above.
+    (@call $f:ident($module:ident; $($c:ident),*; $($p:ident,)*)) => {
+        $f($module, $(&$c,)* $($p),*)
     };
     (@opt name [name = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
     (@opt qualname [qualname = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
@@ -406,23 +431,20 @@ macro_rules! function {
     };
     (@opt $want:ident []) => { ::std::option::Option::None };
     // --- entry points ---
-    ($globals:expr, $f:ident $([$($caps:tt)*])? (globals $(, $($params:tt)*)?) $(-> $ret:literal)? $(, $key:ident = $value:literal)* $(,)?) => {
-        $crate::function!(@caps ($globals, $f, [globals], [$($($params)*)?], [$($ret)?], [$($key = $value),*]) [] $($($caps)*)?)
-    };
-    ($globals:expr, $f:ident $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)? $(, $key:ident = $value:literal)* $(,)?) => {
-        $crate::function!(@caps ($globals, $f, [], [$($params)*], [$($ret)?], [$($key = $value),*]) [] $($($caps)*)?)
+    ($module:expr, $f:ident $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)? $(, $key:ident = $value:literal)* $(,)?) => {
+        $crate::function!(@caps ($module, $f, [$($params)*], [$($ret)?], [$($key = $value),*]) [] $($($caps)*)?)
     };
 }
 
 /// Executes a module level `def`: creates the function like [`function!`]
-/// and binds it to its name in `globals`.
+/// and binds it to its name in the module's globals.
 ///
 /// ```ignore
-/// rt::def!(globals, fib(n))?;
+/// rt::def!(module, fib(n))?;
 /// ```
 #[macro_export]
 macro_rules! def {
-    ($globals:expr, $($rest:tt)*) => {
-        $crate::function::bind_global($globals, $crate::function!($globals, $($rest)*)?)
+    ($module:expr, $($rest:tt)*) => {
+        $crate::function::bind_global($module, $crate::function!($module, $($rest)*)?)
     };
 }

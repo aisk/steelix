@@ -17,6 +17,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString, PyTuple};
 use pyo3::{IntoPyObjectExt, PyTraverseError, PyVisit, ffi};
 
+use crate::Module;
+
 /// The parameter list of a function, fixed when it is transpiled.
 ///
 /// `names` holds every parameter in source order: positional ones (the first
@@ -57,12 +59,11 @@ pub fn python_name(name: &'static str) -> &'static str {
 }
 
 /// Signature shared by all function bodies stored in a [`Function`]: the
-/// module globals, the closure cells and the bound arguments, one per
-/// parameter in [`Signature`] order. The `function!` macro generates a small
-/// adapter of this type around each plain Rust fn.
+/// module, the closure cells and the bound arguments, one per parameter in
+/// [`Signature`] order. The `function!` macro generates a small closure of
+/// this type that hands them to the plain Rust fn.
 pub type Body = for<'py> fn(
-    Python<'py>,
-    &Bound<'py, PyDict>,
+    &Module<'py>,
     &[Bound<'py, PyAny>],
     &[Bound<'py, PyAny>],
 ) -> PyResult<Bound<'py, PyAny>>;
@@ -114,11 +115,9 @@ pub struct Function {
 impl Function {
     /// Creates a function the way executing a `def` statement (or evaluating
     /// a `lambda`) does.
-    pub fn create<'py>(
-        globals: &Bound<'py, PyDict>,
-        def: FunctionDef<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = globals.py();
+    pub fn create<'py>(module: &Module<'py>, def: FunctionDef<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let py = module.py();
+        let globals = module.globals();
         let name = match (def.name, def.qualname) {
             (Some(name), _) => name,
             (None, Some(qualname)) => qualname.rsplit('.').next().unwrap_or(qualname),
@@ -188,7 +187,7 @@ impl Function {
 
     /// The value a call that omits `param` uses, read from `__defaults__` or
     /// `__kwdefaults__` like CPython does at call time.
-    fn default<'py>(&self, py: Python<'py>, param: &str) -> PyResult<Bound<'py, PyAny>> {
+    pub(crate) fn default<'py>(&self, py: Python<'py>, param: &str) -> PyResult<Bound<'py, PyAny>> {
         let sig = self.signature;
         let index = (0..sig.names.len())
             .find(|&i| sig.name(i) == param)
@@ -435,7 +434,8 @@ impl Function {
             Some(closure) => closure.bind(py).iter().collect(),
             None => Vec::new(),
         };
-        (this.body)(py, this.globals.bind(py), &closure, &bound)
+        let module = Module::from_globals(this.globals.bind(py).clone());
+        (this.body)(&module, &closure, &bound)
     }
 
     fn __get__<'py>(
@@ -808,26 +808,6 @@ fn suggestion(py: Python<'_>, candidates: &[&str], keyword: &str) -> Option<Stri
     found.extract().ok()
 }
 
-/// `rt::default(globals, "greet", "greeting")`: the value a direct call of the
-/// module function `greet` passes for the omitted parameter `greeting`.
-///
-/// Like a call through Python, it reads `__defaults__` / `__kwdefaults__` of
-/// the function object at call time, so assigning to them is honoured.
-pub fn default<'py>(
-    globals: &Bound<'py, PyDict>,
-    function: &str,
-    param: &str,
-) -> PyResult<Bound<'py, PyAny>> {
-    let py = globals.py();
-    let Some(object) = globals.get_item(function)? else {
-        return Err(PyNameError::new_err(format!(
-            "name '{function}' is not defined"
-        )));
-    };
-    let function = object.cast::<Function>()?;
-    function.get().default(py, param)
-}
-
 /// The value of a captured variable that is never reassigned after the
 /// capture: the nested function receives the value instead of the cell.
 #[doc(hidden)]
@@ -860,11 +840,11 @@ pub fn as_dict<'a, 'py>(value: &'a Bound<'py, PyAny>) -> &'a Bound<'py, PyDict> 
         .expect("`Function` passes `**kwargs` as a dict")
 }
 
-/// Binds a function created by `function!` to its name in `globals`.
+/// Binds a function created by `function!` to its name in the module.
 #[doc(hidden)]
-pub fn bind_global(globals: &Bound<'_, PyDict>, function: Bound<'_, PyAny>) -> PyResult<()> {
+pub fn bind_global(module: &Module<'_>, function: Bound<'_, PyAny>) -> PyResult<()> {
     let name = function.getattr("__name__")?;
-    globals.set_item(name, function)
+    module.globals().set_item(name, function)
 }
 
 const FORMAT_VALUE: i32 = 1;

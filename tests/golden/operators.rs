@@ -4,17 +4,19 @@ use pyo3::types::PyList;
 use steelix_runtime as rt;
 
 // operators.py:4
-pub fn unary<'py>(py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn unary<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(py, (x.neg()?, x.pos()?, x.bitnot()?, !x.is_truthy()?))?;
     Ok(rt::none(py))
 }
 
 // operators.py:8
 pub fn logic<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (
@@ -46,10 +48,11 @@ pub fn logic<'py>(
 
 // operators.py:18
 pub fn choose<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     flag: &Bound<'py, PyAny>,
     x: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let label = if x.gt(10)? {
         rt::str(py, "big")
     } else {
@@ -75,10 +78,11 @@ pub fn choose<'py>(
 
 // operators.py:24
 pub fn identity<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     x: &Bound<'py, PyAny>,
     y: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (x.is(y), !x.is(y), x.is_none(), !x.is_none(), x.is_none()),
@@ -91,10 +95,11 @@ pub fn identity<'py>(
 
 // operators.py:31
 pub fn membership<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     item: &Bound<'py, PyAny>,
     container: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     if container.contains(item)? && !rt::str(py, "xyz").contains(item)? {
         return Ok(rt::bool(py, true));
     }
@@ -103,10 +108,11 @@ pub fn membership<'py>(
 
 // operators.py:37
 pub fn values<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let lt = a.rich_compare(b, CompareOp::Lt)?;
     rt::builtins::print(
         py,
@@ -159,58 +165,57 @@ pub fn values<'py>(
 }
 
 /// Executes the body of `operators.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Unary operators, and/or, conditional expressions and comparisons.",
     )?;
-    rt::def!(globals, unary(x))?;
-    rt::def!(globals, logic(a, b))?;
-    rt::def!(globals, choose(flag, x))?;
-    rt::def!(globals, identity(x, y))?;
-    rt::def!(globals, membership(item, container))?;
-    rt::def!(globals, values(a, b))?;
-    unary(py, &rt::int(py, 5))?;
-    unary(py, &rt::int(py, -3))?;
-    logic(py, &rt::int(py, 0), &rt::int(py, 3))?;
-    logic(py, &rt::int(py, 2), &rt::int(py, 0))?;
-    logic(py, &rt::int(py, 0), &rt::int(py, 0))?;
-    logic(py, PyList::empty(py).as_any(), &rt::str(py, "s"))?;
+    rt::def!(m, unary(x))?;
+    rt::def!(m, logic(a, b))?;
+    rt::def!(m, choose(flag, x))?;
+    rt::def!(m, identity(x, y))?;
+    rt::def!(m, membership(item, container))?;
+    rt::def!(m, values(a, b))?;
+    unary(m, &rt::int(py, 5))?;
+    unary(m, &rt::int(py, -3))?;
+    logic(m, &rt::int(py, 0), &rt::int(py, 3))?;
+    logic(m, &rt::int(py, 2), &rt::int(py, 0))?;
+    logic(m, &rt::int(py, 0), &rt::int(py, 0))?;
+    logic(m, PyList::empty(py).as_any(), &rt::str(py, "s"))?;
     rt::builtins::print(
         py,
         (
-            choose(py, &rt::bool(py, true), &rt::int(py, 20))?,
-            choose(py, &rt::bool(py, false), &rt::int(py, 0))?,
+            choose(m, &rt::bool(py, true), &rt::int(py, 20))?,
+            choose(m, &rt::bool(py, false), &rt::int(py, 0))?,
         ),
     )?;
     rt::builtins::print(
         py,
         (
-            identity(py, &rt::none(py), &rt::none(py))?,
-            identity(py, &rt::int(py, 1), &rt::none(py))?,
+            identity(m, &rt::none(py), &rt::none(py))?,
+            identity(m, &rt::int(py, 1), &rt::none(py))?,
         ),
     )?;
     rt::builtins::print(
         py,
         (
-            membership(py, &rt::str(py, "a"), &rt::str(py, "abc"))?,
-            membership(py, &rt::str(py, "x"), &rt::str(py, "xyz"))?,
-            membership(py, &rt::int(py, 4), PyList::new(py, [1, 2])?.as_any())?,
+            membership(m, &rt::str(py, "a"), &rt::str(py, "abc"))?,
+            membership(m, &rt::str(py, "x"), &rt::str(py, "xyz"))?,
+            membership(m, &rt::int(py, 4), PyList::new(py, [1, 2])?.as_any())?,
         ),
     )?;
-    values(py, &rt::int(py, 3), &rt::int(py, 7))?;
-    values(py, &rt::int(py, 12), &rt::int(py, 3))?;
-    values(py, &rt::int(py, 3), &rt::int(py, 3))?;
-    globals.set_item("nothing", py.None())?;
-    let nothing = rt::global(globals, "nothing")?;
+    values(m, &rt::int(py, 3), &rt::int(py, 7))?;
+    values(m, &rt::int(py, 12), &rt::int(py, 3))?;
+    values(m, &rt::int(py, 3), &rt::int(py, 3))?;
+    m.set_global("nothing", py.None())?;
+    let nothing = m.global("nothing")?;
     let value = if nothing.is_truthy()? {
         nothing
     } else {
         rt::str(py, "default")
     };
-    let nothing2 = rt::global(globals, "nothing")?;
+    let nothing2 = m.global("nothing")?;
     rt::builtins::print(
         py,
         (
@@ -227,7 +232,7 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         py,
         (
             py.Ellipsis(),
-            rt::global(globals, "nothing")?.is(py.Ellipsis().into_bound(py)),
+            m.global("nothing")?.is(py.Ellipsis().into_bound(py)),
             PyList::new(py, [&py.Ellipsis().into_bound(py)])?,
         ),
     )?;

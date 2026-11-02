@@ -5,6 +5,7 @@ import pytest
 from steelix.rustast import nodes as rs
 from steelix.rustast.fmt import rustfmt
 from steelix.rustast.printer import byte_string_literal, print_expr, print_file, string_literal
+from steelix.rustast.rewrite import count_path, replace_path
 
 
 def p(text: str) -> rs.Path:
@@ -34,8 +35,8 @@ def p(text: str) -> rs.Path:
         (rs.Tuple((p("a"), p("b"))), "(a, b)"),
         (rs.Tuple(()), "()"),
         (
-            rs.MacroCall("rt::def", (p("globals"), rs.Tokens((p("fib"), "(n)")))),
-            "rt::def!(globals, fib(n))",
+            rs.MacroCall("rt::def", (p("m"), rs.Tokens((p("fib"), "(n)")))),
+            "rt::def!(m, fib(n))",
         ),
         # rustfmt does not lay out macros whose arguments are not expressions.
         (
@@ -140,3 +141,17 @@ def test_print_and_format_function() -> None:
 def test_rustfmt_reports_invalid_source() -> None:
     with pytest.raises(RuntimeError, match="rustfmt failed"):
         rustfmt("fn {")
+
+
+def test_path_rewrites_skip_nested_fns() -> None:
+    p = rs.Path
+    nested = rs.Fn("inner", (), "()", rs.Block((), p("py")))
+    block = rs.Block(
+        (rs.ItemStmt(nested), rs.ExprStmt(rs.Call(p("f"), (p("py"), p("x"))))),
+        rs.Tokens(("g(", p("py"), ")")),
+    )
+    assert count_path(block, "py") == 2
+    replaced = replace_path(block, "py", rs.MethodCall(p("m"), "py"))
+    assert count_path(replaced, "py") == 0
+    assert replaced.stmts[0] == rs.ItemStmt(nested)
+    assert replaced.tail == rs.Tokens(("g(", rs.MethodCall(p("m"), "py"), ")"))

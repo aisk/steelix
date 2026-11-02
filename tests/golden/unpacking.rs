@@ -6,10 +6,11 @@ use steelix_runtime as rt;
 
 // unpacking.py:4
 pub fn swap<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut a = a.clone();
     let mut b = b.clone();
     [a, b] = rt::unpack(PyTuple::new(py, [&b, &a])?.as_any())?;
@@ -17,7 +18,8 @@ pub fn swap<'py>(
 }
 
 // unpacking.py:9
-pub fn unpack<'py>(py: Python<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let x: Bound<'py, PyAny>;
     let y: Bound<'py, PyAny>;
     let z: Bound<'py, PyAny>;
@@ -39,7 +41,8 @@ pub fn unpack<'py>(py: Python<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bound<'
 }
 
 // unpacking.py:23
-pub fn targets<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut key: Option<Bound<'py, PyAny>> = None;
     let mut value: Bound<'py, PyAny>;
     let r#box = PyList::new(py, [0, 0, 0])?.into_any();
@@ -82,7 +85,8 @@ pub fn targets<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // unpacking.py:38
-pub fn empty_star<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn empty_star<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let ([a], b, []) = rt::unpack_star(PyList::new(py, [1])?.as_any())?;
     let ([], c, [d]) = rt::unpack_star(PyList::new(py, [2])?.as_any())?;
     rt::builtins::print(py, (&a, &b, &c, &d))?;
@@ -90,40 +94,31 @@ pub fn empty_star<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 /// Executes the body of `unpacking.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Unpacking assignment, also in for loops and with starred targets.",
     )?;
-    rt::def!(globals, swap(a, b))?;
-    rt::def!(globals, unpack(seq))?;
-    rt::def!(globals, targets())?;
-    rt::def!(globals, empty_star())?;
-    rt::builtins::print(py, (swap(py, &rt::int(py, 1), &rt::int(py, 2))?,))?;
-    rt::builtins::print(py, (unpack(py, PyTuple::new(py, [7, 8])?.as_any())?,))?;
-    targets(py)?;
-    empty_star(py)?;
-    let [m, n] = rt::unpack(PyTuple::new(py, [10, 20])?.as_any())?;
-    globals.set_item("m", m)?;
-    globals.set_item("n", n)?;
-    let [m2, n2] = rt::unpack(
-        PyTuple::new(py, [&rt::global(globals, "n")?, &rt::global(globals, "m")?])?.as_any(),
-    )?;
-    globals.set_item("m", m2)?;
-    globals.set_item("n", n2)?;
-    rt::builtins::print(py, (rt::global(globals, "m")?, rt::global(globals, "n")?))?;
+    rt::def!(m, swap(a, b))?;
+    rt::def!(m, unpack(seq))?;
+    rt::def!(m, targets())?;
+    rt::def!(m, empty_star())?;
+    rt::builtins::print(py, (swap(m, &rt::int(py, 1), &rt::int(py, 2))?,))?;
+    rt::builtins::print(py, (unpack(m, PyTuple::new(py, [7, 8])?.as_any())?,))?;
+    targets(m)?;
+    empty_star(m)?;
+    let [m2, n] = rt::unpack(PyTuple::new(py, [10, 20])?.as_any())?;
+    m.set_global("m", m2)?;
+    m.set_global("n", n)?;
+    let [m3, n2] = rt::unpack(PyTuple::new(py, [&m.global("n")?, &m.global("m")?])?.as_any())?;
+    m.set_global("m", m3)?;
+    m.set_global("n", n2)?;
+    rt::builtins::print(py, (m.global("m")?, m.global("n")?))?;
     let ([first], others, []) = rt::unpack_star(&rt::str(py, "xyz"))?;
-    globals.set_item("first", first)?;
-    globals.set_item("others", others)?;
-    rt::builtins::print(
-        py,
-        (
-            rt::global(globals, "first")?,
-            rt::global(globals, "others")?,
-        ),
-    )?;
+    m.set_global("first", first)?;
+    m.set_global("others", others)?;
+    rt::builtins::print(py, (m.global("first")?, m.global("others")?))?;
     for item in PyList::new(
         py,
         [
@@ -134,9 +129,9 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     .try_iter()?
     {
         let [k, v] = rt::unpack(&item?)?;
-        globals.set_item("k", k)?;
-        globals.set_item("v", v)?;
-        rt::builtins::print(py, (rt::global(globals, "k")?, rt::global(globals, "v")?))?;
+        m.set_global("k", k)?;
+        m.set_global("v", v)?;
+        rt::builtins::print(py, (m.global("k")?, m.global("v")?))?;
     }
     Ok(())
 }

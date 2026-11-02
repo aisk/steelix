@@ -3,7 +3,8 @@ use pyo3::pyclass::CompareOp;
 use steelix_runtime as rt;
 
 // constants.py:1
-pub fn describe<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn describe<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (
@@ -73,22 +74,14 @@ pub fn describe<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 /// Executes the body of `constants.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    rt::def!(globals, describe())?;
-    globals.set_item("x", rt::int(py, 1).add(2)?)?;
-    let value = rt::global(globals, "x")?.mul(2)?;
-    globals.set_item("y", &value)?;
-    globals.set_item("z", &value)?;
-    rt::builtins::print(
-        py,
-        (
-            rt::global(globals, "x")?,
-            rt::global(globals, "y")?,
-            rt::global(globals, "z")?,
-        ),
-    )?;
-    rt::builtins::print(py, (describe(py)?,))?;
+    rt::def!(m, describe())?;
+    m.set_global("x", rt::int(py, 1).add(2)?)?;
+    let value = m.global("x")?.mul(2)?;
+    m.set_global("y", &value)?;
+    m.set_global("z", &value)?;
+    rt::builtins::print(py, (m.global("x")?, m.global("y")?, m.global("z")?))?;
+    rt::builtins::print(py, (describe(m)?,))?;
     Ok(())
 }

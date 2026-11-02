@@ -123,6 +123,19 @@ def params_of(args: ast.arguments) -> tuple[str, ...]:
     return tuple(names)
 
 
+def default_of(args: ast.arguments, param: str) -> ast.expr:
+    """The default value expression of the parameter `param`."""
+    positional = args.posonlyargs + args.args
+    first_default = len(positional) - len(args.defaults)
+    for i, arg in enumerate(positional):
+        if arg.arg == param and i >= first_default:
+            return args.defaults[i - first_default]
+    for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
+        if arg.arg == param and default is not None:
+            return default
+    raise KeyError(param)
+
+
 def analyze_scopes(module: ast.Module, source: str, filename: str) -> ModuleScopes:
     table = symtable.symtable(source, filename, "exec")
     functions: dict[FunctionNode, FunctionScope] = {}

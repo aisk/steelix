@@ -53,7 +53,7 @@ _TYPED_CALLS = {
 # Methods returning typed values, by method name.
 _TYPED_METHODS = {
     "into_py_dict": "PyDict",
-    "dict": "PyDict",
+    "globals": "PyDict",
     "str": "PyString",
     "repr": "PyString",
     "get_type": "PyType",

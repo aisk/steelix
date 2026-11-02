@@ -346,10 +346,7 @@ class StmtLowering:
     def store_name(self, stmt: ast.stmt, name: str, value: Value) -> rs.Stmt:
         fn = self.ctx.function
         if fn is None or fn.scope.is_global(name):
-            setter = rs.MethodCall(
-                rs.Path(self.ctx.globals()), "set_item", (rs.StrLit(name), value.arg())
-            )
-            return _try_stmt(setter)
+            return _try_stmt(self.exprs.module_call("set_global", rs.StrLit(name), value.arg()))
         rust = fn.names[name]
         if fn.is_cell(name):
             if cell_declared_at(fn, name, stmt):
@@ -458,9 +455,7 @@ class StmtLowering:
             case ast.Name(id):
                 fn = self.ctx.function
                 if fn is None or fn.scope.is_global(id):
-                    return [
-                        _try_stmt(_rt("del_global", rs.Path(self.ctx.globals()), rs.StrLit(id)))
-                    ]
+                    return [_try_stmt(exprs.module_call("del_global", rs.StrLit(id)))]
                 rust = fn.names[id]
                 if fn.is_cell(id):
                     return [_try_stmt(rs.MethodCall(rs.Path(rust), "delete"))]
@@ -484,14 +479,14 @@ class StmtLowering:
     # --- imports ---
 
     def import_(self, stmt: ast.Import, alias: ast.alias) -> list[rs.Stmt]:
-        globals_ = rs.Path(self.ctx.globals())
+        context = rs.Path(self.ctx.context())
         name = rs.StrLit(alias.name)
         if alias.asname is not None and "." in alias.name:
             # `import a.b as c` binds the submodule itself.
-            module = _rt("import_module", globals_, name)
+            module = _rt("import_module", context, name)
         else:
             # `import a.b` binds the top-level package `a`.
-            module = _rt("import", globals_, name)
+            module = _rt("import", context, name)
         bound = alias.asname or alias.name.split(".")[0]
         return [self.store_name(stmt, bound, Value(rs.Try(module), Kind.OWNED))]
 
@@ -500,7 +495,7 @@ class StmtLowering:
     ) -> list[rs.Stmt]:
         temp = self.ctx.temp(module.rsplit(".", 1)[-1])
         fromlist = rs.Ref(rs.Array(tuple(rs.StrLit(a.name) for a in names)))
-        load = _rt("import_names", rs.Path(self.ctx.globals()), rs.StrLit(module), fromlist)
+        load = _rt("import_names", rs.Path(self.ctx.context()), rs.StrLit(module), fromlist)
         out: list[rs.Stmt] = [rs.Let(temp, init=rs.Try(load))]
         for alias in names:
             value = rs.Try(_rt("import_from", rs.Ref(rs.Path(temp)), rs.StrLit(alias.name)))

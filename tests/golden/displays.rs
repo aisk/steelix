@@ -8,10 +8,11 @@ use steelix_runtime as rt;
 
 // displays.py:6
 pub fn build<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let items = PyList::new(py, [a, b, &a.add(b)?])?.into_any();
     let pair = PyTuple::new(py, [a, b])?.into_any();
     let single = PyTuple::new(py, [a])?.into_any();
@@ -59,7 +60,11 @@ pub fn build<'py>(
 }
 
 // displays.py:18
-pub fn subscripts<'py>(py: Python<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn subscripts<'py>(
+    m: &rt::Module<'py>,
+    items: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (
@@ -90,11 +95,9 @@ pub fn subscripts<'py>(py: Python<'py>, items: &Bound<'py, PyAny>) -> PyResult<B
 }
 
 // displays.py:36
-pub fn attributes<'py>(
-    py: Python<'py>,
-    globals: &Bound<'py, PyDict>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let ns = rt::global(globals, "types")?.call_method0("SimpleNamespace")?;
+pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    let ns = m.global("types")?.call_method0("SimpleNamespace")?;
     ns.setattr("x", 1)?;
     ns.setattr("y", ns.getattr("x")?.add(1)?)?;
     ns.setattr("x", ns.getattr("y")?.mul(10)?)?;
@@ -114,7 +117,8 @@ pub fn attributes<'py>(
 }
 
 // displays.py:47
-pub fn deletes<'py>(py: Python<'py>, flag: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn deletes<'py>(m: &rt::Module<'py>, flag: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut value = Some(rt::int(py, 1));
     rt::builtins::print(py, (rt::local(&value, "value")?,))?;
     value = None;
@@ -128,11 +132,12 @@ pub fn deletes<'py>(py: Python<'py>, flag: &Bound<'py, PyAny>) -> PyResult<Bound
 
 // displays.py:58
 pub fn slicer<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     seq: &Bound<'py, PyAny>,
     start: &Bound<'py, PyAny>,
     stop: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     Ok(PyTuple::new(
         py,
         [
@@ -145,37 +150,36 @@ pub fn slicer<'py>(
 }
 
 /// Executes the body of `displays.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Lists, tuples, dicts and sets, subscripts, slices, attributes and del.",
     )?;
-    globals.set_item("types", rt::import(globals, "types")?)?;
-    rt::def!(globals, build(a, b))?;
-    rt::def!(globals, subscripts(items))?;
-    rt::def!(globals, attributes(globals))?;
-    rt::def!(globals, deletes(flag))?;
-    rt::def!(globals, slicer(seq, start, stop))?;
-    build(py, &rt::int(py, 1), &rt::int(py, 2))?;
-    subscripts(py, PyList::new(py, [1, 2, 3, 4, 5])?.as_any())?;
-    attributes(py, globals)?;
-    rt::builtins::print(py, (deletes(py, &rt::bool(py, true))?,))?;
+    m.set_global("types", rt::import(m, "types")?)?;
+    rt::def!(m, build(a, b))?;
+    rt::def!(m, subscripts(items))?;
+    rt::def!(m, attributes())?;
+    rt::def!(m, deletes(flag))?;
+    rt::def!(m, slicer(seq, start, stop))?;
+    build(m, &rt::int(py, 1), &rt::int(py, 2))?;
+    subscripts(m, PyList::new(py, [1, 2, 3, 4, 5])?.as_any())?;
+    attributes(m)?;
+    rt::builtins::print(py, (deletes(m, &rt::bool(py, true))?,))?;
     rt::builtins::print(
         py,
         (
-            slicer(py, &rt::str(py, "abcdef"), &rt::int(py, 1), &rt::int(py, 3))?,
+            slicer(m, &rt::str(py, "abcdef"), &rt::int(py, 1), &rt::int(py, 3))?,
             slicer(
-                py,
+                m,
                 PyList::new(py, [1, 2, 3])?.as_any(),
                 &rt::int(py, -2),
                 &rt::none(py),
             )?,
         ),
     )?;
-    globals.set_item("glob", 5)?;
-    rt::del_global(globals, "glob")?;
-    rt::builtins::print(py, (deletes(py, &rt::bool(py, false))?,))?;
+    m.set_global("glob", 5)?;
+    m.del_global("glob")?;
+    rt::builtins::print(py, (deletes(m, &rt::bool(py, false))?,))?;
     Ok(())
 }

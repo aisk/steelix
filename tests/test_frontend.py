@@ -380,7 +380,7 @@ def test_global_statement_names_are_not_locals() -> None:
 # --- call graph --------------------------------------------------------------
 
 
-def test_call_graph_cycles_and_globals() -> None:
+def test_call_graph_cycles() -> None:
     tree, source = parse(
         """
         SCALE = 2
@@ -407,7 +407,6 @@ def test_call_graph_cycles_and_globals() -> None:
     graph = build_call_graph(tree, b, analyze_scopes(tree, source, "m.py"))
     names = lambda fns: {f.name for f in fns}  # noqa: E731
     assert names(graph.recursive) == {"ping", "pong", "selfish"}
-    assert names(graph.needs_globals) == {"leaf", "middle", "importer", "writer"}
 
 
 # --- docstrings --------------------------------------------------------------

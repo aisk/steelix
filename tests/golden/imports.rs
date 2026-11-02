@@ -1,19 +1,18 @@
 use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::IntoPyDict;
-use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
 
 // imports.py:12
 pub fn local_import<'py>(
-    py: Python<'py>,
-    globals: &Bound<'py, PyDict>,
+    m: &rt::Module<'py>,
     text: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let textwrap = rt::import(globals, "textwrap")?;
-    let math = rt::import_names(globals, "math", &["pi", "sqrt"])?;
+    let py = m.py();
+    let textwrap = rt::import(m, "textwrap")?;
+    let math = rt::import_names(m, "math", &["pi", "sqrt"])?;
     let PI = rt::import_from(&math, "pi")?;
     let sqrt = rt::import_from(&math, "sqrt")?;
     Ok(PyTuple::new(
@@ -28,99 +27,92 @@ pub fn local_import<'py>(
 }
 
 /// Executes the body of `imports.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Imports of standard library and third-party modules, and script metadata.",
     )?;
-    globals.set_item("os", rt::import(globals, "os")?)?;
-    globals.set_item("os", rt::import(globals, "os.path")?)?;
-    globals.set_item("cabc", rt::import_module(globals, "collections.abc")?)?;
-    globals.set_item("sys", rt::import(globals, "sys")?)?;
-    let json = rt::import_names(globals, "json", &["dumps", "loads"])?;
-    globals.set_item("dumps", rt::import_from(&json, "dumps")?)?;
-    globals.set_item("parse", rt::import_from(&json, "loads")?)?;
-    let version = rt::import_names(globals, "packaging.version", &["Version"])?;
-    globals.set_item("Version", rt::import_from(&version, "Version")?)?;
-    globals.set_item("packaging", rt::import(globals, "packaging.version")?)?;
-    rt::def!(globals, local_import(globals, text))?;
+    m.set_global("os", rt::import(m, "os")?)?;
+    m.set_global("os", rt::import(m, "os.path")?)?;
+    m.set_global("cabc", rt::import_module(m, "collections.abc")?)?;
+    m.set_global("sys", rt::import(m, "sys")?)?;
+    let json = rt::import_names(m, "json", &["dumps", "loads"])?;
+    m.set_global("dumps", rt::import_from(&json, "dumps")?)?;
+    m.set_global("parse", rt::import_from(&json, "loads")?)?;
+    let version = rt::import_names(m, "packaging.version", &["Version"])?;
+    m.set_global("Version", rt::import_from(&version, "Version")?)?;
+    m.set_global("packaging", rt::import(m, "packaging.version")?)?;
+    rt::def!(m, local_import(text))?;
     rt::builtins::print(
         py,
         (
-            rt::global(globals, "os")?
+            m.global("os")?
                 .getattr("path")?
                 .call_method1("basename", ("/a/b.txt",))?,
-            rt::global(globals, "os")?.getattr("sep")?,
+            m.global("os")?.getattr("sep")?,
         ),
     )?;
     rt::builtins::print(
         py,
         (
-            PyList::empty(py).is_instance(&rt::global(globals, "cabc")?.getattr("Sequence")?)?,
-            rt::global(globals, "dumps")?
+            PyList::empty(py).is_instance(&m.global("cabc")?.getattr("Sequence")?)?,
+            m.global("dumps")?
                 .call1(([("a", PyList::new(py, [1, 2])?.as_any())].into_py_dict(py)?,))?,
-            rt::global(globals, "parse")?.call1(("[3]",))?,
+            m.global("parse")?.call1(("[3]",))?,
         ),
     )?;
     rt::builtins::print(
         py,
         (
-            rt::global(globals, "Version")?
+            m.global("Version")?
                 .call1(("1.10",))?
-                .rich_compare(
-                    rt::global(globals, "Version")?.call1(("1.9",))?,
-                    CompareOp::Gt,
-                )?,
-            rt::global(globals, "packaging")?
+                .rich_compare(m.global("Version")?.call1(("1.9",))?, CompareOp::Gt)?,
+            m.global("packaging")?
                 .getattr("version")?
                 .call_method1("Version", ("2.0",))?,
         ),
     )?;
     rt::builtins::print(
         py,
-        (local_import(
-            py,
-            globals,
-            &rt::str(py, "hello transpiled world"),
-        )?,),
+        (local_import(m, &rt::str(py, "hello transpiled world"))?,),
     )?;
     rt::builtins::print(
         py,
         (
-            rt::global(globals, "sys")?
+            m.global("sys")?
                 .getattr("argv")?
                 .get_item(0)?
-                .rich_compare(rt::global(globals, "__file__")?, CompareOp::Eq)?,
-            rt::global(globals, "os")?
+                .rich_compare(m.global("__file__")?, CompareOp::Eq)?,
+            m.global("os")?
                 .getattr("path")?
                 .getattr("basename")?
-                .call1((rt::global(globals, "__file__")?,))?,
-            rt::global(globals, "__name__")?,
+                .call1((m.global("__file__")?,))?,
+            m.global("__name__")?,
         ),
     )?;
     rt::builtins::print(
         py,
-        (rt::global(globals, "sys")?
+        (m.global("sys")?
             .getattr("path")?
             .get_item(0)?
             .rich_compare(
-                rt::global(globals, "os")?
+                m.global("os")?
                     .getattr("path")?
                     .getattr("dirname")?
-                    .call1((rt::global(globals, "os")?
+                    .call1((m
+                        .global("os")?
                         .getattr("path")?
                         .getattr("realpath")?
-                        .call1((rt::global(globals, "__file__")?,))?,))?,
+                        .call1((m.global("__file__")?,))?,))?,
                 CompareOp::Eq,
             )?,),
     )?;
     rt::builtins::print(
         py,
         (
-            rt::global(globals, "sys")?.getattr("argv")?.len()?,
-            rt::global(globals, "__cached__")?,
+            m.global("sys")?.getattr("argv")?.len()?,
+            m.global("__cached__")?,
         ),
     )?;
     Ok(())

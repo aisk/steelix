@@ -7,92 +7,83 @@ use steelix_runtime as rt;
 
 // call_order.py:4
 pub fn show<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     label: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::builtins::print(py, ("eval", label))?;
+    rt::builtins::print(m.py(), ("eval", label))?;
     Ok(value.clone())
 }
 
 // call_order.py:9
 pub fn target<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     args: &Bound<'py, PyTuple>,
     kwargs: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    Ok(PyList::new(py, [args.as_any(), kwargs.as_any()])?.into_any())
+    Ok(PyList::new(m.py(), [args.as_any(), kwargs.as_any()])?.into_any())
 }
 
 // call_order.py:13
 pub fn fixed<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
     c: &Bound<'py, PyAny>,
     d: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    Ok(PyList::new(py, [a, b, c, d])?.into_any())
+    Ok(PyList::new(m.py(), [a, b, c, d])?.into_any())
 }
 
 /// Executes the body of `call_order.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Evaluation order of call arguments with keywords, `*` and `**`.",
     )?;
-    rt::def!(globals, show(label, value = py.None()))?;
-    rt::def!(globals, target(*args, **kwargs))?;
-    rt::def!(globals, fixed(a, b, c = 3, *, d = 4))?;
+    rt::def!(m, show(label, value = py.None()))?;
+    rt::def!(m, target(*args, **kwargs))?;
+    rt::def!(m, fixed(a, b, c = 3, *, d = 4))?;
     rt::builtins::print(
         py,
         (rt::call!(
-            rt::global(globals, "target")?,
-            show(py, &rt::str(py, "a"), &rt::int(py, 1))?,
-            *show(py, &rt::str(py, "star"), PyList::new(py, [2, 3])?.as_any())?,
-            show(py, &rt::str(py, "b"), &rt::int(py, 4))?,
-            k = show(py, &rt::str(py, "k"), &rt::int(py, 5))?,
-            **show(
-                py,
-                &rt::str(py, "kw"),
-                [("z", 6)].into_py_dict(py)?.as_any()
-            )?
+            m.global("target")?,
+            show(m, &rt::str(py, "a"), &rt::int(py, 1))?,
+            *show(m, &rt::str(py, "star"), PyList::new(py, [2, 3])?.as_any())?,
+            show(m, &rt::str(py, "b"), &rt::int(py, 4))?,
+            k = show(m, &rt::str(py, "k"), &rt::int(py, 5))?,
+            **show(m, &rt::str(py, "kw"), [("z", 6)].into_py_dict(py)?.as_any())?
         )?,),
     )?;
     rt::builtins::print(
         py,
         (rt::call!(
-            rt::global(globals, "target")?,
-            show(py, &rt::str(py, "x"), &rt::int(py, 1))?,
-            *show(
-                py,
-                &rt::str(py, "late star"),
-                PyList::new(py, [3])?.as_any()
-            )?,
-            y = show(py, &rt::str(py, "y"), &rt::int(py, 2))?
+            m.global("target")?,
+            show(m, &rt::str(py, "x"), &rt::int(py, 1))?,
+            *show(m, &rt::str(py, "late star"), PyList::new(py, [3])?.as_any())?,
+            y = show(m, &rt::str(py, "y"), &rt::int(py, 2))?
         )?,),
     )?;
-    let a = show(py, &rt::str(py, "1"), &rt::int(py, 1))?;
-    let c = show(py, &rt::str(py, "c"), &rt::int(py, 30))?;
+    let a = show(m, &rt::str(py, "1"), &rt::int(py, 1))?;
+    let c = show(m, &rt::str(py, "c"), &rt::int(py, 30))?;
     rt::builtins::print(
         py,
         (fixed(
-            py,
+            m,
             &a,
-            &show(py, &rt::str(py, "b"), &rt::int(py, 20))?,
+            &show(m, &rt::str(py, "b"), &rt::int(py, 20))?,
             &c,
-            &rt::default(globals, "fixed", "d")?,
+            &rt::int(py, 4),
         )?,),
     )?;
     rt::builtins::print(
         py,
         (rt::call!(
-            rt::global(globals, "fixed")?,
-            *show(py, &rt::str(py, "args"), PyList::new(py, [1, 2])?.as_any())?,
+            m.global("fixed")?,
+            *show(m, &rt::str(py, "args"), PyList::new(py, [1, 2])?.as_any())?,
             **show(
-                py,
+                m,
                 &rt::str(py, "kwargs"),
                 [("d", 40)].into_py_dict(py)?.as_any()
             )?
@@ -101,9 +92,9 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            show(py, &rt::str(py, "callee"), &rt::global(globals, "fixed")?)?.call1((
-                show(py, &rt::str(py, "arg"), &rt::int(py, 1))?,
-                show(py, &rt::str(py, "arg"), &rt::int(py, 2))?,
+            show(m, &rt::str(py, "callee"), &m.global("fixed")?)?.call1((
+                show(m, &rt::str(py, "arg"), &rt::int(py, 1))?,
+                show(m, &rt::str(py, "arg"), &rt::int(py, 2))?,
             ))?,
         ),
     )?;
@@ -111,12 +102,12 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         py,
         (
             rt::call!(
-                rt::global(globals, "target")?,
+                m.global("target")?,
                 **[("a", 1)].into_py_dict(py)?,
                 **[("b", 2)].into_py_dict(py)?
             )?,
             rt::call!(
-                rt::global(globals, "target")?,
+                m.global("target")?,
                 *rt::str(py, "ab"),
                 *PyTuple::new(py, [1, 2])?
             )?,

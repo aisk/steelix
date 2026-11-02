@@ -4,7 +4,8 @@ use pyo3::types::PyTuple;
 use steelix_runtime as rt;
 
 // builtins_special.py:4
-pub fn info<'py>(py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (
@@ -52,17 +53,16 @@ pub fn info<'py>(py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, 
 }
 
 /// Executes the body of `builtins_special.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Builtins with a direct PyO3 spelling, and the dynamic fallback.",
     )?;
-    rt::def!(globals, info(x))?;
-    info(py, PyList::new(py, [3, 1, 2])?.as_any())?;
-    info(py, &rt::str(py, "hello"))?;
-    info(py, &rt::str(py, "ab"))?;
+    rt::def!(m, info(x))?;
+    info(m, PyList::new(py, [3, 1, 2])?.as_any())?;
+    info(m, &rt::str(py, "hello"))?;
+    info(m, &rt::str(py, "ab"))?;
     rt::builtins::print(
         py,
         (

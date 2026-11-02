@@ -28,8 +28,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 
+from steelix.frontend.bindings import is_immutable_constant
 from steelix.frontend.resolve import Direct, Lookup, resolve_call, resolve_global
-from steelix.frontend.scope import FunctionNode, params_of
+from steelix.frontend.scope import FunctionNode, default_of, params_of
 from steelix.lower.context import Context
 from steelix.lower.names import rust_ident
 from steelix.rustast import nodes as rs
@@ -260,8 +261,12 @@ class ExprLowering:
     def py(self) -> rs.Path:
         return rs.Path(self.ctx.py())
 
-    def globals(self) -> rs.Path:
-        return rs.Path(self.ctx.globals())
+    def module(self) -> rs.Path:
+        return rs.Path(self.ctx.context())
+
+    def module_call(self, method: str, *args: rs.Expr) -> rs.MethodCall:
+        """`m.method(args)` on the `rt::Module` context."""
+        return rs.MethodCall(self.module(), method, args)
 
     def use(self, path: str) -> None:
         self.ctx.module.uses.add(path)
@@ -506,7 +511,7 @@ class ExprLowering:
         resolution = resolve_global(self.ctx.module.bindings, name)
         if resolution is Lookup.BUILTIN:
             return Value(_try(_rt("builtin", self.py(), rs.StrLit(name))), Kind.OWNED)
-        return Value(_try(_rt("global", self.globals(), rs.StrLit(name))), Kind.OWNED)
+        return Value(_try(self.module_call("global", rs.StrLit(name))), Kind.OWNED)
 
     # --- operators ---
 
@@ -833,7 +838,8 @@ class ExprLowering:
         args = node.args
         if not bindings.is_module_bound(name) and not args and not node.keywords:
             if name == "globals":
-                owned = rs.MethodCall(rs.MethodCall(self.globals(), "clone"), "into_any")
+                namespace = self.module_call("globals")
+                owned = rs.MethodCall(rs.MethodCall(namespace, "clone"), "into_any")
                 return Value(owned, Kind.OWNED)
             if name in ("locals", "vars"):
                 # They read the calling frame, which transpiled code does not have.
@@ -882,7 +888,9 @@ class ExprLowering:
         """A call of a module level function bound at transpile time.
 
         Omitted parameters read their default from the function object
-        (`rt::default`), after all arguments are evaluated, like CPython.
+        (`m.default(..)`), after all arguments are evaluated, like CPython.
+        Immutable literal defaults are written in place instead, unless the
+        module assigns `__defaults__` or `__kwdefaults__` (design §6).
         """
         module = self.ctx.module
         fn = target.fn
@@ -899,8 +907,14 @@ class ExprLowering:
                 case "keyword" | "varkw":
                     indices = [n_args + j for j in slot.indices]
                 case _:
-                    read = _rt("default", self.globals(), rs.StrLit(fn.name), rs.StrLit(param))
-                    values.append(Value(_try(read), Kind.OWNED))
+                    default = default_of(fn.args, param)
+                    if not module.bindings.writes_defaults and is_immutable_constant(default):
+                        # `greet("Bob")` passes the literal default `"Hello"`.
+                        assert isinstance(default, ast.Constant)
+                        values.append(self.constant(default.value, default))
+                    else:
+                        read = self.module_call("default", rs.StrLit(fn.name), rs.StrLit(param))
+                        values.append(Value(_try(read), Kind.OWNED))
                     roles.append(param)
                     indices = [len(values) - 1]
             for i in indices:
@@ -909,9 +923,7 @@ class ExprLowering:
             per_slot.append(indices)
         values = self.in_rust_order(values, order, roles)
 
-        call_args: list[rs.Expr] = [self.py()]
-        if fn in module.callgraph.needs_globals:
-            call_args.append(self.globals())
+        call_args: list[rs.Expr] = [self.module()]
         for slot, indices in zip(target.slots, per_slot, strict=True):
             used = [values[i] for i in indices]
             match slot.kind:
@@ -957,8 +969,8 @@ class ExprLowering:
         applied one statement at a time, which keeps that order and reads
         like the Python code:
 
-            let decorator = rt::global(globals, "functools")?.call_method1(..)?;
-            let function = rt::function!(globals, wrapper(*args, **kwargs))?;
+            let decorator = m.global("functools")?.call_method1(..)?;
+            let function = rt::function!(m, wrapper(*args, **kwargs))?;
             let wrapper = decorator.call1((function,))?;
         """
         from steelix.lower.function import function_options, signature_text
@@ -973,7 +985,7 @@ class ExprLowering:
         default_exprs = [v.arg() for v in self.operands(list(defaults))]
         signature = signature_text(self.ctx, scope, rust, default_exprs)
         options = function_options(self.ctx, scope, rust)
-        macro_args = (self.globals(), signature, *(rs.Tokens((o,)) for o in options))
+        macro_args = (self.module(), signature, *(rs.Tokens((o,)) for o in options))
         macro = rs.MacroCall("rt::def" if bind else "rt::function", macro_args)
         value = Value(_try(macro), Kind.OWNED)
         if not decorator_values:

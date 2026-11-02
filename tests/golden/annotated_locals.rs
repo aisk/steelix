@@ -3,7 +3,11 @@ use pyo3::types::PyList;
 use steelix_runtime as rt;
 
 // annotated_locals.py:4
-pub fn describe<'py>(py: Python<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn describe<'py>(
+    m: &rt::Module<'py>,
+    items: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut label: Option<Bound<'py, PyAny>> = None;
     let count = rt::int(py, items.len()?);
     let mut total = rt::int(py, 0);
@@ -21,15 +25,14 @@ pub fn describe<'py>(py: Python<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bou
 }
 
 /// Executes the body of `annotated_locals.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "Annotated assignments in functions: the annotations are never evaluated.",
     )?;
-    rt::def!(globals, describe(items: "list") -> "str")?;
-    rt::builtins::print(py, (describe(py, PyList::new(py, [1, 2, 3])?.as_any())?,))?;
-    rt::builtins::print(py, (describe(py, PyList::empty(py).as_any())?,))?;
+    rt::def!(m, describe(items: "list") -> "str")?;
+    rt::builtins::print(py, (describe(m, PyList::new(py, [1, 2, 3])?.as_any())?,))?;
+    rt::builtins::print(py, (describe(m, PyList::empty(py).as_any())?,))?;
     Ok(())
 }

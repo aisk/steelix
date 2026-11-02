@@ -7,7 +7,7 @@ The mapping is deterministic so that regenerating code gives the same names:
 * `self`, `Self`, `crate` and `super` can not be raw identifiers; `self`
   becomes `slf` like in PyO3 code, the others get a `_` suffix.
 * Python names that collide with names the generated code uses itself (`py`,
-  `globals`, ...) get a `_` suffix, repeated until the name is free.
+  `module`, ...) get a `_` suffix, repeated until the name is free.
 """
 
 from __future__ import annotations
@@ -25,12 +25,20 @@ RUST_KEYWORDS = frozenset(
 
 _NOT_RAW = {"self": "slf", "Self": "Self_", "crate": "crate_", "super": "super_", "_": "underscore"}
 
+# The `&rt::Module<'py>` parameter every generated fn takes first is `m`,
+# like the module parameter of a `#[pymodule]` function. A function with a
+# Python local named `m` (a regex match, typically) keeps that name for the
+# local and calls the parameter `module` instead.
+CONTEXT = "m"
+CONTEXT_FALLBACK = "module"
 # Names the generated code binds or relies on inside function bodies.
-FUNCTION_RESERVED = frozenset({"py", "globals", "_guard", "Ok", "Err", "Some", "None"})
+FUNCTION_RESERVED = frozenset({"py", "_guard", "Ok", "Err", "Some", "None"})
 # Item names the generated module defines or relies on next to the functions.
-# `m`, `py` and `globals` are locals of `exec_module`, which would shadow
-# functions of the same name there.
-MODULE_RESERVED = frozenset({"exec_module", "m", "py", "globals", "Ok", "Err", "Some", "None"})
+# The context parameter and `py` are locals of generated fns, which would
+# shadow functions of the same name.
+MODULE_RESERVED = frozenset(
+    {"exec_module", CONTEXT, CONTEXT_FALLBACK, "py", "Ok", "Err", "Some", "None"}
+)
 
 
 def rust_ident(name: str) -> str:
@@ -68,3 +76,14 @@ class Renamer:
 
     def __contains__(self, name: str) -> bool:
         return name in self.mapping
+
+
+def context_name(taken: Iterable[str]) -> str:
+    """The name of the context parameter of a fn whose other locals are `taken`."""
+    taken = set(taken)
+    if CONTEXT not in taken:
+        return CONTEXT
+    name = CONTEXT_FALLBACK
+    while name in taken:
+        name += "_"
+    return name

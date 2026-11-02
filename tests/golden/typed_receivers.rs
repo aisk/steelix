@@ -9,10 +9,11 @@ use steelix_runtime as rt;
 
 // typed_receivers.py:8
 pub fn sizes<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     args: &Bound<'py, PyTuple>,
     kwargs: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (
@@ -34,7 +35,8 @@ pub fn sizes<'py>(
 }
 
 // typed_receivers.py:13
-pub fn containers<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn containers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(
         py,
         (
@@ -98,7 +100,8 @@ pub fn containers<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // typed_receivers.py:28
-pub fn lookup<'py>(py: Python<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn lookup<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     rt::builtins::print(py, ([("a", 1)].into_py_dict(py)?.as_any().get_item("a")?,))?;
     rt::builtins::print(py, ([("a", 1)].into_py_dict(py)?.as_any().get_item(key)?,))?;
     rt::builtins::print(py, ("unreachable in CPython",))?;
@@ -106,19 +109,18 @@ pub fn lookup<'py>(py: Python<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'
 }
 
 /// Executes the body of `typed_receivers.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item("__doc__", "Methods on displays and `*args`/`**kwargs` behave like on any object.\n\nThe concrete PyO3 types have their own `get_item`, `len`, .. with other\nsemantics; a missing dict key must raise `KeyError`, not give `None`.\n")?;
-    rt::def!(globals, sizes(*args, **kwargs))?;
-    rt::def!(globals, containers())?;
-    rt::def!(globals, lookup(key))?;
+    m.set_global("__doc__", "Methods on displays and `*args`/`**kwargs` behave like on any object.\n\nThe concrete PyO3 types have their own `get_item`, `len`, .. with other\nsemantics; a missing dict key must raise `KeyError`, not give `None`.\n")?;
+    rt::def!(m, sizes(*args, **kwargs))?;
+    rt::def!(m, containers())?;
+    rt::def!(m, lookup(key))?;
     sizes(
-        py,
+        m,
         &PyTuple::new(py, [1, 2, 3])?,
         &[("k", "v")].into_py_dict(py)?,
     )?;
-    containers(py)?;
-    lookup(py, &rt::str(py, "b"))?;
+    containers(m)?;
+    lookup(m, &rt::str(py, "b"))?;
     Ok(())
 }

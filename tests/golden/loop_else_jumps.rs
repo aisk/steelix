@@ -3,7 +3,11 @@ use pyo3::types::PyList;
 use steelix_runtime as rt;
 
 // loop_else_jumps.py:4
-pub fn skip_rows<'py>(py: Python<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn skip_rows<'py>(
+    m: &rt::Module<'py>,
+    rows: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     'outer: for row in rows.try_iter()? {
         let row = row?;
         'for_else: {
@@ -22,9 +26,10 @@ pub fn skip_rows<'py>(py: Python<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bou
 
 // loop_else_jumps.py:14
 pub fn first_complete<'py>(
-    py: Python<'py>,
+    m: &rt::Module<'py>,
     rows: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     'for_else: {
         for row in rows.try_iter()? {
             let row = row?;
@@ -45,7 +50,8 @@ pub fn first_complete<'py>(
 }
 
 // loop_else_jumps.py:26
-pub fn countdown<'py>(py: Python<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     let mut n = n.clone();
     let mut i: Bound<'py, PyAny>;
     'outer: while n.gt(0)? {
@@ -67,7 +73,8 @@ pub fn countdown<'py>(py: Python<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<
 }
 
 // loop_else_jumps.py:40
-pub fn nested<'py>(py: Python<'py>, groups: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn nested<'py>(m: &rt::Module<'py>, groups: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     'outer2: for group in groups.try_iter()? {
         let group = group?;
         'for_else: {
@@ -94,19 +101,18 @@ pub fn nested<'py>(py: Python<'py>, groups: &Bound<'py, PyAny>) -> PyResult<Boun
 }
 
 /// Executes the body of `loop_else_jumps.py` in the module `m`.
-pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    let globals = &m.dict();
-    globals.set_item(
+    m.set_global(
         "__doc__",
         "`break`/`continue` in a loop's `else` belong to the enclosing loop.",
     )?;
-    rt::def!(globals, skip_rows(rows))?;
-    rt::def!(globals, first_complete(rows))?;
-    rt::def!(globals, countdown(n))?;
-    rt::def!(globals, nested(groups))?;
+    rt::def!(m, skip_rows(rows))?;
+    rt::def!(m, first_complete(rows))?;
+    rt::def!(m, countdown(n))?;
+    rt::def!(m, nested(groups))?;
     skip_rows(
-        py,
+        m,
         PyList::new(
             py,
             [
@@ -118,7 +124,7 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         .as_any(),
     )?;
     first_complete(
-        py,
+        m,
         PyList::new(
             py,
             [
@@ -130,12 +136,12 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         .as_any(),
     )?;
     first_complete(
-        py,
+        m,
         PyList::new(py, [PyList::new(py, [&rt::none(py)])?.as_any()])?.as_any(),
     )?;
-    countdown(py, &rt::int(py, 5))?;
+    countdown(m, &rt::int(py, 5))?;
     nested(
-        py,
+        m,
         PyList::new(
             py,
             [

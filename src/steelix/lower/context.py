@@ -9,7 +9,7 @@ from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.bindings import LocalsInfo, ModuleBindings
 from steelix.frontend.callgraph import CallGraph
 from steelix.frontend.scope import FunctionNode, FunctionScope, ModuleScopes
-from steelix.lower.names import FUNCTION_RESERVED, RUST_KEYWORDS, Renamer
+from steelix.lower.names import CONTEXT, FUNCTION_RESERVED, RUST_KEYWORDS, Renamer
 from steelix.rustast import nodes as rs
 
 
@@ -75,10 +75,10 @@ class Context:
     """Reachability (and, in functions, the declarations of locals)."""
     function: FunctionInfo | None = None
     """`None` while lowering module level code."""
+    context_name: str = CONTEXT
+    """The `&rt::Module<'py>` parameter, `m` unless a Python local is `m`."""
     statement_index: int | None = None
     """Index of the current top-level statement, for module level code."""
-    uses_py: bool = False
-    uses_globals: bool = False
     items: list[rs.Fn] = field(default_factory=list)
     """Nested functions waiting to be declared before the current statement."""
     item_names: set[str] = field(default_factory=set)
@@ -90,17 +90,18 @@ class Context:
         return self.function is None
 
     def py(self) -> str:
-        self.uses_py = True
+        """The `Python<'py>` token, bound by `bind_py` where the body uses it."""
         return "py"
 
-    def globals(self) -> str:
-        self.uses_globals = True
-        return "globals"
+    def context(self) -> str:
+        """The name of the `&rt::Module<'py>` parameter every generated fn has."""
+        return self.context_name
 
     def temp(self, base: str) -> str:
         """A fresh Rust name for a temporary that can not clash with locals,
         functions or names the generated code relies on."""
         taken = set(self.module.fn_names.mapping.values()) | FUNCTION_RESERVED | self.item_names
+        taken.add(self.context_name)
         if self.function is not None:
             taken.update(self.function.names.mapping.values())
         if not base.isidentifier() or not base.isascii():
@@ -120,6 +121,7 @@ class Context:
         locals or temporaries of the enclosing function (`allowed` is a local
         declared by the very statement that defines the item)."""
         taken = set(self.module.fn_names.mapping.values()) | FUNCTION_RESERVED | self._temps
+        taken.add(self.context_name)
         taken |= self.item_names
         if self.function is not None:
             taken.update(v for v in self.function.names.mapping.values() if v != allowed)

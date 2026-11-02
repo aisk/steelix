@@ -7,25 +7,27 @@
 
 use pyo3::exceptions::{PyImportError, PyKeyError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::types::{PyString, PyTuple};
+
+use crate::Module;
 
 /// `import a.b.c`: imports the module and returns the top-level package `a`,
 /// which is the name the statement binds.
 ///
 /// ```ignore
-/// globals.set_item("os", rt::import(globals, "os.path")?)?;
+/// module.set_global("os", rt::import(module, "os.path")?)?;
 /// ```
-pub fn import<'py>(globals: &Bound<'py, PyDict>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-    import_name(globals, name, None)
+pub fn import<'py>(module: &Module<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+    import_name(module, name, None)
 }
 
 /// `import a.b.c as d`: imports the module and returns `a.b.c` itself.
-pub fn import_module<'py>(globals: &Bound<'py, PyDict>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-    let mut module = import_name(globals, name, None)?;
+pub fn import_module<'py>(module: &Module<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+    let mut imported = import_name(module, name, None)?;
     for part in name.split('.').skip(1) {
-        module = import_from(&module, part)?;
+        imported = import_from(&imported, part)?;
     }
-    Ok(module)
+    Ok(imported)
 }
 
 /// The first half of `from module import a, b`: imports `module` (and any
@@ -33,27 +35,27 @@ pub fn import_module<'py>(globals: &Bound<'py, PyDict>, name: &str) -> PyResult<
 /// [`import_from`].
 ///
 /// ```ignore
-/// let path = rt::import_names(globals, "os.path", &["join", "sep"])?;
-/// globals.set_item("join", rt::import_from(&path, "join")?)?;
+/// let path = rt::import_names(module, "os.path", &["join", "sep"])?;
+/// module.set_global("join", rt::import_from(&path, "join")?)?;
 /// ```
 pub fn import_names<'py>(
-    globals: &Bound<'py, PyDict>,
-    module: &str,
+    module: &Module<'py>,
+    name: &str,
     names: &[&str],
 ) -> PyResult<Bound<'py, PyAny>> {
-    let fromlist = PyTuple::new(globals.py(), names)?;
-    import_name(globals, module, Some(fromlist))
+    let fromlist = PyTuple::new(module.py(), names)?;
+    import_name(module, name, Some(fromlist))
 }
 
 fn import_name<'py>(
-    globals: &Bound<'py, PyDict>,
+    module: &Module<'py>,
     name: &str,
     fromlist: Option<Bound<'py, PyTuple>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = globals.py();
+    let py = module.py();
     let import = crate::builtin(py, "__import__")
         .map_err(|_| PyImportError::new_err("__import__ not found"))?;
-    import.call1((name, globals, py.None(), fromlist, 0))
+    import.call1((name, module.globals(), py.None(), fromlist, 0))
 }
 
 /// `IMPORT_FROM`: reads `name` from an imported module, falling back to

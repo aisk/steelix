@@ -2,9 +2,10 @@
 
 Module level functions become `pub fn` items of the module. Nested functions
 and lambdas become `fn` items declared inside the body of the enclosing Rust
-fn, right where the Python code defines them (design §6). Variables captured
-from enclosing functions are extra parameters after `py` / `globals`: a
-`&rt::Cell` when the variable may still be rebound, else its value.
+fn, right where the Python code defines them (design §6). Every fn takes the
+module context `m: &rt::Module<'py>` first. Variables captured from
+enclosing functions are extra parameters after it: a `&rt::Cell` when the
+variable may still be rebound, else its value.
 """
 
 from __future__ import annotations
@@ -15,12 +16,29 @@ from steelix.frontend.bindings import analyze_locals
 from steelix.frontend.scope import FunctionNode, FunctionScope, annotations_of
 from steelix.lower.context import Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
-from steelix.lower.names import FUNCTION_RESERVED, Renamer, rust_ident
+from steelix.lower.names import FUNCTION_RESERVED, Renamer, context_name, rust_ident
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
+from steelix.rustast.rewrite import count_path, replace_path
 
 BOUND = "Bound<'py, PyAny>"
 RESULT = f"PyResult<{BOUND}>"
+MODULE = "&rt::Module<'py>"
+
+
+def bind_py(body: rs.Block, context: str) -> rs.Block:
+    """Provide the `py` token that the lowered `body` refers to.
+
+    A body that uses it more than once starts with `let py = m.py();`, a
+    single use is spelled `m.py()` in place.
+    """
+    py = rs.MethodCall(rs.Path(context), "py")
+    uses = count_path(body, "py")
+    if uses == 0:
+        return body
+    if uses == 1:
+        return replace_path(body, "py", py)
+    return rs.Block((rs.Let("py", init=py), *body.stmts), body.tail)
 
 
 def lower_function(
@@ -46,7 +64,7 @@ def lower_function(
     module.names[scope] = names
     by_value = {name for name in scope.frees if name in module.frozen[scope.owner(name)]}
     info = FunctionInfo(fn, scope, locals_info, names, by_value)
-    ctx = Context(module, locals_info, info)
+    ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
     lowering = StmtLowering(ctx)
 
     body: list[rs.Stmt] = []
@@ -104,10 +122,7 @@ def lower_function(
             if locals_info.end_reachable:
                 tail = rs.Call(rs.Path("Ok"), (rs.Call(rs.Path("rt::none"), (rs.Path("py"),)),))
 
-    params = [rs.Param("py", "Python<'py>")]
-    if fn in module.callgraph.needs_globals:
-        params.append(rs.Param("globals", "&Bound<'py, PyDict>"))
-        module.uses.add("pyo3::types::PyDict")
+    params = [rs.Param(ctx.context_name, MODULE)]
     for name in scope.frees:
         ty = f"&{BOUND}" if name in by_value else "&rt::Cell<'py>"
         params.append(rs.Param(names[name], ty))
@@ -127,7 +142,7 @@ def lower_function(
         name=rust_name,
         params=tuple(params),
         ret=RESULT,
-        body=rs.Block(tuple(body), tail),
+        body=bind_py(rs.Block(tuple(body), tail), ctx.context_name),
         lifetimes=("'py",),
         public=public,
         doc=tuple(doc.splitlines()) if doc else (),
@@ -212,8 +227,6 @@ def signature_text(
     args = node.args
     defaults_iter = iter(defaults)
     params: list[list[str | rs.Expr]] = []
-    if node in module.callgraph.needs_globals:
-        params.append(["globals"])
 
     def param(arg: ast.arg, prefix: str = "", default: bool = False) -> list[str | rs.Expr]:
         rust = names[arg.arg]

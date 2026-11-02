@@ -1,7 +1,7 @@
 """Write a complete Cargo crate for a transpiled module.
 
 Two output modes share the generated module file, which only exposes
-`exec_module(m)`:
+`exec_module(module)`:
 
 * `bin` (default): an executable that embeds libpython and runs the module as
   `__main__`, like `python app.py`.
@@ -186,7 +186,7 @@ mod {rust_mod};
 
 #[pymodule(name = "{parsed.name}")]
 fn init(m: &Bound<'_, PyModule>) -> PyResult<()> {{
-    {rust_mod}::exec_module(m)
+    {rust_mod}::exec_module(&steelix_runtime::Module::new(m))
 }}
 """
 

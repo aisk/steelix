@@ -9,7 +9,7 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 
 /// The `exec_module` function generated for a Python module.
-pub type ExecModule = fn(&Bound<'_, PyModule>) -> PyResult<()>;
+pub type ExecModule = fn(&crate::Module<'_>) -> PyResult<()>;
 
 /// The Python script a program was transpiled from, as `python app.py` would
 /// see it.
@@ -39,7 +39,7 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
     let failed = Python::attach(|py| {
         let result = py.import("__main__").and_then(|main| {
             prepare_main(&main, script)?;
-            exec_module(&main)
+            exec_module(&crate::Module::new(&main))
         });
         flush_io(py);
         match result {

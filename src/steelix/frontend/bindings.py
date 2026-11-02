@@ -54,6 +54,8 @@ class ModuleBindings:
     star_import: bool
     namespace_access: bool
     """The module calls `globals()` / `vars()` / `locals()`."""
+    writes_defaults: bool = False
+    """The module may assign `__defaults__` / `__kwdefaults__` of a function."""
 
     @property
     def dynamic(self) -> bool:
@@ -129,8 +131,31 @@ def analyze_module_bindings(module: ast.Module) -> ModuleBindings:
         visit_module_level(stmt)
 
     namespace_access = _uses_namespace_builtins(module, set())
+    writes_defaults = _writes_defaults(module)
 
-    return ModuleBindings(counts, defs, star_import, namespace_access)
+    return ModuleBindings(counts, defs, star_import, namespace_access, writes_defaults)
+
+
+_DEFAULTS_ATTRS = frozenset({"__defaults__", "__kwdefaults__"})
+
+
+def _writes_defaults(module: ast.Module) -> bool:
+    """Whether the module may change the defaults of a function object: it
+    assigns or deletes `__defaults__` / `__kwdefaults__`, or spells either
+    name as a string (`setattr(f, "__defaults__", ..)`)."""
+    for node in ast.walk(module):
+        match node:
+            case ast.Attribute(_, attr, ast.Store() | ast.Del()) if attr in _DEFAULTS_ATTRS:
+                return True
+            case ast.Constant(str() as value) if value in _DEFAULTS_ATTRS:
+                return True
+    return False
+
+
+def is_immutable_constant(expr: ast.expr) -> bool:
+    """A literal whose value can not change: `None`, a bool, a number, a
+    string or bytes."""
+    return isinstance(expr, ast.Constant) and expr.value is not Ellipsis
 
 
 def _uses_namespace_builtins(node: ast.AST, local_names: set[str]) -> bool:
