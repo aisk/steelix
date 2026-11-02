@@ -2,11 +2,15 @@
 
 ## 1. 目标
 
-把 Python 源码转换成**可读的** Rust 代码。生成的代码通过 PyO3 继续调用 libpython，所以标准库和第三方 Python 库照常可用。典型迁移路径如下。
+把 Python 源码转换成**可读的** Rust 代码。生成的代码通过 PyO3 继续调用 libpython，所以标准库和第三方 Python 库照常可用。
 
-1. 用 steelix 把一个 Python 模块（或包）整体转成 Rust crate，行为与原 Python 一致。
-2. 生成的 crate 作为 PyO3 扩展模块替换原模块，或者作为嵌入 libpython 的可执行程序运行。
-3. 开发者逐个函数把 `Bound<PyAny>` 改写成原生 Rust 类型和逻辑，最终摆脱对 Python 的依赖。
+**以应用（app）场景为主**，库场景其次。典型迁移路径如下。
+
+1. 用 steelix 把一个 Python 应用（入口脚本加上它自己的模块）整体转成 Rust crate。
+2. 生成的 crate 编译成嵌入 libpython 的可执行程序，`./app` 的行为与 `python app.py` 一致。第三方依赖仍然从 venv 里 import。
+3. 开发者逐个函数把 `Bound<PyAny>` 改写成原生 Rust 类型和逻辑，逐步减少对 Python 的依赖，最终摆脱它。
+
+库场景（生成 PyO3 扩展模块替换原 Python 模块）保留为 `--mode ext`，共用同一套 lowering，但优先级较低。
 
 所以**可读性优先于性能**。生成的代码应该像一个熟悉 PyO3 的人手写出来的样子。
 
@@ -162,7 +166,8 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 - **全局变量不用进程级 static 保存模块对象**，因为 `importlib.reload` 或删除 `sys.modules` 后重新 import 会产生新的模块对象。globals 由 `Function` 持有并显式传给需要它的函数体
 - 可以缓存 import 得到的标准库模块对象（`PyOnceLock`），但不能缓存它们的属性，否则 monkeypatch 失效
 - **直接调用的条件**：名字在模块内只绑定一次（`def` 算一次），且模块里没有 `from x import *`、`globals()`、对自身模块的 `setattr`。否则走 globals 字典动态查找
-- 直接调用无法感知其他模块的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。提供 `--dynamic-globals` 选项让所有全局调用都走动态查找，用于跑依赖 mock 的测试
+- 直接调用无法感知其他模块的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。应用场景里别的模块很少 patch 应用自身的函数，所以影响不大。以后如有需要再提供 `--dynamic-globals` 选项让所有全局调用都走动态查找
+- 应用场景下 `importlib.reload` 也很少见，不用 static 保存模块对象主要是为了让同一份生成代码既能作为 `__main__` 运行，也能被别的模块按真实名字 import
 
 ## 8. 表达式与求值顺序
 
@@ -202,12 +207,20 @@ pub mod point {
 
 ## 11. 输出模式
 
-- **ext 模式**（默认，M1 只做这个）：cdylib 扩展模块，替换原 Python 模块
-- **bin 模式**：嵌入 libpython 的可执行程序，已验证的问题较多，单独一个里程碑
-  - 不用 `auto-initialize`，用 `PyConfig` 初始化，设置 `executable`/`home`，否则 `sys.path` 里没有 `.venv` 的 site-packages。同时传入真实的 `argv`
+两种模式共用生成的 `exec_module(m)`，区别只在 crate 的入口。
+
+- **bin 模式**（默认，主要场景）：嵌入 libpython 的可执行程序，`main.rs` 只调用 `rt::embed::run_main`
+  - 不用 `auto-initialize`，用 `PyConfig` 初始化，设置 `executable`，否则 `sys.path` 里没有 `.venv` 的 site-packages。同时传入真实的 `argv`，`parse_argv = 0`
   - 以 `__main__` 身份执行模块。结束时调用 `Py_FinalizeEx`，这样会 flush stdout 并执行 atexit
-  - `SystemExit` 和未捕获异常映射为退出码，并 `PyErr_Print`
-  - 运行时动态链接器会优先找到系统的 libpython，需要设置 rpath
+  - `SystemExit` 和未捕获异常交给 `PyErr_Print` 处理，退出码与 CPython 一致
+  - build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython
+  - M1 把构建时解释器的路径写死在二进制里，只适合在本机运行。分发到别的机器需要单独设计（见下）
+  - 已知差异：`sys.argv[0]` 是二进制路径，`sys.path[0]` 不是脚本所在目录，`__file__` 未设置
+- **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块
+
+### 分发（待设计）
+
+可执行程序在别的机器上需要找到 libpython、标准库和第三方依赖。可能的方案有：随程序附带 python-build-standalone 加上 venv 的 site-packages，运行时按相对于二进制的路径定位；或者静态链接 libpython 并把纯 Python 依赖打包成 zip 放进 `sys.path`。在 M7 做 spike 再定。
 
 ## 12. 名字卫生与已知语义差异
 
@@ -243,7 +256,7 @@ pub mod point {
 - **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables` 两个 allow），把可读性问题挡在快照阶段
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
-- **端到端差分测试**：ext 模式下比较 `python case.py` 与 `python -c "import case"`（以及 bin 模式就绪后的可执行程序）的 stdout、退出码，以及预期异常的类型和消息（不比较 traceback）。多个用例打包成同一个测试 crate 的多个模块，共用 `CARGO_TARGET_DIR`，减少编译和链接次数。用 pytest marker `e2e` 区分
+- **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码，以及 stderr 最后一行（异常类型和消息，不比较 traceback）。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
 - 源码映射：函数和语句前的 `// file.py:LINE` 注释，异常经过时用 `add_note` 附加 Python 位置。对迁移的人来说行号很重要，优先级不低

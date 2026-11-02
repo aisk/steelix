@@ -10,9 +10,9 @@
 - [x] 验证 PyO3 嵌入 libpython 可行
 - [x] 设计 review，结论已合入 design.md
 
-## M1 最小闭环：fib 跑通（仅 ext 模式）
+## M1 最小闭环：fib 跑通 ✅
 
-目标是 `tests/cases/fib.py` 能转换、编译成扩展模块，`python -c "import fib"` 的输出与 `python fib.py` 一致。
+目标是 `tests/cases/fib.py` 能转换、编译成嵌入 libpython 的可执行程序，输出与 `python fib.py` 一致。原计划只做 ext 模式，后来改成以 app 场景为主，bin 模式提前到 M1 完成，ext 模式保留为 `--mode ext`。
 
 - [x] `rustast`：最小节点集合（fn、let、赋值、if、while、return、表达式语句、调用、方法调用、字面量、`?`）和打印器，rustfmt 必须可用，带单元测试
 - [x] `frontend`：`parse.py`、`scope.py`（symtable），`bindings.py` 统计模块级名字绑定次数、检测 `import *`/`globals()`
@@ -24,6 +24,7 @@
 - [x] `emit`：生成 crate（Cargo.toml、lib.rs），runtime 用 path 依赖
 - [x] CLI `steelix transpile foo.py -o out/` 串起来
 - [x] 测试框架：golden 快照与 `--update-golden`、`cargo check` 层、e2e 差分测试（显式设置 `PYO3_PYTHON`，共享 target 目录，pytest marker `e2e`）
+- [x] bin 模式：`PyConfig` 初始化、以 `__main__` 执行、`Py_FinalizeEx`、退出码、rpath（§11）
 
 ## M2 核心语句与表达式
 
@@ -39,6 +40,7 @@
 - [ ] `global`、模块全局变量读写、`pass`、`assert`
 - [ ] 常用 builtins 映射（len、str、int、isinstance、range 等），其余走 `builtins` 动态查找
 - [ ] 简单的 `import x`、`import x.y as z`、`from x import y`（标准库与第三方库）
+- [ ] bin 模式贴近 `python app.py`：`sys.argv[0]` 用脚本名，`sys.path[0]` 为脚本所在目录，设置 `__file__`
 
 ## M3 函数与闭包
 
@@ -47,7 +49,6 @@
 - [ ] 嵌套函数、闭包、`nonlocal`（cell 作为参数传入）
 - [ ] `lambda`
 - [ ] 装饰器（按 Python 语义执行，被装饰的名字退化为动态调用）
-- [ ] `--dynamic-globals` 选项（§7）
 - [ ] docstring 转 `///`，注释保留，源位置注释
 
 ## M4 异常与上下文管理
@@ -69,20 +70,20 @@
 - [ ] 自定义异常类
 - [ ] PEP 649 注解，验证 dataclass 可用
 
-## M6 多模块项目与混合模式
+## M6 多模块应用与混合模式
 
-- [ ] 输入为包目录时生成一个 crate，每个 Python 模块一个 Rust mod
+- [ ] 输入为应用目录（入口脚本加项目内模块和包）时生成一个 crate，每个 Python 模块一个 Rust mod
 - [ ] 包初始化安装 meta path finder，子模块惰性执行（§7）
 - [ ] 项目内模块之间的引用、相对 import
 - [ ] 混合模式：不支持的函数或类保留 Python 源码嵌入执行（§13）
 - [ ] 转换覆盖率统计（报告每种不支持特性出现的次数）
 
-## M7 bin 模式
+## M7 分发
 
-- [ ] `PyConfig` 初始化（executable、home、argv），以 `__main__` 执行模块（§11）
-- [ ] `Py_FinalizeEx`、`SystemExit` 与未捕获异常映射为退出码
-- [ ] rpath 指向构建时使用的 libpython
-- [ ] e2e 测试加入 bin 模式
+- [ ] Spike：对比附带 python-build-standalone + site-packages、静态链接 libpython 等方案，结论写入 design.md §11
+- [ ] 运行时按相对于二进制的路径定位 Python 安装，不再写死构建时路径
+- [ ] `steelix build` 一条命令产出可分发的目录或压缩包
+- [ ] 在干净环境（容器）里验证可运行
 
 ## M8 推导式与其它
 
@@ -101,4 +102,4 @@
 
 ## 以后再说
 
-generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded
+generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式
