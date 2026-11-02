@@ -8,7 +8,14 @@ import pytest
 from steelix.frontend.bindings import analyze_locals, analyze_module_bindings
 from steelix.frontend.callgraph import build_call_graph
 from steelix.frontend.parse import parse_source
-from steelix.frontend.resolve import Direct, Lookup, resolve_global
+from steelix.frontend.resolve import (
+    Direct,
+    Lookup,
+    Slot,
+    bind_static,
+    resolve_call,
+    resolve_global,
+)
 from steelix.frontend.scope import analyze_scopes
 from steelix.lower.docstrings import clean_doc
 
@@ -16,6 +23,12 @@ from steelix.lower.docstrings import clean_doc
 def parse(source: str) -> tuple[ast.Module, str]:
     source = textwrap.dedent(source)
     return parse_source(source, "m").tree, source
+
+
+def call(source: str) -> ast.Call:
+    expr = ast.parse(source, mode="eval").body
+    assert isinstance(expr, ast.Call)
+    return expr
 
 
 def function(tree: ast.Module, name: str) -> ast.FunctionDef:
@@ -77,14 +90,41 @@ def test_resolve_global() -> None:
     )
     b = analyze_module_bindings(tree)
     fn = function(tree, "f")
-    assert resolve_global(b, "f", call_arity=1) == Direct(fn)
-    assert resolve_global(b, "f", call_arity=2) is Lookup.GLOBAL  # TypeError at run time
-    assert resolve_global(b, "f", call_arity=1, module_index=0) is Lookup.GLOBAL  # before def
-    assert resolve_global(b, "f", call_arity=1, module_index=2) == Direct(fn)
+    one = call("f(1)")
+    assert resolve_call(b, "f", one) == Direct(fn, (Slot("arg", (0,)),))
+    assert resolve_call(b, "f", call("f(1, 2)")) is Lookup.GLOBAL  # TypeError at run time
+    assert resolve_call(b, "f", one, module_index=0) is Lookup.GLOBAL  # before def
+    assert resolve_call(b, "f", one, module_index=2) == Direct(fn, (Slot("arg", (0,)),))
     assert resolve_global(b, "LIMIT") is Lookup.GLOBAL
     assert resolve_global(b, "len") is Lookup.BUILTIN
     assert resolve_global(b, "__name__") is Lookup.GLOBAL
     assert resolve_global(b, "undefined_name") is Lookup.GLOBAL
+
+
+def test_bind_static() -> None:
+    (fn,) = parse("def f(a, /, b=1, *rest, c, d=2, **kw): pass")[0].body
+    assert isinstance(fn, ast.FunctionDef)
+    slots = bind_static(fn.args, call("f(1, 2, 3, 4, d=5, c=6, e=7)"))
+    assert slots == (
+        Slot("arg", (0,)),
+        Slot("arg", (1,)),
+        Slot("varargs", (2, 3)),
+        Slot("keyword", (1,)),
+        Slot("keyword", (0,)),
+        Slot("varkw", (2,)),
+    )
+    assert bind_static(fn.args, call("f(1, c=2)")) == (
+        Slot("arg", (0,)),
+        Slot("default"),
+        Slot("varargs"),
+        Slot("keyword", (0,)),
+        Slot("default"),
+        Slot("varkw"),
+    )
+    # Left to the function object: unpacking and calls that raise TypeError.
+    assert bind_static(fn.args, call("f(*xs, c=1)")) is None
+    assert bind_static(fn.args, call("f(1)")) is None
+    assert bind_static(fn.args, call("f(a=1, c=2)")) is None
 
 
 # --- scopes ------------------------------------------------------------------
@@ -110,8 +150,8 @@ def test_scopes() -> None:
 def locals_of(source: str, name: str = "f"):
     tree, src = parse(source)
     fn = function(tree, name)
-    scope = analyze_scopes(tree, src, "m.py").of(fn)
-    return analyze_locals(fn, scope), fn
+    scopes = analyze_scopes(tree, src, "m.py")
+    return analyze_locals(scopes.of(fn), scopes), fn
 
 
 def test_straight_line_locals_are_declared_in_place() -> None:
@@ -380,3 +420,38 @@ def test_clean_doc_matches_cpython() -> None:
     raw = ast.get_docstring(ast.parse(source).body[0], clean=False)  # type: ignore[arg-type]
     assert raw is not None
     assert clean_doc(raw) == namespace["f"].__doc__  # type: ignore[attr-defined]
+
+
+# --- closures ----------------------------------------------------------------
+
+
+def test_cells_and_frozen_captures() -> None:
+    tree, source = parse(
+        """
+        def f(a, b):
+            c = 1
+            late = 0
+
+            def g():
+                nonlocal b
+                b += 1
+                return a + c + late
+
+            def h():
+                return early
+
+            early = 2
+            late = 3
+            return g, h
+        """
+    )
+    scopes = analyze_scopes(tree, source, "m.py")
+    outer = scopes.of(function(tree, "f"))
+    inner = outer.children[0]
+    assert inner.qualname == "f.<locals>.g"
+    assert set(inner.frees) == {"a", "b", "c", "late"}
+    assert outer.cells == {"a", "b", "c", "late", "early"}
+    info = analyze_locals(outer, scopes)
+    # `b` is rebound by `g`, `late` after the capture, and `early` is
+    # captured before it is assigned: those need real cells.
+    assert info.frozen == {"a", "c"}

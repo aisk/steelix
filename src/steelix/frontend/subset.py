@@ -15,7 +15,6 @@ from steelix.diagnostics import SourceLocation, UnsupportedError
 _FEATURES: dict[type[ast.AST], str] = {
     ast.AsyncFor: "async for",
     ast.AnnAssign: "annotated assignment",
-    ast.Nonlocal: "nonlocal statement",
     ast.Try: "try statement",
     ast.TryStar: "try/except*",
     ast.Raise: "raise",
@@ -25,7 +24,6 @@ _FEATURES: dict[type[ast.AST], str] = {
     ast.AsyncFunctionDef: "async function",
     ast.Match: "match statement",
     ast.TypeAlias: "type alias",
-    ast.Lambda: "lambda",
     ast.NamedExpr: "assignment expression",
     ast.Slice: "slice outside a subscript",
     ast.Starred: "starred expression",
@@ -43,6 +41,8 @@ _FEATURES: dict[type[ast.AST], str] = {
 class SubsetChecker:
     def __init__(self, filename: str) -> None:
         self.filename = filename
+        self.depth = 0
+        """Number of enclosing functions."""
 
     def fail(self, feature: str, node: ast.AST) -> UnsupportedError:
         return UnsupportedError(feature, SourceLocation.of(self.filename, node))
@@ -59,26 +59,21 @@ class SubsetChecker:
                 self.check_stmt(stmt)
 
     def check_def(self, fn: ast.FunctionDef) -> None:
-        if fn.decorator_list:
-            raise self.fail("decorator", fn.decorator_list[0])
         if fn.type_params:
             raise self.fail("type parameters", fn)
-        if fn.returns is not None:
-            raise self.fail("annotation", fn.returns)
-        args = fn.args
-        if args.vararg or args.kwarg:
-            raise self.fail("*args / **kwargs parameter", fn)
-        if args.kwonlyargs:
-            raise self.fail("keyword-only parameter", fn)
-        if args.defaults:
-            raise self.fail("default argument", args.defaults[0])
-        for arg in args.posonlyargs + args.args:
-            if arg.annotation is not None:
-                raise self.fail("annotation", arg.annotation)
+        for decorator in fn.decorator_list:
+            self.check_expr(decorator)
+        # Annotations are kept as source and evaluated lazily by the runtime.
+        self.check_defaults(fn.args)
+        self.depth += 1
         for stmt in fn.body:
-            if isinstance(stmt, ast.FunctionDef):
-                raise self.fail("nested function", stmt)
             self.check_stmt(stmt)
+        self.depth -= 1
+
+    def check_defaults(self, args: ast.arguments) -> None:
+        for default in args.defaults + args.kw_defaults:
+            if default is not None:
+                self.check_expr(default)
 
     def check_stmt(self, stmt: ast.stmt) -> None:
         match stmt:
@@ -123,8 +118,12 @@ class SubsetChecker:
                 self.check_expr(test)
                 if msg is not None:
                     self.check_expr(msg)
-            case ast.Pass() | ast.Break() | ast.Continue() | ast.Global():
+            case ast.Pass() | ast.Break() | ast.Continue() | ast.Global() | ast.Nonlocal():
                 pass
+            case ast.AnnAssign() if self.depth == 0:
+                raise self.fail("annotated assignment at module level", stmt)
+            case ast.FunctionDef() if self.depth > 0:
+                self.check_def(stmt)
             case ast.FunctionDef():
                 raise self.fail("function definition outside module top level", stmt)
             case _:
@@ -195,12 +194,15 @@ class SubsetChecker:
                 self.check_expr(orelse)
             case ast.Call(func, args, keywords):
                 self.check_expr(func)
-                if keywords:
-                    raise self.fail("keyword argument", keywords[0])
                 for arg in args:
-                    if isinstance(arg, ast.Starred):
-                        raise self.fail("argument unpacking", arg)
-                    self.check_expr(arg)
+                    self.check_expr(arg.value if isinstance(arg, ast.Starred) else arg)
+                for keyword in keywords:
+                    self.check_expr(keyword.value)
+            case ast.Lambda(args, body):
+                self.check_defaults(args)
+                self.depth += 1
+                self.check_expr(body)
+                self.depth -= 1
             case ast.Attribute(value):
                 self.check_expr(value)
             case ast.Subscript(value, index):

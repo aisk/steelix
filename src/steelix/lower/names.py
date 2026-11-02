@@ -28,7 +28,9 @@ _NOT_RAW = {"self": "slf", "Self": "Self_", "crate": "crate_", "super": "super_"
 # Names the generated code binds or relies on inside function bodies.
 FUNCTION_RESERVED = frozenset({"py", "globals", "_guard", "Ok", "Err", "Some", "None"})
 # Item names the generated module defines or relies on next to the functions.
-MODULE_RESERVED = frozenset({"exec_module", "Ok", "Err", "Some", "None"})
+# `m`, `py` and `globals` are locals of `exec_module`, which would shadow
+# functions of the same name there.
+MODULE_RESERVED = frozenset({"exec_module", "m", "py", "globals", "Ok", "Err", "Some", "None"})
 
 
 def rust_ident(name: str) -> str:

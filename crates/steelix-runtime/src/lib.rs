@@ -16,7 +16,10 @@ use pyo3::sync::PyOnceLock;
 use pyo3::type_object::PyTypeInfo;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PySlice, PyString, PyTuple};
 
-mod function;
+pub mod call;
+mod cell;
+#[doc(hidden)]
+pub mod function;
 mod import;
 mod ops;
 mod unpack;
@@ -26,7 +29,8 @@ pub mod embed;
 
 pub mod builtins;
 
-pub use function::{Body, Function};
+pub use cell::Cell;
+pub use function::{Body, Function, FunctionDef, Signature, default};
 pub use import::{import, import_from, import_module, import_names};
 pub use ops::{
     iadd, iand, ifloordiv, ilshift, imatmul, imod, imul, ior, ipow, irshift, isub, itruediv, ixor,
@@ -256,46 +260,169 @@ impl Drop for RecursionGuard<'_> {
     }
 }
 
-/// Defines a Python function backed by a Rust function and binds it in
-/// `globals`, like executing a `def` statement.
+/// Creates a Python function object backed by a Rust function, like
+/// evaluating a `def` statement (without binding the name) or a `lambda`.
+///
+/// The parameter list is written like the Python one, using the Rust names of
+/// the parameters. Defaults are evaluated right away, in order, and stored in
+/// `__defaults__` / `__kwdefaults__`; annotations are kept as Python source and
+/// evaluated lazily (PEP 649).
 ///
 /// ```ignore
-/// rt::def!(globals, fib(n))?;                  // fn fib(py, n)
-/// rt::def!(globals, scale(globals, x))?;       // fn scale(py, globals, x)
-/// rt::def!(globals, slf(x), name = "self")?;   // Python name differs from the Rust one
-/// rt::def!(globals, area(r), doc = "Area of a circle.")?;
+/// rt::function!(globals, greet(name, greeting = "Hello"))?;      // fn greet(py, name, greeting)
+/// rt::function!(globals, log(globals, msg, *, level = 20))?;      // fn log(py, globals, msg, level)
+/// rt::function!(globals, wrap(f, /, *args, **kwargs))?;          // fn wrap(py, f, args, kwargs)
+/// rt::function!(globals, area(r: "float") -> "float")?;           // annotations
+/// rt::function!(globals, slf as "self"(x), name = "method")?;     // Python names differ
+/// // A nested function capturing `n` by value and the shared cell `count`:
+/// rt::function!(globals, add[n, &count](x), qualname = "make.<locals>.add")?;
+/// ```
+///
+/// Options: `name = ".."` (defaults to the Rust name, or the last part of
+/// `qualname`), `qualname = ".."` (defaults to the name) and `doc = ".."`.
+#[macro_export]
+macro_rules! function {
+    // --- captures: `n` by value, `&count` as a shared cell ---
+    (@caps $h:tt [$($c:tt)*] & $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
+        $crate::function!(@caps $h [$($c)* {cell $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
+    };
+    (@caps $h:tt [$($c:tt)*] $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
+        $crate::function!(@caps $h [$($c)* {value $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
+    };
+    (@caps ($globals:expr, $f:ident, [$($g:tt)?], [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
+        $crate::function!(@params ($globals, $f, [$($g)?], [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
+    };
+    // --- parameters, sorted into positional-only, positional, `*args`,
+    // keyword-only and `**kwargs` ---
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] $mode:ident / $(, $($rest:tt)*)?) => {
+        $crate::function!(@params $h [$($p)*] [] [$($v)*] [$($k)*] [$($vk)*] $mode $($($rest)*)?)
+    };
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [] $mode:ident
+        * * $id:ident $(as $n:literal)? $(: $ann:literal)? $(, $($rest:tt)*)?) => {
+        $crate::function!(@params $h [$($po)*] [$($p)*] [$($v)*] [$($k)*]
+            [{$id, $crate::function!(@name $id $($n)?), [], [$($ann)?]}] $mode $($($rest)*)?)
+    };
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [] [$($k:tt)*] [$($vk:tt)*] pos
+        * $id:ident $(as $n:literal)? $(: $ann:literal)? $(, $($rest:tt)*)?) => {
+        $crate::function!(@params $h [$($po)*] [$($p)*]
+            [{$id, $crate::function!(@name $id $($n)?), [], [$($ann)?]}] [$($k)*] [$($vk)*] kw $($($rest)*)?)
+    };
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [] [$($k:tt)*] [$($vk:tt)*] pos * $(, $($rest:tt)*)?) => {
+        $crate::function!(@params $h [$($po)*] [$($p)*] [] [$($k)*] [$($vk)*] kw $($($rest)*)?)
+    };
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] pos
+        $id:ident $(as $n:literal)? $(: $ann:literal)? $(= $default:expr)? $(, $($rest:tt)*)?) => {
+        $crate::function!(@params $h [$($po)*]
+            [$($p)* {$id, $crate::function!(@name $id $($n)?), [$($default)?], [$($ann)?]}]
+            [$($v)*] [$($k)*] [$($vk)*] pos $($($rest)*)?)
+    };
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] kw
+        $id:ident $(as $n:literal)? $(: $ann:literal)? $(= $default:expr)? $(, $($rest:tt)*)?) => {
+        $crate::function!(@params $h [$($po)*] [$($p)*] [$($v)*]
+            [$($k)* {$id, $crate::function!(@name $id $($n)?), [$($default)?], [$($ann)?]}]
+            [$($vk)*] kw $($($rest)*)?)
+    };
+    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] $mode:ident) => {
+        $crate::function!(@build $h [$($po)*] [$($p)*] [$($v)*] [$($k)*] [$($vk)*])
+    };
+    // --- the function object ---
+    (@build ($globals:expr, $f:ident, [$($g:tt)?], [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
+        [$({$po:ident, $pon:expr, [$($pod:expr)?], [$($poa:literal)?]})*]
+        [$({$p:ident, $pn:expr, [$($pd:expr)?], [$($pa:literal)?]})*]
+        [$({$v:ident, $vn:expr, [], [$($va:literal)?]})?]
+        [$({$k:ident, $kn:expr, [$($kd:expr)?], [$($ka:literal)?]})*]
+        [$({$vk:ident, $vkn:expr, [], [$($vka:literal)?]})?]
+    ) => {{
+        static SIGNATURE: $crate::Signature = $crate::Signature {
+            names: &[$($pon,)* $($pn,)* $($vn,)? $($kn,)* $($vkn,)?],
+            posonly: <[&str]>::len(&[$($pon),*]),
+            positional: <[&str]>::len(&[$($pon,)* $($pn),*]),
+            varargs: <[&str]>::len(&[$($vn)?]) == 1,
+            kwonly: <[&str]>::len(&[$($kn),*]),
+            varkw: <[&str]>::len(&[$($vkn)?]) == 1,
+        };
+        static ANNOTATIONS: &[(&str, &str)] = &[
+            $($(($pon, $poa),)?)* $($(($pn, $pa),)?)* $($(($vn, $va),)?)?
+            $($(($kn, $ka),)?)* $($(($vkn, $vka),)?)? $(("return", $ret),)?
+        ];
+        let globals: &$crate::pyo3::Bound<'_, $crate::pyo3::types::PyDict> = $globals;
+        let py = $crate::pyo3::Bound::py(globals);
+        let defaults = ::std::vec![
+            $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pod, py)?,)?)*
+            $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pd, py)?,)?)*
+        ];
+        let kwdefaults = ::std::vec![
+            $($(($kn, $crate::pyo3::IntoPyObjectExt::into_bound_py_any($kd, py)?),)?)*
+        ];
+        let closure = ::std::vec![$($crate::function!(@capture $ck $c),)*];
+        let body: $crate::Body = |py, globals, closure, args| {
+            let [$($c),*] = closure else {
+                unreachable!("the closure has one cell per captured variable")
+            };
+            $($crate::function!(@captured $ck $c, $cn);)*
+            let [$($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?] = args else {
+                unreachable!("`Function` binds one value per parameter")
+            };
+            $(let $v = $crate::function::as_tuple($v);)?
+            $(let $vk = $crate::function::as_dict($vk);)?
+            $crate::function!(@call [$($g)?] $f(py, globals; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
+        };
+        $crate::Function::create(globals, $crate::FunctionDef {
+            name: $crate::function!(@opt name [$($key = $value),*]),
+            qualname: $crate::function!(@opt qualname [$($key = $value),*]),
+            rust_name: stringify!($f),
+            doc: $crate::function!(@opt doc [$($key = $value),*]),
+            signature: &SIGNATURE,
+            defaults,
+            kwdefaults,
+            closure,
+            annotations: ANNOTATIONS,
+            body,
+        })
+    }};
+    (@name $id:ident) => { stringify!($id) };
+    (@name $id:ident $n:literal) => { $n };
+    (@capture value $c:ident) => { $crate::function::capture(&$c)? };
+    (@capture cell $c:ident) => { $crate::Cell::object(&$c) };
+    (@captured value $c:ident, $cn:expr) => {
+        let $c = $crate::function::cell_contents($c, $cn)?;
+    };
+    (@captured cell $c:ident, $cn:expr) => {
+        let $c = $crate::Cell::free($c, $cn);
+    };
+    // `py` and `globals` are passed in as tokens so that they keep the hygiene
+    // context of the closure parameters above.
+    (@call [] $f:ident($py:ident, $globals:ident; $($c:ident),*; $($p:ident,)*)) => {
+        $f($py, $(&$c,)* $($p),*)
+    };
+    (@call [$g:tt] $f:ident($py:ident, $globals:ident; $($c:ident),*; $($p:ident,)*)) => {
+        $f($py, $globals, $(&$c,)* $($p),*)
+    };
+    (@opt name [name = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
+    (@opt qualname [qualname = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
+    (@opt doc [doc = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
+    (@opt $want:ident [$key:ident = $value:literal $(, $($rest:tt)*)?]) => {
+        $crate::function!(@opt $want [$($($rest)*)?])
+    };
+    (@opt $want:ident []) => { ::std::option::Option::None };
+    // --- entry points ---
+    ($globals:expr, $f:ident $([$($caps:tt)*])? (globals $(, $($params:tt)*)?) $(-> $ret:literal)? $(, $key:ident = $value:literal)* $(,)?) => {
+        $crate::function!(@caps ($globals, $f, [globals], [$($($params)*)?], [$($ret)?], [$($key = $value),*]) [] $($($caps)*)?)
+    };
+    ($globals:expr, $f:ident $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)? $(, $key:ident = $value:literal)* $(,)?) => {
+        $crate::function!(@caps ($globals, $f, [], [$($params)*], [$($ret)?], [$($key = $value),*]) [] $($($caps)*)?)
+    };
+}
+
+/// Executes a module level `def`: creates the function like [`function!`]
+/// and binds it to its name in `globals`.
+///
+/// ```ignore
+/// rt::def!(globals, fib(n))?;
 /// ```
 #[macro_export]
 macro_rules! def {
-    ($globals:expr, $f:ident(globals $(, $p:ident)* $(,)?) $(, name = $name:literal)? $(, doc = $doc:literal)? $(,)?) => {
-        $crate::def!(@define [globals] $globals, $f, [$($p),*], [$($name)?], [$($doc)?])
-    };
-    ($globals:expr, $f:ident($($p:ident),* $(,)?) $(, name = $name:literal)? $(, doc = $doc:literal)? $(,)?) => {
-        $crate::def!(@define [] $globals, $f, [$($p),*], [$($name)?], [$($doc)?])
-    };
-    (@define [$($g:tt)?] $globals:expr, $f:ident, [$($p:ident),*], [$($name:literal)?], [$($doc:literal)?]) => {{
-        let body: $crate::Body = |py, globals, args| {
-            let [$($p),*] = args else {
-                unreachable!("argument count is checked by Function::__call__")
-            };
-            $crate::def!(@call [$($g)?] $f(py, globals $(, $p)*))
-        };
-        let name = $crate::def!(@or [$($name)?] stringify!($f));
-        let doc: Option<&str> = $crate::def!(@or [$(Some($doc))?] None);
-        $crate::Function::define($globals, name, &[$(stringify!($p)),*], doc, body)
-    }};
-    // `py` and `globals` are passed in as tokens so that they keep the hygiene
-    // context of the closure parameters above.
-    (@call [] $f:ident($py:ident, $globals:ident $(, $p:ident)*)) => {
-        $f($py $(, $p)*)
-    };
-    (@call [$g:tt] $f:ident($py:ident, $globals:ident $(, $p:ident)*)) => {
-        $f($py, $globals $(, $p)*)
-    };
-    (@or [] $default:expr) => {
-        $default
-    };
-    (@or [$value:expr] $default:expr) => {
-        $value
+    ($globals:expr, $($rest:tt)*) => {
+        $crate::function::bind_global($globals, $crate::function!($globals, $($rest)*)?)
     };
 }

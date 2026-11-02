@@ -108,7 +108,24 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
             return f"{label}: {print_block(body, level)}"
         case rs.Comment(text):
             return f"// {text}".rstrip()
+        case rs.ItemStmt(item):
+            return print_item(item)
     raise TypeError(f"unknown statement {stmt!r}")
+
+
+_MACRO_LINE = 70
+
+
+def _macro_call(path: str, args: tuple[rs.Expr, ...]) -> str:
+    """rustfmt leaves alone macro calls whose arguments do not parse as Rust
+    expressions, like the signatures in `rt::function!`, so long ones are
+    broken into one argument per line here. rustfmt fixes the indentation
+    and joins the lines again when it can format the call itself."""
+    text = f"{path}!({_args(args)})"
+    if len(text) <= _MACRO_LINE or "\n" in text:
+        return text
+    args_text = f",\n{INDENT}".join(print_expr(arg) for arg in args)
+    return f"{path}!(\n{INDENT}{args_text}\n)"
 
 
 def _print_if(stmt: rs.If, level: int) -> str:
@@ -142,7 +159,7 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
         case rs.MethodCall(receiver, method, args):
             return f"{_operand(receiver, _POSTFIX)}.{method}({_args(args)})"
         case rs.MacroCall(path, args):
-            return f"{path}!({_args(args)})"
+            return _macro_call(path, args)
         case rs.Try(inner):
             return f"{_operand(inner, _POSTFIX)}?"
         case rs.Ref(inner):

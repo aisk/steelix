@@ -48,8 +48,11 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "Python names that are Rust keywords or names the generated code uses.",
     )?;
     rt::def!(globals, r#type(r#match, r#loop))?;
-    rt::def!(globals, r#mod(py_, globals_, slf))?;
-    rt::def!(globals, exec_module_(Some_), name = "exec_module")?;
+    rt::def!(
+        globals,
+        r#mod(py_ as "py", globals_ as "globals", slf as "self")
+    )?;
+    rt::def!(globals, exec_module_(Some_ as "Some"), name = "exec_module")?;
     rt::def!(globals, maybe(flag))?;
     rt::builtins::print(
         py,

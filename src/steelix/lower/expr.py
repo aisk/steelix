@@ -28,9 +28,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 
-from steelix.frontend.resolve import Direct, Lookup, resolve_global
+from steelix.frontend.resolve import Direct, Lookup, resolve_call, resolve_global
+from steelix.frontend.scope import FunctionNode, params_of
 from steelix.lower.context import Context
+from steelix.lower.names import rust_ident
 from steelix.rustast import nodes as rs
+from steelix.rustast.printer import print_expr, string_literal
 
 
 class Kind(Enum):
@@ -87,7 +90,8 @@ class Value:
         """As a `&Bound<'py, PyAny>`, e.g. an argument of a generated function."""
         match self.kind:
             case Kind.REF:
-                return self.expr
+                # `&Bound<PyTuple>` only coerces to `&Bound<PyAny>` in some places.
+                return rs.MethodCall(self.expr, "as_any") if self.typed else self.expr
             case Kind.LITERAL | Kind.BOOL | Kind.NATIVE:
                 assert self.owned_literal is not None
                 return rs.Ref(self.owned_literal)
@@ -96,8 +100,22 @@ class Value:
             return rs.MethodCall(self.expr, "as_any")
         return rs.Ref(self.expr)
 
-    def receiver(self) -> rs.Expr:
-        """As the receiver of a PyO3 method call (auto-referenced)."""
+    def receiver(self, method: str | None = None) -> rs.Expr:
+        """As the receiver of a PyO3 method call (auto-referenced).
+
+        Concrete types such as `PyTuple` have their own `len`, `get_item`, ..
+        with other signatures than the `PyAny` ones, so give `method` to call
+        the `PyAny` method on those.
+        """
+        if self.kind in (Kind.LITERAL, Kind.BOOL, Kind.NATIVE):
+            assert self.owned_literal is not None
+            return self.owned_literal
+        if self.typed and method in _TYPED_CLASHES:
+            return rs.MethodCall(self.expr, "as_any")
+        return self.expr
+
+    def bound(self) -> rs.Expr:
+        """As an expression `&expr` makes a `&Bound<'py, PyAny>`-like reference of."""
         if self.kind in (Kind.LITERAL, Kind.BOOL, Kind.NATIVE):
             assert self.owned_literal is not None
             return self.owned_literal
@@ -175,6 +193,10 @@ IN_PLACE: dict[type[ast.operator], str] = {
     ast.BitXor: "ixor",
     ast.BitAnd: "iand",
 }
+
+# Methods of `PyTuple`, `PyList`, `PyDict` and `PySet` that shadow the
+# `PyAnyMethods` ones with a different signature.
+_TYPED_CLASHES = frozenset({"len", "get_item", "set_item", "del_item", "add"})
 
 _UNARY: dict[type[ast.unaryop], str] = {ast.USub: "neg", ast.UAdd: "pos", ast.Invert: "bitnot"}
 
@@ -354,15 +376,19 @@ class ExprLowering:
                 then = self.branch(body)
                 other = self.branch(orelse)
                 return Value(_if_expr(cond, then, other), Kind.OWNED)
-            case ast.Call(func, args):
-                return self.call(func, args, expr)
+            case ast.Call(func, args, keywords):
+                return self.call(func, args, keywords, expr)
+            case ast.Lambda():
+                from steelix.lower.function import lower_nested
+
+                return self.function_value(expr, lower_nested(self.ctx, expr))
             case ast.Attribute(obj, attr):
                 inner = self.value(obj)
                 call = rs.MethodCall(inner.receiver(), "getattr", (rs.StrLit(attr),))
                 return Value(_try(call), Kind.OWNED)
             case ast.Subscript(obj, index):
                 container, key = self.operands([obj, index])
-                call = rs.MethodCall(container.receiver(), "get_item", (key.arg(),))
+                call = rs.MethodCall(container.receiver("get_item"), "get_item", (key.arg(),))
                 return Value(_try(call), Kind.OWNED)
             case ast.Slice(lower, upper, step):
                 return self.slice(lower, upper, step)
@@ -460,13 +486,18 @@ class ExprLowering:
 
     def name(self, name: str, node: ast.expr) -> Value:
         fn = self.ctx.function
-        if fn is not None and fn.scope.is_local(name):
+        if fn is not None and not fn.scope.is_global(name):
             rust = fn.names[name]
+            if fn.is_cell(name):
+                return Value(_try(rs.MethodCall(rs.Path(rust), "get")), Kind.OWNED)
+            if fn.scope.is_free(name):
+                return Value(rs.Path(rust), Kind.REF)
             if name in fn.locals.optional:
                 check = _rt("local", rs.Ref(rs.Path(rust)), rs.StrLit(name))
                 return Value(_try(check), Kind.REF)
             if name in fn.scope.params and name not in fn.locals.assigned_params:
-                return Value(rs.Path(rust), Kind.REF)
+                typed = name in (fn.varargs, fn.varkw)
+                return Value(rs.Path(rust), Kind.REF, typed=typed)
             return Value(rs.Path(rust), Kind.PLACE)
         return self.global_name(name)
 
@@ -484,7 +515,7 @@ class ExprLowering:
         args: tuple[rs.Expr, ...] = (rhs.arg(),)
         if method == "pow":
             args += (rs.MethodCall(self.py(), "None"),)
-        return Value(_try(rs.MethodCall(lhs.receiver(), method, args)), Kind.OWNED)
+        return Value(_try(rs.MethodCall(lhs.receiver(method), method, args)), Kind.OWNED)
 
     def boolop(self, is_and: bool, values: list[ast.expr]) -> Value:
         """`a and b` / `a or b`: the first operand that decides, as an object."""
@@ -703,13 +734,18 @@ class ExprLowering:
 
     # --- calls ---
 
-    def call(self, func: ast.expr, args: list[ast.expr], node: ast.Call) -> Value:
-        if len(args) > MAX_CALL_ARGS:
-            raise self.ctx.unsupported(f"call with more than {MAX_CALL_ARGS} arguments", node)
+    def call(
+        self, func: ast.expr, args: list[ast.expr], keywords: list[ast.keyword], node: ast.Call
+    ) -> Value:
+        plain = not keywords and not any(isinstance(a, ast.Starred) for a in args)
         if isinstance(func, ast.Name) and self.is_global(func.id):
-            special = self.global_call(func.id, args, node)
+            special = self.global_call(func.id, node, plain)
             if special is not None:
                 return special
+        if not plain:
+            return self.call_macro(func, args, keywords)
+        if len(args) > MAX_CALL_ARGS:
+            raise self.ctx.unsupported(f"call with more than {MAX_CALL_ARGS} arguments", node)
         if isinstance(func, ast.Attribute):
             return self.method_call(func, args)
         callee, *values = self.operands([func, *args])
@@ -722,6 +758,42 @@ class ExprLowering:
         else:
             call = rs.MethodCall(callee.receiver(), "call0")
         return Value(_try(call), Kind.OWNED)
+
+    def call_macro(
+        self, func: ast.expr, args: list[ast.expr], keywords: list[ast.keyword]
+    ) -> Value:
+        """A call with keyword arguments or unpacking: `rt::call!(f, x, *xs, k = v)`.
+
+        Python evaluates the callee, the positional arguments, then the
+        keyword arguments, which is the order the macro evaluates them in.
+        """
+        if isinstance(func, ast.Attribute):
+            # `o.m(..)` looks the method up first.
+            def method() -> Value:
+                obj = self.value(func.value)
+                getattr_ = rs.MethodCall(obj.receiver(), "getattr", (rs.StrLit(func.attr),))
+                return Value(_try(getattr_), Kind.OWNED, base=func.attr)
+
+            first: Operand = method
+        else:
+            first = func
+        items: list[Operand] = [first]
+        items += [a.value if isinstance(a, ast.Starred) else a for a in args]
+        items += [k.value for k in keywords]
+        callee, *values = self.operands(items)
+        parts: list[str] = []
+        for arg, value in zip(args, values, strict=False):
+            if isinstance(arg, ast.Starred):
+                parts.append("*" + print_expr(value.bound()))
+            else:
+                parts.append(print_expr(value.arg()))
+        for keyword, value in zip(keywords, values[len(args) :], strict=True):
+            if keyword.arg is None:
+                parts.append("**" + print_expr(value.bound()))
+            else:
+                parts.append(f"{_keyword(keyword.arg)} = {print_expr(value.arg())}")
+        macro = rs.MacroCall("rt::call", (callee.bound(), *(rs.Raw(p) for p in parts)))
+        return Value(_try(macro), Kind.OWNED)
 
     def method_call(self, func: ast.Attribute, args: list[ast.expr]) -> Value:
         """`o.m(args)`: `call_method1` when that keeps Python's order, which
@@ -743,24 +815,23 @@ class ExprLowering:
 
     def is_global(self, name: str) -> bool:
         fn = self.ctx.function
-        return fn is None or not fn.scope.is_local(name)
+        return fn is None or fn.scope.is_global(name)
 
-    def global_call(self, name: str, args: list[ast.expr], node: ast.Call) -> Value | None:
+    def global_call(self, name: str, node: ast.Call, plain: bool) -> Value | None:
         """Calls of module functions and builtins with a direct Rust spelling."""
         bindings = self.ctx.module.bindings
-        if not bindings.is_module_bound(name) and not args:
+        args = node.args
+        if not bindings.is_module_bound(name) and not args and not node.keywords:
             if name == "globals":
                 owned = rs.MethodCall(rs.MethodCall(self.globals(), "clone"), "into_any")
                 return Value(owned, Kind.OWNED)
             if name in ("locals", "vars"):
                 # They read the calling frame, which transpiled code does not have.
                 raise self.ctx.unsupported(f"{name}()", node)
-        resolution = resolve_global(
-            bindings, name, call_arity=len(args), module_index=self.ctx.statement_index
-        )
+        resolution = resolve_call(bindings, name, node, module_index=self.ctx.statement_index)
         if isinstance(resolution, Direct):
-            return self.direct_call(resolution.fn, args)
-        if resolution is not Lookup.BUILTIN:
+            return self.direct_call(resolution, node)
+        if resolution is not Lookup.BUILTIN or not plain:
             return None
         if name == "print":
             values = self.operands(list(args))
@@ -776,7 +847,7 @@ class ExprLowering:
         arg = args[0]
         match name:
             case "len":
-                length = _try(rs.MethodCall(arg.receiver(), "len"))
+                length = _try(rs.MethodCall(arg.receiver("len"), "len"))
                 return Value(length, Kind.NATIVE, _rt("int", self.py(), length), base="len")
             case "isinstance":
                 check = _try(rs.MethodCall(arg.receiver(), "is_instance", (args[1].ref(),)))
@@ -795,14 +866,120 @@ class ExprLowering:
                 return Value(_try(rs.MethodCall(arg.receiver(), "abs")), Kind.OWNED)
         raise AssertionError(name)
 
-    def direct_call(self, target: ast.FunctionDef, args: list[ast.expr]) -> Value:
+    def direct_call(self, target: Direct, node: ast.Call) -> Value:
+        """A call of a module level function bound at transpile time.
+
+        Omitted parameters read their default from the function object
+        (`rt::default`), after all arguments are evaluated, like CPython.
+        """
         module = self.ctx.module
+        fn = target.fn
+        params = params_of(fn.args)
+        n_args = len(node.args)
+        values = self.operands([*node.args, *(k.value for k in node.keywords)])
+        roles = ["value"] * len(values)
+        order: list[int] = []
+        per_slot: list[list[int]] = []
+        for param, slot in zip(params, target.slots, strict=True):
+            match slot.kind:
+                case "arg" | "varargs":
+                    indices = list(slot.indices)
+                case "keyword" | "varkw":
+                    indices = [n_args + j for j in slot.indices]
+                case _:
+                    read = _rt("default", self.globals(), rs.StrLit(fn.name), rs.StrLit(param))
+                    values.append(Value(_try(read), Kind.OWNED))
+                    roles.append(param)
+                    indices = [len(values) - 1]
+            for i in indices:
+                roles[i] = param
+            order += indices
+            per_slot.append(indices)
+        values = self.in_rust_order(values, order, roles)
+
         call_args: list[rs.Expr] = [self.py()]
-        if target in module.callgraph.needs_globals:
+        if fn in module.callgraph.needs_globals:
             call_args.append(self.globals())
-        call_args += [v.ref() for v in self.operands(list(args))]
-        call = rs.Call(rs.Path(module.fn_names[target.name]), tuple(call_args))
+        for slot, indices in zip(target.slots, per_slot, strict=True):
+            used = [values[i] for i in indices]
+            match slot.kind:
+                case "varargs":
+                    call_args.append(rs.Ref(self.tuple_of(used)))
+                case "varkw":
+                    names = [node.keywords[j].arg or "" for j in slot.indices]
+                    call_args.append(rs.Ref(self.dict_of(names, used)))
+                case _:
+                    call_args.append(used[0].ref())
+        call = rs.Call(rs.Path(module.fn_names[fn.name]), tuple(call_args))
         return Value(_try(call), Kind.OWNED)
+
+    def tuple_of(self, values: list[Value]) -> rs.Expr:
+        self.use("pyo3::types::PyTuple")
+        if not values:
+            return rs.Call(rs.Path("PyTuple::empty"), (self.py(),))
+        array = rs.Array(tuple(self.elements(values)))
+        return _try(rs.Call(rs.Path("PyTuple::new"), (self.py(), array)))
+
+    def dict_of(self, names: list[str], values: list[Value]) -> rs.Expr:
+        if not values:
+            self.use("pyo3::types::PyDict")
+            return rs.Call(rs.Path("PyDict::new"), (self.py(),))
+        self.use("pyo3::types::IntoPyDict")
+        pairs = rs.Array(
+            tuple(
+                rs.Tuple((rs.StrLit(name), v))
+                for name, v in zip(names, self.elements(values), strict=True)
+            )
+        )
+        return _try(rs.MethodCall(pairs, "into_py_dict", (self.py(),)))
+
+    # --- function objects ---
+
+    def function_value(self, node: FunctionNode, rust: str, bind: bool = False) -> Value:
+        """The function object of a `def` or `lambda` whose Rust fn is `rust`:
+        `rt::function!(..)` with the decorators applied, or `rt::def!(..)`
+        with `bind`.
+
+        Python evaluates the decorators, then the defaults, then applies the
+        decorators bottom-up. Decorators are evaluated into temporaries and
+        applied one statement at a time, which keeps that order and reads
+        like the Python code:
+
+            let decorator = rt::global(globals, "functools")?.call_method1(..)?;
+            let function = rt::function!(globals, wrapper(*args, **kwargs))?;
+            let wrapper = decorator.call1((function,))?;
+        """
+        from steelix.lower.function import function_options, signature_text
+
+        scope = self.ctx.module.scopes.of(node)
+        decorators = node.decorator_list if isinstance(node, ast.FunctionDef) else []
+        decorator_values = [
+            self.hoist(replace(self.value(d), base=None), "decorator") for d in decorators
+        ]
+        args = node.args
+        defaults = [*args.defaults, *(d for d in args.kw_defaults if d is not None)]
+        default_exprs = [v.arg() for v in self.operands(list(defaults))]
+        signature = signature_text(self.ctx, scope, rust, default_exprs)
+        options = function_options(self.ctx, scope, rust)
+        macro_args = (self.globals(), rs.Raw(signature), *(rs.Raw(o) for o in options))
+        macro = rs.MacroCall("rt::def" if bind else "rt::function", macro_args)
+        value = Value(_try(macro), Kind.OWNED)
+        if not decorator_values:
+            return value
+        value = self.hoist(value, "function")
+        assert isinstance(value.expr, rs.Path)
+        for decorator in reversed(decorator_values[1:]):
+            applied = self.call_value(decorator, [value])
+            self.prelude.append(rs.Let(value.expr.text, init=applied.expr))
+        return self.call_value(decorator_values[0], [value])
+
+
+def _keyword(name: str) -> str:
+    """A keyword argument name in `rt::call!`: an identifier if possible."""
+    rust = rust_ident(name)
+    if rust.removeprefix("r#") == name:
+        return rust
+    return string_literal(name)
 
 
 def _expr_base(expr: ast.expr) -> str | None:

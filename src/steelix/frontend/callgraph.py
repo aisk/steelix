@@ -1,12 +1,13 @@
-"""Call graph between module level functions that call each other directly.
+"""Call graph of direct Rust calls between functions.
 
 Two facts come out of it:
 
-* which functions are part of a cycle of direct Rust calls and need a
-  `RecursionGuard` (calls through Python objects are already guarded by
-  CPython), and
-* which functions need the module globals passed in, either because they look
-  a name up dynamically or because a function they call directly does.
+* which module level functions are part of a cycle of direct Rust calls and
+  need a `RecursionGuard` (calls through Python objects are already guarded by
+  CPython; nested functions are only ever called through Python), and
+* which functions, nested ones included, need the module globals passed in:
+  because they look a name up dynamically, create a function object, read a
+  default for a direct call, or directly call a function that needs them.
 """
 
 from __future__ import annotations
@@ -15,38 +16,38 @@ import ast
 from dataclasses import dataclass
 
 from steelix.frontend.bindings import ModuleBindings
-from steelix.frontend.resolve import Direct, Lookup, resolve_global
-from steelix.frontend.scope import FunctionScope, ModuleScopes
+from steelix.frontend.resolve import Direct, Lookup, resolve_call, resolve_global
+from steelix.frontend.scope import FunctionNode, FunctionScope, ModuleScopes, scope_body, walk_scope
 
 
 @dataclass
 class CallGraph:
-    edges: dict[ast.FunctionDef, list[ast.FunctionDef]]
-    recursive: set[ast.FunctionDef]
-    needs_globals: set[ast.FunctionDef]
+    edges: dict[FunctionNode, list[ast.FunctionDef]]
+    recursive: set[FunctionNode]
+    needs_globals: set[FunctionNode]
 
 
 def build_call_graph(
     module: ast.Module, bindings: ModuleBindings, scopes: ModuleScopes
 ) -> CallGraph:
-    functions = [stmt for stmt in module.body if isinstance(stmt, ast.FunctionDef)]
-    edges: dict[ast.FunctionDef, list[ast.FunctionDef]] = {}
-    needs_globals: set[ast.FunctionDef] = set()
+    edges: dict[FunctionNode, list[ast.FunctionDef]] = {}
+    needs_globals: set[FunctionNode] = set()
 
-    for fn in functions:
-        scope = scopes.of(fn)
+    for fn, scope in scopes.functions.items():
         callees: list[ast.FunctionDef] = []
         callee_names: set[int] = set()
         for node in _walk_body(fn):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 name = node.func.id
-                if scope.is_local(name):
+                if not scope.is_global(name):
                     continue
-                target = resolve_global(bindings, name, call_arity=len(node.args))
+                target = resolve_call(bindings, name, node)
                 if isinstance(target, Direct):
                     callee_names.add(id(node.func))
                     if target.fn not in callees:
                         callees.append(target.fn)
+                    if any(slot.kind == "default" for slot in target.slots):
+                        needs_globals.add(fn)
         for node in _walk_body(fn):
             if _uses_globals(node, scope, bindings) and id(node) not in callee_names:
                 needs_globals.add(fn)
@@ -68,32 +69,35 @@ def _uses_globals(node: ast.AST, scope: FunctionScope, bindings: ModuleBindings)
     """Whether lowering `node` refers to the module globals."""
     match node:
         case ast.Name(name, ast.Load()):
-            return not scope.is_local(name) and (
+            return scope.is_global(name) and (
                 resolve_global(bindings, name) is Lookup.GLOBAL or name == "globals"
             )
         case ast.Name(name):
             # Stores and deletes of names declared `global`.
-            return not scope.is_local(name)
+            return scope.is_global(name)
         case ast.Import() | ast.ImportFrom():
             # `__import__` receives the importing module's globals.
+            return True
+        case ast.FunctionDef() | ast.Lambda():
+            # A function object holds the module globals.
             return True
     return False
 
 
-def _walk_body(fn: ast.FunctionDef):
-    for stmt in fn.body:
-        yield from ast.walk(stmt)
+def _walk_body(fn: FunctionNode):
+    for node in scope_body(fn):
+        yield from walk_scope(node)
 
 
-def _in_cycles(edges: dict[ast.FunctionDef, list[ast.FunctionDef]]) -> set[ast.FunctionDef]:
+def _in_cycles(edges: dict[FunctionNode, list[ast.FunctionDef]]) -> set[FunctionNode]:
     """Nodes on a cycle: members of a non-trivial SCC or with a self loop (Tarjan)."""
-    index: dict[ast.FunctionDef, int] = {}
-    low: dict[ast.FunctionDef, int] = {}
-    stack: list[ast.FunctionDef] = []
-    on_stack: set[ast.FunctionDef] = set()
-    result: set[ast.FunctionDef] = set()
+    index: dict[FunctionNode, int] = {}
+    low: dict[FunctionNode, int] = {}
+    stack: list[FunctionNode] = []
+    on_stack: set[FunctionNode] = set()
+    result: set[FunctionNode] = set()
 
-    def connect(v: ast.FunctionDef) -> None:
+    def connect(v: FunctionNode) -> None:
         index[v] = low[v] = len(index)
         stack.append(v)
         on_stack.add(v)

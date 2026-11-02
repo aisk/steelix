@@ -34,16 +34,11 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
 @pytest.mark.parametrize(
     ("source", "feature", "line", "col"),
     [
-        ("def f(a=1):\n    pass\n", "default argument", 1, 9),
-        ("def f(*, a):\n    pass\n", "keyword-only parameter", 1, 1),
-        ("def f():\n    def g():\n        pass\n", "nested function", 2, 5),
-        ("print(f(a=1))\n", "keyword argument", 1, 9),
-        ("print(*xs)\n", "argument unpacking", 1, 7),
-        ("x = lambda: 1\n", "lambda", 1, 5),
         ("x = [i for i in y]\n", "list comprehension", 1, 5),
         ("x = [*a]\n", "unpacking in a display", 1, 6),
         ("x = {**a}\n", "unpacking in a display", 1, 8),
-        ("x: int = 1\n", "annotated assignment", 1, 1),
+        ("x: int = 1\n", "annotated assignment at module level", 1, 1),
+        ("def f(a):\n    a.b: int\n", "annotated assignment", 2, 5),
         ("from . import x\n", "relative import", 1, 1),
         ("from os import *\n", "star import", 1, 1),
         ("raise E\n", "raise", 1, 1),

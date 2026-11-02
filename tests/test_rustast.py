@@ -34,6 +34,13 @@ def p(text: str) -> rs.Path:
         (rs.Tuple((p("a"), p("b"))), "(a, b)"),
         (rs.Tuple(()), "()"),
         (rs.MacroCall("rt::def", (p("globals"), rs.Raw("fib(n)"))), "rt::def!(globals, fib(n))"),
+        # rustfmt does not lay out macros whose arguments are not expressions.
+        (
+            rs.MacroCall(
+                "rt::function", (p("globals"), rs.Raw("f[a, b](x, /, y)"), rs.Raw("q" * 40))
+            ),
+            f"rt::function!(\n    globals,\n    f[a, b](x, /, y),\n    {'q' * 40}\n)",
+        ),
         (rs.Array((rs.IntLit(1), rs.IntLit(2))), "[1, 2]"),
         (rs.Unary("!", rs.Try(rs.MethodCall(p("x"), "is_truthy"))), "!x.is_truthy()?"),
         (rs.Unary("!", rs.Binary("&&", p("a"), p("b"))), "!(a && b)"),

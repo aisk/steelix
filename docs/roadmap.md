@@ -46,12 +46,18 @@
 
 ## M3 函数与闭包
 
-- [ ] `Function` 完整签名绑定：默认参数（`def` 时求值，存 `__defaults__`）、关键字参数、`*args`、`**kwargs`、keyword-only（§6）
-- [ ] 调用侧的关键字参数、`*`/`**` 展开
-- [ ] 嵌套函数、闭包、`nonlocal`（cell 作为参数传入）
-- [ ] `lambda`
-- [ ] 装饰器（按 Python 语义执行，被装饰的名字退化为动态调用）
-- [ ] docstring 转 `///`，注释保留，源位置注释
+- [x] `Function` 完整签名绑定：默认参数（`def` 时求值，存 `__defaults__`）、关键字参数、`*args`、`**kwargs`、keyword-only、positional-only，`TypeError` 文字与 CPython 一致（§6）
+- [x] 直接调用支持关键字参数和默认参数，省略的参数在调用时从函数对象读取（§6）
+- [x] 调用侧的关键字参数、`*`/`**` 展开，按 CPython 的顺序求值（`rt::call!`，§8）
+- [x] 嵌套函数、闭包、`nonlocal`（会改变的变量用 `rt::Cell` 作为参数传入，其余按值传入）
+- [x] `lambda`
+- [x] 装饰器（按 Python 语义执行，被装饰的名字退化为动态调用），验证 `functools.wraps`、`functools.lru_cache`
+- [x] PEP 649 注解（保存源码文本，惰性求值，不影响生成的类型）
+- [x] `__signature__`、`__reduce__` 等内省支持，`inspect.signature` 和 pickle 可用
+- [x] docstring 转 `///`，注释保留，源位置注释
+- [x] 函数内的带注解赋值（注解不求值，等同普通赋值）
+
+模块级的带注解赋值（需要模块的 `__annotate__`，与类一起在 M5 做）、模块级的条件定义和重复定义、类型参数（`def f[T]()`）仍然报 `UnsupportedError`。
 
 ## M4 异常与上下文管理
 

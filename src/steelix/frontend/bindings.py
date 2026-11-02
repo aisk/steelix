@@ -13,7 +13,14 @@ import ast
 from collections import Counter
 from dataclasses import dataclass, field
 
-from steelix.frontend.scope import MODULE_SCOPE, FunctionScope
+from steelix.frontend.scope import (
+    MODULE_SCOPE,
+    FunctionNode,
+    FunctionScope,
+    ModuleScopes,
+    scope_body,
+    walk_scope,
+)
 
 # Names the import system and module creation put into every module's globals.
 MODULE_DUNDERS = frozenset(
@@ -57,10 +64,14 @@ class ModuleBindings:
         return name in self.counts or name in MODULE_DUNDERS
 
     def direct_function(self, name: str) -> ast.FunctionDef | None:
-        """The `def` that is the only binding of `name`, if calls may bypass globals."""
+        """The `def` that is the only binding of `name`, if calls may bypass globals.
+
+        A decorated name is bound to whatever the decorator returns.
+        """
         if self.dynamic or self.counts[name] != 1 or name not in self.defs:
             return None
-        return self.defs[name][0]
+        fn = self.defs[name][0]
+        return None if fn.decorator_list else fn
 
     def def_index(self, name: str) -> int:
         return self.defs[name][1]
@@ -208,8 +219,13 @@ class LocalsInfo:
     """Parameters that are reassigned, so they are shadowed by an owned `let mut`."""
     declared_at_top: list[str] = field(default_factory=list)
     """Non-parameter locals declared at the top of the function, in source order."""
+    order: list[str] = field(default_factory=list)
+    """All non-parameter locals, in order of first occurrence."""
     assigned_deletes: set[ast.Name] = field(default_factory=set)
     """`del x` targets where `x` is definitely assigned."""
+    frozen: set[str] = field(default_factory=set)
+    """Cells that are never rebound once a nested function captured them: the
+    nested functions receive their value instead of the cell (design §6)."""
     unreachable: set[ast.stmt] = field(default_factory=set)
     end_reachable: bool = True
 
@@ -246,15 +262,16 @@ class _Loop:
 
 
 class _DefiniteAssignment:
-    def __init__(self, scope: FunctionScope) -> None:
+    def __init__(self, scope: FunctionScope, scopes: ModuleScopes | None = None) -> None:
         self.scope = scope
+        self.scopes = scopes
         self.info = LocalsInfo()
         self.loops: list[_Loop] = []
 
     def run(self, body: list[ast.stmt]) -> LocalsInfo:
         params = frozenset(self.scope.params)
         for stmt in body:
-            for node in ast.walk(stmt):
+            for node in walk_scope(stmt):
                 if isinstance(node, ast.Delete):
                     # A deleted local can be unassigned again afterwards.
                     for target in node.targets:
@@ -263,6 +280,9 @@ class _DefiniteAssignment:
         self.info.end_reachable = end is not None
         self._loop_scoped(body)
         self._declarations(body)
+        params = set(self.scope.params)
+        self.info.order += sorted(self.scope.locals - params - set(self.info.order))
+        self._frozen(body)
         return self.info
 
     def block(self, stmts: list[ast.stmt], state: State) -> State:
@@ -317,7 +337,12 @@ class _DefiniteAssignment:
                 self.reads(test, state)
                 if msg is not None:
                     self.reads(msg, state)
-            case ast.Pass() | ast.Global() | ast.FunctionDef():
+            case ast.FunctionDef(name, args, decorator_list=decorators):
+                for expr in [*decorators, *args.defaults, *args.kw_defaults]:
+                    if expr is not None:
+                        self.reads(expr, state)
+                return self.assign_name(name, state)
+            case ast.Pass() | ast.Global() | ast.Nonlocal():
                 pass
             case _:
                 raise AssertionError(f"unexpected statement {stmt!r}")
@@ -391,13 +416,51 @@ class _DefiniteAssignment:
         return state
 
     def reads(self, expr: ast.expr, state: _Flow) -> None:
-        for node in ast.walk(expr):
+        for node in walk_scope(expr):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 self.read_name(node.id, state)
 
     def read_name(self, name: str, state: _Flow) -> None:
         if self.scope.is_local(name) and name not in state.definite:
             self.info.optional.add(name)
+
+    def _nested_frees(self, node: FunctionNode) -> tuple[str, ...]:
+        if self.scopes is None:
+            return ()
+        return self.scopes.of(node).frees
+
+    def _occurrences(self, stmt: ast.stmt) -> list[str]:
+        """Names of this scope in `stmt`, in source order. A nested function
+        counts as an occurrence of the variables it captures."""
+        found: list[tuple[int, int, str]] = []
+        for node in walk_scope(stmt):
+            match node:
+                case ast.Name(name):
+                    found.append((node.lineno, node.col_offset, name))
+                case ast.FunctionDef() | ast.Lambda():
+                    position = (node.lineno, node.col_offset)
+                    if isinstance(node, ast.FunctionDef):
+                        found.append((*position, node.name))
+                    found += [(*position, name) for name in self._nested_frees(node)]
+                case ast.Import(names) | ast.ImportFrom(names=names):
+                    position = (node.lineno, node.col_offset)
+                    found += [(*position, _import_name(alias)) for alias in names]
+        found.sort(key=lambda item: item[:2])
+        return [name for _, _, name in found]
+
+    def _binding_counts(self, body: list[ast.stmt]) -> Counter[str]:
+        bindings: Counter[str] = Counter()
+        for stmt in body:
+            for node in walk_scope(stmt):
+                match node:
+                    case ast.Name(name, ast.Store() | ast.Del()):
+                        bindings[name] += 1
+                    case ast.FunctionDef(name):
+                        bindings[name] += 1
+                    case ast.Import(names) | ast.ImportFrom(names=names):
+                        for alias in names:
+                            bindings[_import_name(alias)] += 1
+        return bindings
 
     def _local_names(self, target: ast.expr) -> list[str]:
         return [
@@ -410,28 +473,24 @@ class _DefiniteAssignment:
 
     def _loop_scoped(self, body: list[ast.stmt]) -> None:
         """Find `for` targets that can be declared inside the loop body."""
-        bindings: Counter[str] = Counter()
+        bindings = self._binding_counts(body)
         loads: dict[str, list[ast.Name]] = {}
         loops: list[ast.For] = []
         for stmt in body:
-            for node in ast.walk(stmt):
+            for node in walk_scope(stmt):
                 match node:
                     case ast.Name(name, ast.Load()):
                         loads.setdefault(name, []).append(node)
-                    case ast.Name(name):
-                        bindings[name] += 1
-                    case ast.Import(names) | ast.ImportFrom(names=names):
-                        for alias in names:
-                            bindings[alias.asname or alias.name.split(".")[0]] += 1
                     case ast.For() if node not in self.info.unreachable:
                         loops.append(node)
         for loop in loops:
             names = _target_names(loop.target)
             if names is None or len(set(names)) != len(names):
                 continue
-            inside = {id(n) for stmt in loop.body for n in ast.walk(stmt)}
+            inside = {id(n) for stmt in loop.body for n in walk_scope(stmt)}
             if all(
                 self.scope.is_local(name)
+                and name not in self.scope.cells
                 and name not in self.scope.params
                 and name not in self.info.optional
                 and bindings[name] == 1
@@ -445,20 +504,13 @@ class _DefiniteAssignment:
         """Pick locals whose first occurrence is a top-level assignment."""
         seen: set[str] = set(self.scope.params) | set(self.info.loop_scoped)
         for stmt in body:
-            names = sorted(
-                (n for n in ast.walk(stmt) if isinstance(n, ast.Name)),
-                key=lambda n: (n.lineno, n.col_offset),
-            )
-            first = [n.id for n in names]
-            for node in ast.walk(stmt):
-                if isinstance(node, ast.Import | ast.ImportFrom):
-                    first += [alias.asname or alias.name.split(".")[0] for alias in node.names]
             first = [
                 name
-                for name in dict.fromkeys(first)
+                for name in dict.fromkeys(self._occurrences(stmt))
                 if name not in seen and self.scope.is_local(name)
             ]
             seen.update(first)
+            self.info.order += first
             declared = self._declarable(stmt, first)
             for name in first:
                 if name in declared:
@@ -470,8 +522,16 @@ class _DefiniteAssignment:
         """Names a reachable top-level assignment can declare with `let`."""
         if stmt in self.info.unreachable:
             return set()
+        if isinstance(stmt, ast.FunctionDef):
+            # Not if the function, its decorators or defaults refer to the name.
+            read = {n.id for n in ast.walk(stmt) if isinstance(n, ast.Name)}
+            read.update(self._nested_frees(stmt))
+            name = stmt.name
+            if name in first and name not in read and name not in self.info.optional:
+                return {name}
+            return set()
         if isinstance(stmt, ast.Import | ast.ImportFrom):
-            bound = [alias.asname or alias.name.split(".")[0] for alias in stmt.names]
+            bound = [_import_name(alias) for alias in stmt.names]
             return {
                 name
                 for name in bound
@@ -497,6 +557,33 @@ class _DefiniteAssignment:
             for t in stmt.targets
             if isinstance(t, ast.Name) and t.id in first and t.id not in read
         }
+
+    def _frozen(self, body: list[ast.stmt]) -> None:
+        """Cells whose value is fixed by the time any nested function captures
+        them: parameters that are never rebound, and locals bound exactly once
+        by a top-level statement that comes before every capture."""
+        scope = self.scope
+        info = self.info
+        rebound_inside = {
+            name
+            for inner in scope.descendants()
+            for name in inner.nonlocals
+            if inner.owner(name) is scope
+        }
+        bindings = self._binding_counts(body)
+        for name in scope.cells:
+            if name in rebound_inside or name in info.optional:
+                continue
+            if name in scope.params:
+                once = bindings[name] == 0
+            else:
+                once = bindings[name] == 1 and name in info.declared_at
+            if once and name not in info.mutable:
+                info.frozen.add(name)
+
+
+def _import_name(alias: ast.alias) -> str:
+    return alias.asname or alias.name.split(".")[0]
 
 
 def _target_names(target: ast.expr) -> list[str] | None:
@@ -538,8 +625,14 @@ def is_constant_true(expr: ast.expr) -> bool:
     return isinstance(expr, ast.Constant) and bool(expr.value)
 
 
-def analyze_locals(fn: ast.FunctionDef, scope: FunctionScope) -> LocalsInfo:
-    return _DefiniteAssignment(scope).run(fn.body)
+def analyze_locals(scope: FunctionScope, scopes: ModuleScopes | None = None) -> LocalsInfo:
+    fn = scope.node
+    assert fn is not None
+    body = scope_body(fn)
+    if isinstance(fn, ast.Lambda):
+        # The body of a lambda is an expression returned right away.
+        body = [ast.copy_location(ast.Return(fn.body), fn.body)]
+    return _DefiniteAssignment(scope, scopes).run(body)  # type: ignore[arg-type]
 
 
 def analyze_module_flow(module: ast.Module) -> LocalsInfo:

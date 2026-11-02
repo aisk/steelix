@@ -214,6 +214,13 @@ class Comment(Stmt):
 
 
 @dataclass(frozen=True)
+class ItemStmt(Stmt):
+    """An item declared inside a block, such as a nested `fn`."""
+
+    item: Item
+
+
+@dataclass(frozen=True)
 class Block:
     stmts: tuple[Stmt, ...] = ()
     tail: Expr | None = None

@@ -11,6 +11,7 @@ import ast
 from steelix.frontend.bindings import is_constant_true
 from steelix.lower.context import Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
+from steelix.lower.function import cell_declared_at, lower_nested
 from steelix.rustast import nodes as rs
 
 
@@ -39,11 +40,23 @@ class StmtLowering:
         return [s for s in stmts if s not in self.ctx.flow.unreachable]
 
     def stmt(self, stmt: ast.stmt) -> list[rs.Stmt]:
+        comments = self.comments(stmt)
         if stmt in self.ctx.flow.unreachable:
-            return []
+            return comments
         with self.exprs.fresh() as prelude:
             out = self._stmt(stmt)
-        return prelude + out
+        return comments + self.flush_items() + prelude + out
+
+    def comments(self, stmt: ast.stmt) -> list[rs.Stmt]:
+        if isinstance(stmt, ast.FunctionDef):
+            return []  # they go to the Rust fn
+        return [rs.Comment(text) for text in self.ctx.module.comments.get(stmt, [])]
+
+    def flush_items(self) -> list[rs.Stmt]:
+        """Nested functions lowered while lowering the current statement."""
+        items: list[rs.Stmt] = [rs.ItemStmt(item) for item in self.ctx.items]
+        self.ctx.items.clear()
+        return items
 
     def _stmt(self, stmt: ast.stmt) -> list[rs.Stmt]:
         match stmt:
@@ -74,9 +87,29 @@ class StmtLowering:
                 return self.import_from(stmt, module, names)
             case ast.Assert(test, msg):
                 return [self.assert_stmt(test, msg)]
-            case ast.Pass() | ast.Global():
+            case ast.FunctionDef():
+                return self.function_def(stmt)
+            case ast.Pass() | ast.Global() | ast.Nonlocal():
                 return []
         raise self.ctx.unsupported(type(stmt).__name__, stmt)
+
+    # --- functions ---
+
+    def function_def(self, stmt: ast.FunctionDef) -> list[rs.Stmt]:
+        """A nested `def`: a Rust fn item, then the function object bound to
+        the local name."""
+        rust = lower_nested(self.ctx, stmt)
+        value = self.exprs.function_value(stmt, rust)
+        return [self.store_name(stmt, stmt.name, value)]
+
+    def module_def(self, stmt: ast.FunctionDef, rust: str) -> list[rs.Stmt]:
+        """A module level `def`, whose Rust fn is an item of the module."""
+        with self.exprs.fresh() as prelude:
+            if stmt.decorator_list:
+                out = [self.store_name(stmt, stmt.name, self.exprs.function_value(stmt, rust))]
+            else:
+                out = [rs.ExprStmt(self.exprs.function_value(stmt, rust, bind=True).expr)]
+        return self.flush_items() + prelude + out
 
     # --- expressions as statements ---
 
@@ -228,7 +261,11 @@ class StmtLowering:
                     v, o, i = exprs.in_rust_order(
                         exprs.operands([value, obj, index]), [1, 2, 0], ["value", "obj", "index"]
                     )
-                    return [_try_stmt(rs.MethodCall(o.receiver(), "set_item", (i.arg(), v.arg())))]
+                    return [
+                        _try_stmt(
+                            rs.MethodCall(o.receiver("set_item"), "set_item", (i.arg(), v.arg()))
+                        )
+                    ]
                 case ast.Attribute(obj, attr):
                     v, o = exprs.in_rust_order(
                         exprs.operands([value, obj]), [1, 0], ["value", "obj"]
@@ -260,7 +297,11 @@ class StmtLowering:
                 return [self.store_name(stmt, id, value)]
             case ast.Subscript(obj, index):
                 o, i = exprs.operands([obj, index])
-                return [_try_stmt(rs.MethodCall(o.receiver(), "set_item", (i.arg(), value.arg())))]
+                return [
+                    _try_stmt(
+                        rs.MethodCall(o.receiver("set_item"), "set_item", (i.arg(), value.arg()))
+                    )
+                ]
             case ast.Attribute(obj, attr):
                 o = exprs.value(obj)
                 setter = rs.MethodCall(o.receiver(), "setattr", (rs.StrLit(attr), value.arg()))
@@ -271,12 +312,19 @@ class StmtLowering:
 
     def store_name(self, stmt: ast.stmt, name: str, value: Value) -> rs.Stmt:
         fn = self.ctx.function
-        if fn is None or not fn.scope.is_local(name):
+        if fn is None or fn.scope.is_global(name):
             setter = rs.MethodCall(
                 rs.Path(self.ctx.globals()), "set_item", (rs.StrLit(name), value.arg())
             )
             return _try_stmt(setter)
         rust = fn.names[name]
+        if fn.is_cell(name):
+            if cell_declared_at(fn, name, stmt):
+                cell = rs.Call(
+                    rs.Path("rt::Cell::new"), (rs.Path(self.ctx.py()), rs.StrLit(name), value.arg())
+                )
+                return rs.Let(rust, init=rs.Try(cell))
+            return _try_stmt(rs.MethodCall(rs.Path(rust), "set", (value.arg(),)))
         info = fn.locals
         init = value.owned()
         if name in info.optional:
@@ -305,7 +353,10 @@ class StmtLowering:
             fn is not None
             and len(names) == len(targets)
             and len(set(names)) == len(names)
-            and all(fn.scope.is_local(n) and n not in fn.locals.optional for n in names)
+            and all(
+                fn.scope.is_local(n) and not fn.is_cell(n) and n not in fn.locals.optional
+                for n in names
+            )
         )
         if plain and not declare:
             assert fn is not None
@@ -353,11 +404,13 @@ class StmtLowering:
                 return [self.store_name(stmt, id, result)]
             case ast.Subscript(obj, index):
                 o, i = exprs.hoist_all(exprs.operands([obj, index]), ["target", "index"])
-                getter = rs.MethodCall(o.receiver(), "get_item", (i.arg(),))
+                getter = rs.MethodCall(o.receiver("get_item"), "get_item", (i.arg(),))
                 current = Value(rs.Try(getter), Kind.OWNED, base="item")
                 current, rhs = exprs.operands([value], [current])
                 result = rs.Try(_rt(helper, current.ref(), rhs.arg()))
-                return [_try_stmt(rs.MethodCall(o.receiver(), "set_item", (i.arg(), result)))]
+                return [
+                    _try_stmt(rs.MethodCall(o.receiver("set_item"), "set_item", (i.arg(), result)))
+                ]
             case ast.Attribute(obj, attr):
                 o = exprs.hoist(exprs.value(obj), "target")
                 getter = rs.MethodCall(o.receiver(), "getattr", (rs.StrLit(attr),))
@@ -374,17 +427,19 @@ class StmtLowering:
         match target:
             case ast.Name(id):
                 fn = self.ctx.function
-                if fn is None or not fn.scope.is_local(id):
+                if fn is None or fn.scope.is_global(id):
                     return [
                         _try_stmt(_rt("del_global", rs.Path(self.ctx.globals()), rs.StrLit(id)))
                     ]
                 rust = fn.names[id]
+                if fn.is_cell(id):
+                    return [_try_stmt(rs.MethodCall(rs.Path(rust), "delete"))]
                 if target in fn.locals.assigned_deletes:
                     return [rs.Assign(rs.Path(rust), rs.Path("None"))]
                 return [_try_stmt(_rt("del_local", rs.Raw(f"&mut {rust}"), rs.StrLit(id)))]
             case ast.Subscript(obj, index):
                 o, i = exprs.operands([obj, index])
-                return [_try_stmt(rs.MethodCall(o.receiver(), "del_item", (i.arg(),)))]
+                return [_try_stmt(rs.MethodCall(o.receiver("del_item"), "del_item", (i.arg(),)))]
             case ast.Attribute(obj, attr):
                 o = exprs.value(obj)
                 return [_try_stmt(rs.MethodCall(o.receiver(), "delattr", (rs.StrLit(attr),)))]
