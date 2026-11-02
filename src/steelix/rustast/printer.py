@@ -94,16 +94,17 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
             return "return;" if value is None else f"return {print_expr(value)};"
         case rs.If():
             return _print_if(stmt, level)
-        case rs.While(cond, body):
-            return f"while {print_expr(cond)} {print_block(body, level)}"
-        case rs.Loop(body):
-            return f"loop {print_block(body, level)}"
-        case rs.For(pat, iter_, body):
-            return f"for {pat} in {print_expr(iter_)} {print_block(body, level)}"
+        case rs.While(cond, body, label):
+            return f"{_label(label)}while {print_expr(cond)} {print_block(body, level)}"
+        case rs.Loop(body, label):
+            return f"{_label(label)}loop {print_block(body, level)}"
+        case rs.For(pat, iter_, body, label):
+            head = f"{_label(label)}for {pat} in {print_expr(iter_)}"
+            return f"{head} {print_block(body, level)}"
         case rs.Break(label):
             return "break;" if label is None else f"break {label};"
-        case rs.Continue():
-            return "continue;"
+        case rs.Continue(label):
+            return "continue;" if label is None else f"continue {label};"
         case rs.LabeledBlock(label, body):
             return f"{label}: {print_block(body, level)}"
         case rs.Comment(text):
@@ -111,6 +112,10 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
         case rs.ItemStmt(item):
             return print_item(item)
     raise TypeError(f"unknown statement {stmt!r}")
+
+
+def _label(label: str | None) -> str:
+    return "" if label is None else f"{label}: "
 
 
 _MACRO_LINE = 70
@@ -142,8 +147,10 @@ def _print_if(stmt: rs.If, level: int) -> str:
 
 def print_expr(expr: rs.Expr, level: int = 0) -> str:
     match expr:
-        case rs.Path(text) | rs.Raw(text):
+        case rs.Path(text):
             return text
+        case rs.Tokens(parts):
+            return "".join(p if isinstance(p, str) else print_expr(p) for p in parts)
         case rs.IntLit(value, suffix):
             return f"{value}{suffix}"
         case rs.FloatLit(value):
@@ -162,8 +169,8 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
             return _macro_call(path, args)
         case rs.Try(inner):
             return f"{_operand(inner, _POSTFIX)}?"
-        case rs.Ref(inner):
-            return f"&{_operand(inner, _UNARY)}"
+        case rs.Ref(inner, mutable):
+            return f"&{'mut ' if mutable else ''}{_operand(inner, _UNARY)}"
         case rs.Tuple(elems):
             if len(elems) == 1:
                 return f"({print_expr(elems[0])},)"

@@ -99,6 +99,6 @@ def _lower_exec_module(module: ModuleContext, tree: ast.Module, parsed: ParsedMo
         name="exec_module",
         params=(rs.Param("m", "&Bound<'_, PyModule>"),),
         ret="PyResult<()>",
-        body=rs.Block(tuple(prologue + body), rs.Path("Ok(())")),
+        body=rs.Block(tuple(prologue + body), rs.Call(rs.Path("Ok"), (rs.Tuple(()),))),
         doc=(f"Executes the body of `{parsed.filename}` in the module `m`.",),
     )

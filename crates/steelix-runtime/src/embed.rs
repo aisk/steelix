@@ -41,6 +41,7 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
             prepare_main(&main, script)?;
             exec_module(&main)
         });
+        flush_io(py);
         match result {
             Ok(()) => false,
             Err(err) => {
@@ -60,6 +61,21 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
         ExitCode::from(120)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// Flushes `sys.stderr` and `sys.stdout`, ignoring errors, like CPython's
+/// `flush_io` does after running the script and before printing an uncaught
+/// exception. Without it, output still buffered in `sys.stdout` would come
+/// after the traceback when both go to the same file.
+fn flush_io(py: Python<'_>) {
+    let Ok(sys) = py.import("sys") else { return };
+    for name in ["stderr", "stdout"] {
+        if let Ok(stream) = sys.getattr(name)
+            && !stream.is_none()
+        {
+            let _ = stream.call_method0("flush");
+        }
     }
 }
 

@@ -47,10 +47,7 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
         scale: &Bound<'py, PyAny>,
         extra: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        a.add(b)?
-            .add(rest.as_any().len()?)?
-            .add(extra.as_any().len()?)?
-            .mul(scale)
+        a.add(b)?.add(rest.len())?.add(extra.len())?.mul(scale)
     }
     globals.set_item(
         "add",

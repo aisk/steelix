@@ -7,6 +7,7 @@ expressions need (see `expr.py`), which is emitted right before it.
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 
 from steelix.frontend.bindings import is_constant_true
 from steelix.lower.context import Context
@@ -23,12 +24,27 @@ def _try_stmt(expr: rs.Expr) -> rs.Stmt:
     return rs.ExprStmt(rs.Try(expr))
 
 
+@dataclass
+class _Loop:
+    """A loop being lowered, as a target of `break` and `continue`."""
+
+    else_label: str | None
+    """The label of the block around the loop and its `else`, which `break`
+    leaves, if there is one."""
+    blocks: int
+    """Number of labeled blocks open around the loop."""
+    label: str | None = None
+    """The loop's own label, given once a jump needs it."""
+
+
 class StmtLowering:
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
         self.exprs = ExprLowering(ctx)
-        self.loops: list[str | None] = []
-        """For each enclosing loop, the label a `break` has to leave."""
+        self.loops: list[_Loop] = []
+        """The enclosing loops, innermost last."""
+        self.blocks = 0
+        """Number of labeled blocks open around the statement being lowered."""
 
     def block(self, stmts: list[ast.stmt]) -> rs.Block:
         out: list[rs.Stmt] = []
@@ -77,9 +93,12 @@ class StmtLowering:
             case ast.For():
                 return self.for_stmt(stmt)
             case ast.Break():
-                return [rs.Break(self.loops[-1])]
+                loop = self.loops[-1]
+                if loop.else_label is not None:
+                    return [rs.Break(loop.else_label)]
+                return [rs.Break(self.jump_label(loop))]
             case ast.Continue():
-                return [rs.Continue()]
+                return [rs.Continue(self.jump_label(self.loops[-1]))]
             case ast.Import(names):
                 return [s for alias in names for s in self.import_(stmt, alias)]
             case ast.ImportFrom(module, names):
@@ -153,6 +172,7 @@ class StmtLowering:
 
     def if_stmt(self, stmt: ast.If) -> list[rs.Stmt]:
         cond = self.exprs.condition(stmt.test)
+        items = self.flush_items()
         then = self.block(stmt.body)
         orelse: rs.Block | rs.If | None = None
         if len(stmt.orelse) == 1 and isinstance(stmt.orelse[0], ast.If):
@@ -164,7 +184,7 @@ class StmtLowering:
                 orelse = rs.Block(tuple(inner))
         elif stmt.orelse:
             orelse = self.block(stmt.orelse)
-        return [rs.If(cond, then, orelse)]
+        return [*items, rs.If(cond, then, orelse)]
 
     def loop_label(self, stmt: ast.While | ast.For, base: str) -> str | None:
         """The label of the block around a loop with `else`, if `break` needs it."""
@@ -175,13 +195,35 @@ class StmtLowering:
                 return self.ctx.label(base)
         return None
 
+    def jump_label(self, loop: _Loop) -> str | None:
+        """The label a `break` or `continue` needs to reach `loop`.
+
+        Rust rejects unlabeled jumps out of a labeled block (E0695), which a
+        jump from a loop's `else` to the enclosing loop is, so only those
+        label the loop.
+        """
+        if self.blocks == loop.blocks:
+            return None
+        if loop.label is None:
+            loop.label = self.ctx.label("outer")
+        return loop.label
+
+    def loop_body(self, stmts: list[ast.stmt], else_label: str | None) -> tuple[rs.Block, _Loop]:
+        loop = _Loop(else_label, self.blocks)
+        self.loops.append(loop)
+        body = self.block(stmts)
+        self.loops.pop()
+        return body, loop
+
     def with_else(
         self, stmt: ast.While | ast.For, loop: rs.Stmt, label: str | None
     ) -> list[rs.Stmt]:
-        orelse = self.block(stmt.orelse)
         if label is None:
             # Without a `break` the `else` block always runs after the loop.
-            return [loop, *orelse.stmts]
+            return [loop, *self.block(stmt.orelse).stmts]
+        self.blocks += 1
+        orelse = self.block(stmt.orelse)
+        self.blocks -= 1
         return [rs.LabeledBlock(label, rs.Block((loop, *orelse.stmts)))]
 
     def while_stmt(self, stmt: ast.While) -> list[rs.Stmt]:
@@ -189,23 +231,24 @@ class StmtLowering:
         constant_true = is_constant_true(stmt.test)
         with self.exprs.fresh() as prelude:
             cond = None if constant_true else self.exprs.condition(stmt.test)
-        self.loops.append(label)
-        body = self.block(stmt.body)
-        self.loops.pop()
+        items = self.flush_items()
+        body, target = self.loop_body(stmt.body, label)
         if cond is None:
-            loop: rs.Stmt = rs.Loop(body)
+            loop: rs.Stmt = rs.Loop(body, target.label)
         elif not prelude:
-            loop = rs.While(cond, body)
+            loop = rs.While(cond, body, target.label)
         else:
             # The test needs statements before it on every iteration.
             exit_ = rs.If(negate(cond), rs.Block((rs.Break(),)))
-            loop = rs.Loop(rs.Block((*prelude, exit_, *body.stmts)))
-        return self.with_else(stmt, loop, label)
+            loop = rs.Loop(rs.Block((*prelude, exit_, *body.stmts)), target.label)
+        return items + self.with_else(stmt, loop, label)
 
     def for_stmt(self, stmt: ast.For) -> list[rs.Stmt]:
         label = self.loop_label(stmt, "for_else")
         iterable = self.exprs.value(stmt.iter)
-        iterator = rs.Try(rs.MethodCall(iterable.receiver(), "try_iter"))
+        # Functions defined by the header, which the loop body must not hide.
+        items = self.flush_items()
+        iterator = rs.Try(iterable.method("try_iter"))
         fn = self.ctx.function
         target = stmt.target
         scoped = fn is not None and any(
@@ -224,11 +267,9 @@ class StmtLowering:
             with self.exprs.fresh() as prelude:
                 head = self.store(stmt, target, item, declare=scoped)
             head = prelude + head
-        self.loops.append(label)
-        body = self.block(stmt.body)
-        self.loops.pop()
-        loop = rs.For(pat, iterator, rs.Block((*head, *body.stmts)))
-        return self.with_else(stmt, loop, label)
+        body, target = self.loop_body(stmt.body, label)
+        loop = rs.For(pat, iterator, rs.Block((*head, *body.stmts)), target.label)
+        return items + self.with_else(stmt, loop, label)
 
     def assert_stmt(self, test: ast.expr, msg: ast.expr | None) -> rs.Stmt:
         self.exprs.use("pyo3::exceptions::PyAssertionError")
@@ -261,16 +302,12 @@ class StmtLowering:
                     v, o, i = exprs.in_rust_order(
                         exprs.operands([value, obj, index]), [1, 2, 0], ["value", "obj", "index"]
                     )
-                    return [
-                        _try_stmt(
-                            rs.MethodCall(o.receiver("set_item"), "set_item", (i.arg(), v.arg()))
-                        )
-                    ]
+                    return [_try_stmt(o.method("set_item", i.arg(), v.arg()))]
                 case ast.Attribute(obj, attr):
                     v, o = exprs.in_rust_order(
                         exprs.operands([value, obj]), [1, 0], ["value", "obj"]
                     )
-                    setter = rs.MethodCall(o.receiver(), "setattr", (rs.StrLit(attr), v.arg()))
+                    setter = o.method("setattr", rs.StrLit(attr), v.arg())
                     return [_try_stmt(setter)]
             return self.store(stmt, target, exprs.value(value))
         # `a = b = value`: evaluate once, then assign left to right.
@@ -297,14 +334,10 @@ class StmtLowering:
                 return [self.store_name(stmt, id, value)]
             case ast.Subscript(obj, index):
                 o, i = exprs.operands([obj, index])
-                return [
-                    _try_stmt(
-                        rs.MethodCall(o.receiver("set_item"), "set_item", (i.arg(), value.arg()))
-                    )
-                ]
+                return [_try_stmt(o.method("set_item", i.arg(), value.arg()))]
             case ast.Attribute(obj, attr):
                 o = exprs.value(obj)
-                setter = rs.MethodCall(o.receiver(), "setattr", (rs.StrLit(attr), value.arg()))
+                setter = o.method("setattr", rs.StrLit(attr), value.arg())
                 return [_try_stmt(setter)]
             case ast.Tuple(elts) | ast.List(elts):
                 return self.unpack(stmt, elts, value, declare)
@@ -369,7 +402,8 @@ class StmtLowering:
                 return [rs.Let(pattern, init=call)]
             if not any(info.declared_at.get(n) is stmt for n in names):
                 # Destructuring assignment to locals declared earlier.
-                return [rs.Assign(rs.Raw(_pattern([fn.names[n] for n in names], star)), call)]
+                target = _pattern_expr([fn.names[n] for n in names], star)
+                return [rs.Assign(target, call)]
         # Unpack into a pattern of declared names and temporaries, then assign
         # the temporaries to their targets in order.
         parts: list[str] = []
@@ -404,22 +438,18 @@ class StmtLowering:
                 return [self.store_name(stmt, id, result)]
             case ast.Subscript(obj, index):
                 o, i = exprs.hoist_all(exprs.operands([obj, index]), ["target", "index"])
-                getter = rs.MethodCall(o.receiver("get_item"), "get_item", (i.arg(),))
+                getter = o.method("get_item", i.arg())
                 current = Value(rs.Try(getter), Kind.OWNED, base="item")
                 current, rhs = exprs.operands([value], [current])
                 result = rs.Try(_rt(helper, current.ref(), rhs.arg()))
-                return [
-                    _try_stmt(rs.MethodCall(o.receiver("set_item"), "set_item", (i.arg(), result)))
-                ]
+                return [_try_stmt(o.method("set_item", i.arg(), result))]
             case ast.Attribute(obj, attr):
                 o = exprs.hoist(exprs.value(obj), "target")
-                getter = rs.MethodCall(o.receiver(), "getattr", (rs.StrLit(attr),))
+                getter = o.method("getattr", rs.StrLit(attr))
                 current = Value(rs.Try(getter), Kind.OWNED, base=attr)
                 current, rhs = exprs.operands([value], [current])
                 result = rs.Try(_rt(helper, current.ref(), rhs.arg()))
-                return [
-                    _try_stmt(rs.MethodCall(o.receiver(), "setattr", (rs.StrLit(attr), result)))
-                ]
+                return [_try_stmt(o.method("setattr", rs.StrLit(attr), result))]
         raise self.ctx.unsupported(type(target).__name__, target)
 
     def delete(self, target: ast.expr) -> list[rs.Stmt]:
@@ -436,13 +466,14 @@ class StmtLowering:
                     return [_try_stmt(rs.MethodCall(rs.Path(rust), "delete"))]
                 if target in fn.locals.assigned_deletes:
                     return [rs.Assign(rs.Path(rust), rs.Path("None"))]
-                return [_try_stmt(_rt("del_local", rs.Raw(f"&mut {rust}"), rs.StrLit(id)))]
+                place = rs.Ref(rs.Path(rust), mutable=True)
+                return [_try_stmt(_rt("del_local", place, rs.StrLit(id)))]
             case ast.Subscript(obj, index):
                 o, i = exprs.operands([obj, index])
-                return [_try_stmt(rs.MethodCall(o.receiver("del_item"), "del_item", (i.arg(),)))]
+                return [_try_stmt(o.method("del_item", i.arg()))]
             case ast.Attribute(obj, attr):
                 o = exprs.value(obj)
-                return [_try_stmt(rs.MethodCall(o.receiver(), "delattr", (rs.StrLit(attr),)))]
+                return [_try_stmt(o.method("delattr", rs.StrLit(attr)))]
             case ast.Tuple(elts) | ast.List(elts):
                 out: list[rs.Stmt] = []
                 for elt in elts:
@@ -484,6 +515,15 @@ def _pattern(names: list[str], star: int | None) -> str:
     before = ", ".join(names[:star])
     after = ", ".join(names[star + 1 :])
     return f"([{before}], {names[star]}, [{after}])"
+
+
+def _pattern_expr(names: list[str], star: int | None) -> rs.Expr:
+    """`_pattern` as the left side of a destructuring assignment."""
+    paths = [rs.Path(name) for name in names]
+    if star is None:
+        return rs.Array(tuple(paths))
+    before, after = rs.Array(tuple(paths[:star])), rs.Array(tuple(paths[star + 1 :]))
+    return rs.Tuple((before, paths[star], after))
 
 
 def _target_base(target: ast.expr) -> str:

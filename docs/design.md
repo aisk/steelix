@@ -36,6 +36,7 @@ Python AST + 注释
   │                        遇到不支持的语法抛 UnsupportedError
   ▼
 Rust AST（rustast/nodes.py）
+  │  rustast/verify.py     检查作用域、跳转标签、带类型的接收者
   │  rustast/printer.py    渲染成源码，再强制过一遍 rustfmt
   ▼
 .rs 源码
@@ -45,6 +46,14 @@ Cargo crate
 ```
 
 选择先构建一个小型 Rust AST 再打印，而不是直接拼字符串。这样 lowering 和格式化解耦，也方便做局部的可读性改写（例如去掉多余的 clone、合并 `?`）。Rust AST 只覆盖生成代码用得到的部分，不追求完整。
+
+打印之前先跑一遍检查器（`rustast/verify.py`，M3a），发现问题就报内部错误，而不是写出编译不过或语义错误的代码。它检查三类容易在 lowering 里犯、review 也不容易看出来的错误：
+
+- 每个路径和局部变量都在作用域内。嵌套的 fn item 看不到外层函数的局部变量，块里的 item 在整个块内可见。例如条件里一个 block 声明的临时变量在下一个 block 里使用，或者循环头里的 lambda 对应的 fn item 被放进了循环体
+- `break`/`continue` 的标签存在，`continue` 的标签是循环；不带标签的跳转不能跨出带标签的 block（rustc E0695）
+- 带具体类型的值（`Bound<PyDict>` 等）不能调用被该类型自己的方法遮蔽的 `PyAnyMethods` 方法（见 §8）
+
+类型只从参数类型和生成代码里少数几种产生具体类型的表达式推出来，其余都当作 `PyAny`。宏参数里不是表达式的部分（签名、`key = value`）用 `Tokens` 节点表示：文本和表达式交错，对局部变量和 item 的引用必须放在表达式部分里，文本部分不检查。Rust AST 里没有任意文本节点。检查器很便宜（所有用例加起来十几毫秒），所以每次转换都会运行。
 
 ## 3. 目录结构
 
@@ -119,6 +128,7 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 - 模块级变量的读写走 globals 字典：`rt::global(globals, "LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `globals.set_item("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "max")?`
 - 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
 - 函数末尾的 `return` 写成尾表达式，返回值本身是 `PyResult` 时不再包一层 `Ok(..?)`
+- 带 `else` 且有 `break` 的循环包在带标签的 block 里，`break` 写成 `break 'for_else`，正常结束时执行 `else`。`else` 里的 `break`/`continue` 属于外层循环，要跨出这个 block，rustc 不允许不带标签的跳转跨出带标签的 block（E0695），所以只在这时给外层循环加标签 `'outer: for ..`，写成 `continue 'outer`。其余循环都不带标签
 - 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(globals, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。需要 globals 的写成 `rt::def!(globals, scale(globals, x))`，Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
 - 模块级函数若只绑定一次，并且能在转换时绑定参数，调用时直接调用 Rust 函数（见第 6、7 节）
 - 嵌套函数和 lambda 是写在外层函数体里的 Rust fn，被捕获并会改变的变量是 `rt::Cell`（见第 6 节）
@@ -228,6 +238,7 @@ greet(
 - 嵌套函数一律通过函数对象调用（`go.get()?.call1((..))`），不做直接调用。嵌套函数的名字常常在循环里重新绑定，直接调用的分析不值得
 - 嵌套函数可以递归：函数名本身是外层函数的 cell，嵌套函数通过 cell 读到自己
 - lambda 的函数体是一个尾表达式
+- `if`、`elif`、`while`、`for` 头部表达式里的 lambda，其 fn item 放在整个语句之前，而不是第一个分支或循环体里，否则头部看不到它
 - 嵌套函数的 docstring 同样生成 `///` 和 `__doc__`
 
 ### 闭包与 cell
@@ -339,6 +350,8 @@ Rust 方法调用的形状会改变求值顺序，例如 `x in y` 写成 `y.cont
 
 lowering 给每个子表达式记录它在 Rust 里的形态（`lower/expr.py` 的 `Value`）：拥有的 `Bound`、`&Bound` 参数、局部变量、可以直接作为 `IntoPyObject` 的字面量、代表 Python bool 的 Rust `bool`（`in`、`is`、`not`、`isinstance`），以及代表 int 的 Rust 整数（`len`）。每个使用点选最可读的写法，例如条件里直接用 Rust `bool`，`len(xs) > 3` 直接写 `xs.len()? > 3`。
 
+`Value` 还记录值的具体类型（`typed`），例如容器字面量是 `PyList`，`*args` 是 `PyTuple`，`str(x)` 是 `PyString`，`iter(x)` 是 `PyIterator`。这很重要：`Bound<PyDict>` 除了 `PyAnyMethods` 还有 `PyDictMethods`，同名时 Rust 优先选后者，而 `PyDict::get_item` 在 key 不存在时返回 `None`，不抛 `KeyError`。`Bound<PyIterator>` 实现了 `Iterator`，`eq`、`lt` 等会解析成 `Iterator` 的方法。所以生成的方法调用都经过 `Value.method(name, ..)`，它查 `rustast/pyo3.py` 的表，被遮蔽且行为不同的方法先 `.as_any()` 擦除类型。行为完全相同的（精确类型上的 `contains`、`len`，dict 的 `set_item`、`del_item`）保留原写法，其中 `len` 不会失败，写成 `args.len()`，不带 `?`。
+
 临时变量是语句前面的 `let`（prelude）。只有 Rust 的求值顺序与 Python 不同、或者一个值要用两次时才引入：
 
 - 只在操作数"不纯"时需要。纯的是局部变量、参数和字面量，它们没有副作用也不会失败。全局变量读取不纯（可能抛 `NameError`，也可能被前面的调用改掉）
@@ -360,7 +373,7 @@ h.call0()?.contains(&item)?
 - 方法调用：参数都是纯的时写 `o.call_method1("m", (x, 1))?`，否则写 `o.getattr("m")?.call1((f()?,))?`，保证先查找方法
 - `in`/`not in` 用 `contains`，`is` 用 `Bound::is`，与 `None` 比较用 `is_none()`。它们的结果是 Rust `bool`，需要对象时才 `rt::bool(py, ..)`
 - `and`/`or` 在条件里是 `&&`/`||`，右侧有 prelude 时写成 block。需要值时生成 `if` 表达式，左操作数先放进临时变量，决定结果时直接 move 出来；左操作数是 Rust `bool` 时不需要临时变量。左操作数是常量时在转换时就决定。作为语句的 `a or f()` 生成 `if !a.is_truthy()? { f()?; }`
-- 链式比较：`a < b < c` 在条件里是 `a.lt(&b)? && b.lt(c)?`；需要值时第一个比较结果放进临时变量，`if result.is_truthy()? { b.rich_compare(c, ..)? } else { result }`
+- 链式比较：`a < b < c` 在条件里是 `a.lt(&b)? && b.lt(c)?`；中间操作数需要临时变量时，它和之后所有用到它的比较放在同一个 block 里：`a.lt(b)? && { let rhs = f(py)?; b.lt(&rhs)? && rhs.lt(d)? }`。需要值时第一个比较结果放进临时变量，`if result.is_truthy()? { b.rich_compare(c, ..)? } else { result }`
 - 一元运算用 PyO3 的 `neg`/`pos`/`bitnot`，`not` 是 `!cond`
 - 增量赋值的 runtime 函数按 `operator` 模块命名：`rt::iadd`、`rt::itruediv`、`rt::ior` 等。`x += v` 写成 `x = rt::iadd(&x, v)?;`
 - 容器字面量用 PyO3 的构造函数：`PyList::new(py, [1, 2, 3])?`、`PyTuple::new(..)`、`PySet::new(..)`、`[("a", 1)].into_py_dict(py)?`，空的用 `PyList::empty(py)`、`PyDict::new(py)`。元素都是同类型的字面量时直接写，否则统一写成 `&Bound`。所有元素先求值再构造，与 `BUILD_LIST`/`BUILD_MAP` 一致
@@ -417,7 +430,9 @@ pub mod point {
 - **bin 模式**（默认，主要场景）：嵌入 libpython 的可执行程序，`main.rs` 只调用 `rt::embed::run_main`
   - 不用 `auto-initialize`，用 `PyConfig` 初始化，设置 `executable`，否则 `sys.path` 里没有 `.venv` 的 site-packages。同时传入真实的 `argv`，`parse_argv = 0`
   - 以 `__main__` 身份执行模块。结束时调用 `Py_FinalizeEx`，这样会 flush stdout 并执行 atexit
-  - `SystemExit` 和未捕获异常交给 `PyErr_Print` 处理，退出码与 CPython 一致
+  - `SystemExit` 和未捕获异常交给 `PyErr_Print` 处理，退出码与 CPython 一致。之前和 CPython 的 `flush_io` 一样先 flush `sys.stderr` 和 `sys.stdout`（忽略错误），否则 stdout 和 stderr 重定向到同一个文件时，缓冲区里的输出会排在 traceback 后面
+  - 生成的 `Cargo.toml` 在 dev profile 下把 pyo3、pyo3-ffi 和 runtime 设为 `opt-level = 3`，生成的 crate 本身设为 1。没有优化的 PyO3 让每个 Python 操作慢几倍；不用 `package."*"`，因为它也会优化 proc macro，让干净构建的时间翻倍。实测（M3a）一个递归加循环的基准：全部 `opt-level = 0` 时 1.39s，现在的配置 0.40s，而 CPython 是 0.18s；干净构建从 11.5s 增加到 15.3s，改一行后重新构建从 0.5s 增加到 1.0s。转换出来的代码每个操作仍然经过 C API，没有字节码解释的开销但也没有 CPython 的特化和内联缓存，在函数被改写成原生 Rust 之前不会比 CPython 快
+  - 只有 crate 是 workspace 根时 profile 才生效，所以只在独立 crate（默认）里生成
   - build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython
   - M1 把构建时解释器的路径写死在二进制里，只适合在本机运行。分发到别的机器需要单独设计（见下）
   - 与 `python app.py` 一致的脚本信息（M2），在转换时确定并写进 `main.rs` 的 `rt::embed::Script`
@@ -478,7 +493,9 @@ pub mod point {
 - **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
-- **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码，以及 stderr 最后一行（异常类型和消息，不比较 traceback）。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
+- **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码，以及 stderr 最后一行（异常类型和消息，不比较 traceback）。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
+- **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
+- **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
 - 源码映射：函数和语句前的 `// file.py:LINE` 注释，异常经过时用 `add_note` 附加 Python 位置。对迁移的人来说行号很重要，优先级不低

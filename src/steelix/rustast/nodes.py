@@ -63,7 +63,7 @@ class MethodCall(Expr):
 
 @dataclass(frozen=True)
 class MacroCall(Expr):
-    """`path!(args)`. Arguments are expressions or `Raw` token text."""
+    """`path!(args)`. Arguments are expressions or `Tokens`."""
 
     path: str
     args: tuple[Expr, ...] = ()
@@ -78,9 +78,10 @@ class Try(Expr):
 
 @dataclass(frozen=True)
 class Ref(Expr):
-    """`&expr`."""
+    """`&expr`, or `&mut expr`."""
 
     expr: Expr
+    mutable: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,10 +128,15 @@ class IfExpr(Expr):
 
 
 @dataclass(frozen=True)
-class Raw(Expr):
-    """Verbatim tokens, used for macro arguments such as `name = "x"`."""
+class Tokens(Expr):
+    """A macro argument that is not an expression, such as `name = value` or
+    a signature: verbatim token text interleaved with expressions.
 
-    text: str
+    The text must not refer to locals or items; such references are
+    expression parts, so that the verifier sees them.
+    """
+
+    parts: tuple[str | Expr, ...]
 
 
 # --- statements ----------------------------------------------------------------
@@ -176,11 +182,13 @@ class If(Stmt):
 class While(Stmt):
     cond: Expr
     body: Block
+    label: str | None = None
 
 
 @dataclass(frozen=True)
 class Loop(Stmt):
     body: Block
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +196,7 @@ class For(Stmt):
     pat: str
     iter: Expr
     body: Block
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,7 +206,7 @@ class Break(Stmt):
 
 @dataclass(frozen=True)
 class Continue(Stmt):
-    pass
+    label: str | None = None
 
 
 @dataclass(frozen=True)

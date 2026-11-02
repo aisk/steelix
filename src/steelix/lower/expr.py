@@ -33,7 +33,8 @@ from steelix.frontend.scope import FunctionNode, params_of
 from steelix.lower.context import Context
 from steelix.lower.names import rust_ident
 from steelix.rustast import nodes as rs
-from steelix.rustast.printer import print_expr, string_literal
+from steelix.rustast.printer import string_literal
+from steelix.rustast.pyo3 import INFALLIBLE_LEN, must_erase
 
 
 class Kind(Enum):
@@ -57,8 +58,9 @@ class Value:
     kind: Kind
     owned_literal: rs.Expr | None = None
     """For `LITERAL`, `BOOL` and `NATIVE`: an expression building the object."""
-    typed: bool = False
-    """The value is a `Bound<'py, T>` of a concrete type such as `PyString`."""
+    typed: str | None = None
+    """The concrete type `T` if the value is a `Bound<'py, T>` such as a
+    `PyString`, not a `Bound<'py, PyAny>`."""
     pure: bool | None = None
     """Evaluating it has no effect and can not fail. Derived from the kind
     when not given."""
@@ -100,19 +102,21 @@ class Value:
             return rs.MethodCall(self.expr, "as_any")
         return rs.Ref(self.expr)
 
-    def receiver(self, method: str | None = None) -> rs.Expr:
-        """As the receiver of a PyO3 method call (auto-referenced).
+    def method(self, name: str, *args: rs.Expr) -> rs.MethodCall:
+        """`value.name(args)`, calling the `PyAnyMethods` method `name`.
 
-        Concrete types such as `PyTuple` have their own `len`, `get_item`, ..
-        with other signatures than the `PyAny` ones, so give `method` to call
-        the `PyAny` method on those.
+        A concrete type such as `PyDict` has its own `get_item`, `len`, ..
+        that Rust would pick instead (see `rustast.pyo3`), so such a receiver
+        is erased to `PyAny` first where that makes a difference.
         """
         if self.kind in (Kind.LITERAL, Kind.BOOL, Kind.NATIVE):
             assert self.owned_literal is not None
-            return self.owned_literal
-        if self.typed and method in _TYPED_CLASHES:
-            return rs.MethodCall(self.expr, "as_any")
-        return self.expr
+            receiver = self.owned_literal
+        elif must_erase(self.typed, name):
+            receiver = rs.MethodCall(self.expr, "as_any")
+        else:
+            receiver = self.expr
+        return rs.MethodCall(receiver, name, args)
 
     def bound(self) -> rs.Expr:
         """As an expression `&expr` makes a `&Bound<'py, PyAny>`-like reference of."""
@@ -124,7 +128,8 @@ class Value:
     def identity(self) -> rs.Expr:
         """As the argument of `Bound::is`, which takes `AsRef<Py<PyAny>>`."""
         if self.kind in (Kind.LITERAL, Kind.BOOL, Kind.NATIVE):
-            return self.receiver()
+            assert self.owned_literal is not None
+            return self.owned_literal
         return self.arg()
 
     def owned(self) -> rs.Expr:
@@ -158,7 +163,7 @@ class Value:
                 return self.expr
             case Kind.NATIVE:
                 return rs.Binary("!=", self.expr, rs.IntLit(0))
-        return _try(rs.MethodCall(self.receiver(), "is_truthy"))
+        return _try(self.method("is_truthy"))
 
 
 _BINOPS: dict[type[ast.operator], str] = {
@@ -193,10 +198,6 @@ IN_PLACE: dict[type[ast.operator], str] = {
     ast.BitXor: "ixor",
     ast.BitAnd: "iand",
 }
-
-# Methods of `PyTuple`, `PyList`, `PyDict` and `PySet` that shadow the
-# `PyAnyMethods` ones with a different signature.
-_TYPED_CLASHES = frozenset({"len", "get_item", "set_item", "del_item", "add"})
 
 _UNARY: dict[type[ast.unaryop], str] = {ast.USub: "neg", ast.UAdd: "pos", ast.Invert: "bitnot"}
 
@@ -361,7 +362,7 @@ class ExprLowering:
                 return self.bool_value(negate(self.condition(operand)))
             case ast.UnaryOp(op, operand):
                 inner = self.value(operand)
-                call = rs.MethodCall(inner.receiver(), _UNARY[type(op)])
+                call = inner.method(_UNARY[type(op)])
                 return Value(_try(call), Kind.OWNED)
             case ast.Name(id):
                 return self.name(id, expr)
@@ -384,11 +385,11 @@ class ExprLowering:
                 return self.function_value(expr, lower_nested(self.ctx, expr))
             case ast.Attribute(obj, attr):
                 inner = self.value(obj)
-                call = rs.MethodCall(inner.receiver(), "getattr", (rs.StrLit(attr),))
+                call = inner.method("getattr", rs.StrLit(attr))
                 return Value(_try(call), Kind.OWNED)
             case ast.Subscript(obj, index):
                 container, key = self.operands([obj, index])
-                call = rs.MethodCall(container.receiver("get_item"), "get_item", (key.arg(),))
+                call = container.method("get_item", key.arg())
                 return Value(_try(call), Kind.OWNED)
             case ast.Slice(lower, upper, step):
                 return self.slice(lower, upper, step)
@@ -496,7 +497,7 @@ class ExprLowering:
                 check = _rt("local", rs.Ref(rs.Path(rust)), rs.StrLit(name))
                 return Value(_try(check), Kind.REF)
             if name in fn.scope.params and name not in fn.locals.assigned_params:
-                typed = name in (fn.varargs, fn.varkw)
+                typed = {fn.varargs: "PyTuple", fn.varkw: "PyDict"}.get(name)
                 return Value(rs.Path(rust), Kind.REF, typed=typed)
             return Value(rs.Path(rust), Kind.PLACE)
         return self.global_name(name)
@@ -515,7 +516,7 @@ class ExprLowering:
         args: tuple[rs.Expr, ...] = (rhs.arg(),)
         if method == "pow":
             args += (rs.MethodCall(self.py(), "None"),)
-        return Value(_try(rs.MethodCall(lhs.receiver(method), method, args)), Kind.OWNED)
+        return Value(_try(lhs.method(method, *args)), Kind.OWNED)
 
     def boolop(self, is_and: bool, values: list[ast.expr]) -> Value:
         """`a and b` / `a or b`: the first operand that decides, as an object."""
@@ -588,7 +589,7 @@ class ExprLowering:
         match op:
             case ast.In() | ast.NotIn():
                 lhs, rhs = self.in_rust_order([lhs, rhs], [1, 0], ["item", "container"])
-                contains = _try(rs.MethodCall(rhs.receiver(), "contains", (lhs.arg(),)))
+                contains = _try(rhs.method("contains", lhs.arg()))
                 return self.bool_value(contains if isinstance(op, ast.In) else negate(contains))
             case ast.Is() | ast.IsNot():
                 cond = self._identity(lhs, rhs)
@@ -596,36 +597,45 @@ class ExprLowering:
                 return self.bool_value(cond if isinstance(op, ast.Is) else negate(cond), pure)
         self.use("pyo3::pyclass::CompareOp")
         method = _COMPARE[type(op)][1]
-        call = rs.MethodCall(
-            lhs.receiver(), "rich_compare", (rhs.arg(), rs.Path(f"CompareOp::{method}"))
-        )
+        call = lhs.method("rich_compare", rhs.arg(), rs.Path(f"CompareOp::{method}"))
         return Value(_try(call), Kind.OWNED)
 
     def _identity(self, lhs: Value, rhs: Value) -> rs.Expr:
         if _is_none_literal(rhs):
-            return rs.MethodCall(lhs.receiver(), "is_none")
+            return lhs.method("is_none")
         if _is_none_literal(lhs):
-            return rs.MethodCall(rhs.receiver(), "is_none")
-        return rs.MethodCall(lhs.receiver(), "is", (rhs.identity(),))
+            return rhs.method("is_none")
+        return lhs.method("is", rhs.identity())
 
     def compare_condition(
         self, left: ast.expr, ops: list[ast.cmpop], comparators: list[ast.expr]
     ) -> rs.Expr:
         lhs, rhs = self.operands([left, comparators[0]])
-        if len(ops) > 1 and not rhs.is_pure:
+        if len(ops) == 1:
+            return self.compare_bool(ops[0], lhs, rhs)
+        # `a < b < c`: `b` is evaluated once and used twice.
+        if not rhs.is_pure:
             lhs, rhs = self.hoist_all([lhs, rhs], ["lhs", "rhs"])
-        result = self.compare_bool(ops[0], lhs, rhs)
-        for op, comparator in zip(ops[1:], comparators[1:], strict=True):
-            lhs = rhs
-            with self.fresh() as pre:
-                rhs = self.value(comparator)
-                if comparator is not comparators[-1]:
-                    rhs = self.hoist(rhs, "rhs")
-                cond = self.compare_bool(op, lhs, rhs)
-            if pre:
-                cond = rs.BlockExpr(rs.Block(tuple(pre), cond))
-            result = rs.Binary("&&", result, cond)
-        return result
+        conds = [self.compare_bool(ops[0], lhs, rhs)]
+        conds += self.compare_condition_rest(rhs, ops[1:], comparators[1:])
+        return _all(conds)
+
+    def compare_condition_rest(
+        self, lhs: Value, ops: list[ast.cmpop], comparators: list[ast.expr]
+    ) -> list[rs.Expr]:
+        """The comparisons of a chain after the first, as conjuncts that only
+        run if the earlier ones are true. A temporary for a middle operand is
+        declared in a block that also holds every later comparison using it."""
+        with self.fresh() as pre:
+            rhs = self.value(comparators[0])
+            if len(ops) > 1:
+                rhs = self.hoist(rhs, "rhs")
+            conds = [self.compare_bool(ops[0], lhs, rhs)]
+            if len(ops) > 1:
+                conds += self.compare_condition_rest(rhs, ops[1:], comparators[1:])
+        if pre:
+            return [rs.BlockExpr(rs.Block(tuple(pre), _all(conds)))]
+        return conds
 
     def compare_bool(self, op: ast.cmpop, lhs: Value, rhs: Value) -> rs.Expr:
         """One comparison as a Rust `bool`, as in a condition."""
@@ -635,7 +645,7 @@ class ExprLowering:
         if _native_int_comparable(lhs, rhs):
             # `len(xs) > 3`: both sides are plain Rust integers.
             return rs.Binary(symbol, lhs.expr, rhs.expr)
-        return _try(rs.MethodCall(lhs.receiver(), method, (rhs.arg(),)))
+        return _try(lhs.method(method, rhs.arg()))
 
     # --- subscripts and displays ---
 
@@ -649,7 +659,7 @@ class ExprLowering:
         call = _rt(helper, self.py(), *(v.arg() for v in values))
         # Building a slice of plain values can not fail or have effects.
         pure = all(v.is_pure for v in values)
-        return Value(_try(call), Kind.OWNED, typed=True, pure=pure)
+        return Value(_try(call), Kind.OWNED, typed="PySlice", pure=pure)
 
     def elements(self, values: list[Value]) -> list[rs.Expr]:
         """Elements of a Rust array, which must all have the same type."""
@@ -664,16 +674,16 @@ class ExprLowering:
         self.use(f"pyo3::types::{type_name}")
         if not elts and type_name != "PySet":
             call: rs.Expr = rs.Call(rs.Path(f"{type_name}::empty"), (self.py(),))
-            return Value(call, Kind.OWNED, typed=True)
+            return Value(call, Kind.OWNED, typed=type_name)
         values = self.operands(list(elts))
         array = rs.Array(tuple(self.elements(values)))
         call = _try(rs.Call(rs.Path(f"{type_name}::new"), (self.py(), array)))
-        return Value(call, Kind.OWNED, typed=True)
+        return Value(call, Kind.OWNED, typed=type_name)
 
     def dict(self, keys: list[ast.expr], values: list[ast.expr]) -> Value:
         if not keys:
             self.use("pyo3::types::PyDict")
-            return Value(rs.Call(rs.Path("PyDict::new"), (self.py(),)), Kind.OWNED, typed=True)
+            return Value(rs.Call(rs.Path("PyDict::new"), (self.py(),)), Kind.OWNED, typed="PyDict")
         self.use("pyo3::types::IntoPyDict")
         items = self.operands([e for pair in zip(keys, values, strict=True) for e in pair])
         lowered_keys = self.elements(items[0::2])
@@ -682,7 +692,7 @@ class ExprLowering:
             tuple(rs.Tuple((k, v)) for k, v in zip(lowered_keys, lowered_values, strict=True))
         )
         call = _try(rs.MethodCall(pairs, "into_py_dict", (self.py(),)))
-        return Value(call, Kind.OWNED, typed=True)
+        return Value(call, Kind.OWNED, typed="PyDict")
 
     # --- f-strings ---
 
@@ -714,11 +724,11 @@ class ExprLowering:
         value = self.value(node.value)
         match chr(node.conversion) if node.conversion >= 0 else None:
             case "s":
-                value = Value(_try(rs.MethodCall(value.receiver(), "str")), Kind.OWNED, typed=True)
+                value = Value(_try(value.method("str")), Kind.OWNED, typed="PyString")
             case "r":
-                value = Value(_try(rs.MethodCall(value.receiver(), "repr")), Kind.OWNED, typed=True)
+                value = Value(_try(value.method("repr")), Kind.OWNED, typed="PyString")
             case "a":
-                value = Value(_try(_rt("ascii", value.ref())), Kind.OWNED, typed=True)
+                value = Value(_try(_rt("ascii", value.ref())), Kind.OWNED, typed="PyString")
         spec = node.format_spec
         if spec is None:
             if node.conversion >= 0:
@@ -754,9 +764,9 @@ class ExprLowering:
     def call_value(self, callee: Value, values: list[Value]) -> Value:
         if values:
             tuple_ = rs.Tuple(tuple(v.arg() for v in values))
-            call = rs.MethodCall(callee.receiver(), "call1", (tuple_,))
+            call = callee.method("call1", tuple_)
         else:
-            call = rs.MethodCall(callee.receiver(), "call0")
+            call = callee.method("call0")
         return Value(_try(call), Kind.OWNED)
 
     def call_macro(
@@ -771,7 +781,7 @@ class ExprLowering:
             # `o.m(..)` looks the method up first.
             def method() -> Value:
                 obj = self.value(func.value)
-                getattr_ = rs.MethodCall(obj.receiver(), "getattr", (rs.StrLit(func.attr),))
+                getattr_ = obj.method("getattr", rs.StrLit(func.attr))
                 return Value(_try(getattr_), Kind.OWNED, base=func.attr)
 
             first: Operand = method
@@ -781,18 +791,18 @@ class ExprLowering:
         items += [a.value if isinstance(a, ast.Starred) else a for a in args]
         items += [k.value for k in keywords]
         callee, *values = self.operands(items)
-        parts: list[str] = []
+        parts: list[rs.Expr] = []
         for arg, value in zip(args, values, strict=False):
             if isinstance(arg, ast.Starred):
-                parts.append("*" + print_expr(value.bound()))
+                parts.append(rs.Tokens(("*", value.bound())))
             else:
-                parts.append(print_expr(value.arg()))
+                parts.append(value.arg())
         for keyword, value in zip(keywords, values[len(args) :], strict=True):
             if keyword.arg is None:
-                parts.append("**" + print_expr(value.bound()))
+                parts.append(rs.Tokens(("**", value.bound())))
             else:
-                parts.append(f"{_keyword(keyword.arg)} = {print_expr(value.arg())}")
-        macro = rs.MacroCall("rt::call", (callee.bound(), *(rs.Raw(p) for p in parts)))
+                parts.append(rs.Tokens((f"{_keyword(keyword.arg)} = ", value.arg())))
+        macro = rs.MacroCall("rt::call", (callee.bound(), *parts))
         return Value(_try(macro), Kind.OWNED)
 
     def method_call(self, func: ast.Attribute, args: list[ast.expr]) -> Value:
@@ -800,16 +810,16 @@ class ExprLowering:
         looks the method up before evaluating the arguments."""
         obj = self.value(func.value)
         start = len(self.prelude)
-        getattr_ = rs.MethodCall(obj.receiver(), "getattr", (rs.StrLit(func.attr),))
+        getattr_ = obj.method("getattr", rs.StrLit(func.attr))
         method = Value(_try(getattr_), Kind.OWNED, base=func.attr)
         callee, *values = self.operands(list(args), [method])
         if len(self.prelude) == start and all(v.is_pure for v in values):
             name = rs.StrLit(func.attr)
             if values:
                 tuple_ = rs.Tuple(tuple(v.arg() for v in values))
-                call = rs.MethodCall(obj.receiver(), "call_method1", (name, tuple_))
+                call = obj.method("call_method1", name, tuple_)
             else:
-                call = rs.MethodCall(obj.receiver(), "call_method0", (name,))
+                call = obj.method("call_method0", name)
             return Value(_try(call), Kind.OWNED)
         return self.call_value(callee, values)
 
@@ -847,23 +857,25 @@ class ExprLowering:
         arg = args[0]
         match name:
             case "len":
-                length = _try(rs.MethodCall(arg.receiver("len"), "len"))
+                length: rs.Expr = arg.method("len")
+                if arg.typed not in INFALLIBLE_LEN:
+                    length = _try(length)
                 return Value(length, Kind.NATIVE, _rt("int", self.py(), length), base="len")
             case "isinstance":
-                check = _try(rs.MethodCall(arg.receiver(), "is_instance", (args[1].ref(),)))
+                check = _try(arg.method("is_instance", args[1].ref()))
                 return self.bool_value(check)
             case "bool":
                 return self.bool_value(arg.truthy())
             case "type":
-                return Value(rs.MethodCall(arg.receiver(), "get_type"), Kind.OWNED, typed=True)
+                return Value(arg.method("get_type"), Kind.OWNED, typed="PyType")
             case "iter":
-                call = _try(rs.MethodCall(arg.receiver(), "try_iter"))
-                return Value(call, Kind.OWNED, typed=True)
+                call = _try(arg.method("try_iter"))
+                return Value(call, Kind.OWNED, typed="PyIterator")
             case "str" | "repr":
-                call = _try(rs.MethodCall(arg.receiver(), name))
-                return Value(call, Kind.OWNED, typed=True)
+                call = _try(arg.method(name))
+                return Value(call, Kind.OWNED, typed="PyString")
             case "abs":
-                return Value(_try(rs.MethodCall(arg.receiver(), "abs")), Kind.OWNED)
+                return Value(_try(arg.method("abs")), Kind.OWNED)
         raise AssertionError(name)
 
     def direct_call(self, target: Direct, node: ast.Call) -> Value:
@@ -961,7 +973,7 @@ class ExprLowering:
         default_exprs = [v.arg() for v in self.operands(list(defaults))]
         signature = signature_text(self.ctx, scope, rust, default_exprs)
         options = function_options(self.ctx, scope, rust)
-        macro_args = (self.globals(), rs.Raw(signature), *(rs.Raw(o) for o in options))
+        macro_args = (self.globals(), signature, *(rs.Tokens((o,)) for o in options))
         macro = rs.MacroCall("rt::def" if bind else "rt::function", macro_args)
         value = Value(_try(macro), Kind.OWNED)
         if not decorator_values:
@@ -989,6 +1001,14 @@ def _expr_base(expr: ast.expr) -> str | None:
         case ast.Attribute(_, attr):
             return attr
     return None
+
+
+def _all(conds: list[rs.Expr]) -> rs.Expr:
+    """`a && b && c`."""
+    result = conds[0]
+    for cond in conds[1:]:
+        result = rs.Binary("&&", result, cond)
+    return result
 
 
 def _if_expr(cond: rs.Expr, then: rs.Block, orelse: rs.Block) -> rs.IfExpr:

@@ -59,17 +59,17 @@
 
 模块级的带注解赋值（需要模块的 `__annotate__`，与类一起在 M5 做）、模块级的条件定义和重复定义、类型参数（`def f[T]()`）仍然报 `UnsupportedError`。
 
-## M3a 修复与生成代码检查
+## M3a 修复与生成代码检查 ✅
 
 来自 M2 之后的独立评估，以及 M3 验收时发现的问题。
 
-- [ ] 字面量容器（`PyDict`/`PyList`/`PyTuple`/`PySet`）作为 `get_item`、`set_item`、`del_item`、`len`、`contains` 等的接收者时先擦除成 `PyAny`。现在 `{"a": 1}[key]` 在 key 不存在时返回 None 而不是抛 KeyError，`len([1, 2])`、`[1, 2, 3][-1]` 编译失败。`Value` 的 `typed` 应该带上具体类型
-- [ ] 条件里的链式比较，中间操作数需要临时变量时（`if a < b < f() < d:`），后续比较要放进同一个嵌套 block，否则临时变量超出作用域
-- [ ] 循环 `else` 里对外层循环的 `break`/`continue` 需要带标签（rustc E0695）。循环节点加可选标签，`Continue` 加标签字段，维护循环栈
-- [ ] bin 模式下未捕获异常时，先 flush `sys.stdout` 再打印 traceback，与 CPython 的输出顺序一致
-- [ ] 生成代码检查器：在 Rust AST 上检查路径引用是否在作用域内、跳转标签是否正确、带类型的接收者是否调用了被遮蔽的方法，对所有 golden 运行
-- [ ] 一批"真实风格"的脚本作为语料，要求能转换并编译（不比较输出），用来发现编译失败类的问题
-- [ ] 生成的 crate 在 dev profile 下提高 `opt-level`，文档说明函数改写前不会比 CPython 快
+- [x] 字面量容器（`PyDict`/`PyList`/`PyTuple`/`PySet`）作为 `get_item`、`set_item`、`del_item`、`len`、`contains` 等的接收者时先擦除成 `PyAny`。现在 `{"a": 1}[key]` 在 key 不存在时返回 None 而不是抛 KeyError，`len([1, 2])`、`[1, 2, 3][-1]` 编译失败。`Value` 的 `typed` 应该带上具体类型
+- [x] 条件里的链式比较，中间操作数需要临时变量时（`if a < b < f() < d:`），后续比较要放进同一个嵌套 block，否则临时变量超出作用域
+- [x] 循环 `else` 里对外层循环的 `break`/`continue` 需要带标签（rustc E0695）。循环节点加可选标签，`Continue` 加标签字段，维护循环栈
+- [x] bin 模式下未捕获异常时，先 flush `sys.stdout` 再打印 traceback，与 CPython 的输出顺序一致
+- [x] 生成代码检查器：在 Rust AST 上检查路径引用是否在作用域内、跳转标签是否正确、带类型的接收者是否调用了被遮蔽的方法，对所有 golden 运行
+- [x] 一批"真实风格"的脚本作为语料（`tests/corpus/`），要求能转换、编译没有警告，输出与 CPython 一致。发现并修复了 `if`/`while`/`for` 头部的 lambda 的 fn item 被放进分支或循环体的问题
+- [x] 生成的 crate 在 dev profile 下提高 `opt-level`，文档说明函数改写前不会比 CPython 快
 
 ## M3b 改写边界
 

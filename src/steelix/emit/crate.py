@@ -20,6 +20,7 @@ from steelix.lower.module import lower_module
 from steelix.lower.names import Renamer
 from steelix.rustast.fmt import config_text, rustfmt
 from steelix.rustast.printer import print_file, string_literal
+from steelix.rustast.verify import verify
 
 PYO3_VERSION = "0.30"
 RUNTIME_VERSION = "0.1"
@@ -28,6 +29,26 @@ RUNTIME_VERSION = "0.1"
 # functions may ignore their parameters, and Python code may assign values it
 # never reads (including `del x`, which becomes `x = None`).
 CRATE_ALLOWS = "#![allow(non_snake_case, unused_variables, unused_assignments)]"
+
+
+# Unoptimized PyO3 makes every Python operation several times slower, so the
+# dev profile optimizes it and the runtime fully, and the generated code a
+# little, which keeps rebuilds after an edit around a second. Packages are
+# named instead of `"*"`, which would also optimize proc macros and double
+# the time of a clean build.
+DEV_PROFILE = """\
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.pyo3]
+opt-level = 3
+
+[profile.dev.package.pyo3-ffi]
+opt-level = 3
+
+[profile.dev.package.steelix-runtime]
+opt-level = 3
+"""
 
 
 class Mode(Enum):
@@ -50,8 +71,15 @@ def rust_module_name(name: str) -> str:
 
 
 def render_module(parsed: ParsedModule) -> str:
-    """The formatted Rust source for one Python module."""
-    return rustfmt(print_file(lower_module(parsed).file))
+    """The formatted Rust source for one Python module.
+
+    The generated code is verified first (`rustast.verify`): a failure is a
+    bug of steelix, reported instead of writing code that does not compile
+    or does the wrong thing.
+    """
+    file = lower_module(parsed).file
+    verify(file)
+    return rustfmt(print_file(file))
 
 
 def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> None:
@@ -99,7 +127,8 @@ def cargo_toml(module_name: str, options: CrateOptions) -> str:
     if options.mode is Mode.BIN:
         lines += ["[build-dependencies]", f'pyo3-build-config = "{PYO3_VERSION}"', ""]
     if options.standalone:
-        lines += ["[workspace]", ""]
+        # Cargo only reads profiles from the workspace root.
+        lines += [DEV_PROFILE, "[workspace]", ""]
     return "\n".join(lines)
 
 

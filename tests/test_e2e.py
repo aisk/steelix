@@ -67,6 +67,32 @@ def test_bin_matches_python(case: str, bin_workspace: Workspace, tmp_path: Path)
         assert actual.last_stderr_line == expected.last_stderr_line
 
 
+UNCAUGHT = [case for case in CASES if "uncaught" in case or case == "typed_receivers"]
+
+
+@pytest.mark.parametrize("case", UNCAUGHT)
+def test_bin_output_order_matches_python(
+    case: str, bin_workspace: Workspace, tmp_path: Path
+) -> None:
+    """With stdout and stderr going to the same file, everything the program
+    printed comes before the traceback, as with CPython (which flushes
+    `sys.stdout` before printing the exception)."""
+
+    def combined(args: list[str]) -> list[str]:
+        proc = subprocess.run(
+            args, cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+        assert proc.returncode != 0
+        return proc.stdout.splitlines()
+
+    expected = combined([str(PYTHON), str(CASES_DIR / f"{case}.py")])
+    actual = combined([str(E2E_DIR / "target" / "debug" / case)])
+    printed = expected[: expected.index("Traceback (most recent call last):")]
+    assert printed
+    assert actual[: len(printed)] == printed
+    assert actual[-1] == expected[-1]
+
+
 def test_ext_module_matches_python(tmp_path: Path) -> None:
     """The extension module mode still builds and imports."""
     workspace = make_workspace("ext", ["fib"], Mode.EXT, from_golden=False)

@@ -11,11 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from steelix.emit.crate import CrateOptions, Mode, emit_crate, rust_module_name
+from steelix.emit.crate import DEV_PROFILE, CrateOptions, Mode, emit_crate, rust_module_name
 from steelix.frontend.parse import parse_file
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES_DIR = ROOT / "tests" / "cases"
+CORPUS_DIR = ROOT / "tests" / "corpus"
 GOLDEN_DIR = ROOT / "tests" / "golden"
 RUNTIME = ROOT / "crates" / "steelix-runtime"
 PYTHON = ROOT / ".venv" / "bin" / "python"
@@ -71,7 +72,14 @@ class Workspace:
         )
 
 
-def make_workspace(name: str, cases: list[str], mode: Mode, *, from_golden: bool) -> Workspace:
+def make_workspace(
+    name: str,
+    cases: list[str],
+    mode: Mode,
+    *,
+    from_golden: bool,
+    source_dir: Path = CASES_DIR,
+) -> Workspace:
     """Generate one crate per case under a shared cargo workspace.
 
     With `from_golden` the generated module file is replaced by the golden
@@ -83,14 +91,15 @@ def make_workspace(name: str, cases: list[str], mode: Mode, *, from_golden: bool
     root.mkdir(parents=True)
     options = CrateOptions(mode=mode, runtime_path=RUNTIME, standalone=False)
     for case in cases:
-        parsed = parse_file(CASES_DIR / f"{case}.py")
+        parsed = parse_file(source_dir / f"{case}.py")
         crate = root / case
         emit_crate(parsed, crate, options)
         if from_golden:
             module_file = rust_module_name(case).removeprefix("r#") + ".rs"
             shutil.copyfile(GOLDEN_DIR / f"{case}.rs", crate / "src" / module_file)
     members = ", ".join(f'"{case}"' for case in cases)
-    (root / "Cargo.toml").write_text(f'[workspace]\nresolver = "3"\nmembers = [{members}]\n')
+    manifest = f'[workspace]\nresolver = "3"\nmembers = [{members}]\n\n{DEV_PROFILE}'
+    (root / "Cargo.toml").write_text(manifest)
     # Reuse the repository lock file so PyO3 resolves to the same version offline.
     shutil.copyfile(ROOT / "Cargo.lock", root / "Cargo.lock")
     return Workspace(root, cases)

@@ -17,7 +17,7 @@ from steelix.lower.context import Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
 from steelix.lower.names import FUNCTION_RESERVED, Renamer, rust_ident
 from steelix.rustast import nodes as rs
-from steelix.rustast.printer import print_expr, string_literal
+from steelix.rustast.printer import string_literal
 
 BOUND = "Bound<'py, PyAny>"
 RESULT = f"PyResult<{BOUND}>"
@@ -51,7 +51,8 @@ def lower_function(
 
     body: list[rs.Stmt] = []
     if fn in module.callgraph.recursive:
-        body.append(rs.Let("_guard", init=rs.Path("rt::RecursionGuard::enter(py)?")))
+        enter = rs.Call(rs.Path("rt::RecursionGuard::enter"), (rs.Path("py"),))
+        body.append(rs.Let("_guard", init=rs.Try(enter)))
     typed = {info.varargs, info.varkw} - {None}
     for param in scope.params:
         rust = names[param]
@@ -170,8 +171,12 @@ def lower_nested(ctx: Context, node: FunctionNode) -> str:
 
 def signature_text(
     ctx: Context, scope: FunctionScope, rust_name: str, defaults: list[rs.Expr]
-) -> str:
-    """`name[captures](params) -> "ret"` as written in `rt::function!`."""
+) -> rs.Tokens:
+    """`name[captures](params) -> "ret"` as written in `rt::function!`.
+
+    The Rust fn, the captured variables and the defaults are expressions of
+    the result; parameter names only name the macro's own bindings.
+    """
     module = ctx.module
     node = scope.node
     assert node is not None
@@ -184,51 +189,71 @@ def signature_text(
                 source = repr(source)
             annotations[param] = string_literal(source)
 
-    captures = []
+    out: list[str | rs.Expr] = [rs.Path(rust_name)]
+
+    def separate(index: int) -> None:
+        if index:
+            out.append(", ")
+
     parent = ctx.function
-    for free in scope.frees:
-        assert parent is not None
-        outer = parent.names[free]
-        text = outer if free in module.frozen[scope.owner(free)] else f"&{outer}"
-        captures.append(text + _as(outer, free))
+    if scope.frees:
+        out.append("[")
+        for i, free in enumerate(scope.frees):
+            assert parent is not None
+            outer = parent.names[free]
+            separate(i)
+            if free in module.frozen[scope.owner(free)]:
+                out.append(rs.Path(outer))
+            else:
+                out.append(rs.Ref(rs.Path(outer)))
+            out.append(_as(outer, free))
+        out.append("]")
 
     args = node.args
     defaults_iter = iter(defaults)
-    parts = []
+    params: list[list[str | rs.Expr]] = []
     if node in module.callgraph.needs_globals:
-        parts.append("globals")
+        params.append(["globals"])
 
-    def param(arg: ast.arg, prefix: str = "", default: bool = False) -> str:
+    def param(arg: ast.arg, prefix: str = "", default: bool = False) -> list[str | rs.Expr]:
         rust = names[arg.arg]
         text = prefix + rust + _as(rust, arg.arg)
         if arg.arg in annotations:
             text += f": {annotations[arg.arg]}"
         if default:
-            text += f" = {print_expr(next(defaults_iter))}"
-        return text
+            return [text + " = ", next(defaults_iter)]
+        return [text]
 
     positional = args.posonlyargs + args.args
     first_default = len(positional) - len(args.defaults)
     for i, arg in enumerate(positional):
-        parts.append(param(arg, default=i >= first_default))
+        params.append(param(arg, default=i >= first_default))
         if args.posonlyargs and i == len(args.posonlyargs) - 1:
-            parts.append("/")
+            params.append(["/"])
     if args.vararg is not None:
-        parts.append(param(args.vararg, "*"))
+        params.append(param(args.vararg, "*"))
     elif args.kwonlyargs:
-        parts.append("*")
+        params.append(["*"])
     for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
-        parts.append(param(arg, default=default is not None))
+        params.append(param(arg, default=default is not None))
     if args.kwarg is not None:
-        parts.append(param(args.kwarg, "**"))
+        params.append(param(args.kwarg, "**"))
 
-    text = rust_name
-    if captures:
-        text += f"[{', '.join(captures)}]"
-    text += f"({', '.join(parts)})"
+    out.append("(")
+    for i, part in enumerate(params):
+        separate(i)
+        out += part
+    out.append(")")
     if "return" in annotations:
-        text += f" -> {annotations['return']}"
-    return text
+        out.append(f" -> {annotations['return']}")
+    # Join adjacent text for a compact node.
+    merged: list[str | rs.Expr] = []
+    for part in out:
+        if isinstance(part, str) and merged and isinstance(merged[-1], str):
+            merged[-1] += part
+        elif part != "":
+            merged.append(part)
+    return rs.Tokens(tuple(merged))
 
 
 def _as(rust: str, python: str) -> str:
