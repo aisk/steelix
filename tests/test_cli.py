@@ -50,10 +50,10 @@ def test_transpile_ext_mode(tmp_path: Path) -> None:
 
 def test_no_fallback_reports_unsupported(tmp_path: Path, capsys) -> None:
     source = tmp_path / "bad.py"
-    source.write_text("class A:\n    pass\n")
+    source.write_text("async def f():\n    pass\n")
     args = ["transpile", str(source), "-o", str(tmp_path / "out"), "--no-fallback"]
     assert main(args) == 1
-    assert "bad.py:1:1: unsupported: class definition" in capsys.readouterr().err
+    assert "bad.py:1:1: unsupported: async function" in capsys.readouterr().err
 
 
 def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, capsys) -> None:
@@ -78,30 +78,30 @@ def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, 
     args = ["transpile", str(source), "-o", str(tmp_path / "out"), "--report", str(report)]
     assert main([*args, "-v"]) == 0
     err = capsys.readouterr().err
-    assert "app.py: native 1/3 (33%) functions, 1/2 (50%) module statements" in err
+    assert "app.py: native 1/3 (33%) functions, 2/2 (100%) module statements" in err
     assert "      app.py:11:12" in err  # the generator expression, with -v
     data = json.loads(report.read_text())
     assert data["functions"] == {"native": 1, "total": 3}
     features = {f["feature"]: f for f in data["features"]}
-    assert features["class definition"]["functions"] == 1
     assert features["list comprehension"] == {
         "feature": "list comprehension",
         "occurrences": 1,
         "functions": 1,
-        "only": 0,
+        "only": 1,
         "statements": 0,
         "locations": ["app.py:7:16"],
     }
     assert features["generator expression"]["only"] == 1
     assert [(p["kind"], p["name"]) for p in data["python"]] == [
         ("function", "A.m"),
-        ("statement", "A"),
         ("function", "g"),
     ]
     module_rs = (tmp_path / "out" / "src" / "app.rs").read_text()
     assert "pub fn f<'py>(" in module_rs
-    assert "line = 5," in module_rs
-    assert "class A:\n" in module_rs
+    # The class is native, its method `m` is kept as Python.
+    assert 'rt::class!(m, "A"(), a::body, line = 5)' in module_rs
+    assert "line = 6," in module_rs
+    assert "    def m(self):\n" in module_rs
 
 
 def test_coverage_merges_modules(tmp_path: Path, capsys) -> None:

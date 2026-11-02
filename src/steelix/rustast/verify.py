@@ -124,11 +124,25 @@ class _Verifier:
                     else:
                         scope.items.add(path.rsplit("::", 1)[-1])
                     scope.items.add(path.split("::", 1)[0])
-                case rs.Fn(name) | rs.ModDecl(name):
+                case rs.Fn(name) | rs.ModDecl(name) | rs.Mod(name):
                     scope.items.add(name)
-        for item in file.items:
+        self.items(file.items, scope)
+
+    def items(self, items: list[rs.Item] | tuple[rs.Item, ...], scope: _Scope) -> None:
+        for item in items:
             if isinstance(item, rs.Fn):
                 self.function(item, scope)
+            elif isinstance(item, rs.Mod):
+                self.mod(item, scope)
+
+    def mod(self, mod: rs.Mod, outer: _Scope) -> None:
+        """`pub mod name { use super::*; .. }`: the glob import makes the
+        items of the enclosing module visible."""
+        scope = _Scope(outer, barrier=True)
+        for item in mod.items:
+            if isinstance(item, rs.Fn | rs.Mod):
+                scope.items.add(item.name)
+        self.items(mod.items, scope)
 
     def function(self, fn: rs.Fn, outer: _Scope) -> None:
         saved = self.fn, self.labels

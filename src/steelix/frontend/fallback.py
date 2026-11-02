@@ -2,8 +2,10 @@
 
 A module level statement that steelix can not lower is kept as Python source
 and executed in place, in the module's globals, by `rt::exec_python!`. A `def`
-or `class` containing an unsupported construct is kept whole, nested
-functions included.
+containing an unsupported construct is kept whole, nested functions included.
+A class is split like a compound statement (method level mixed mode): only
+the methods and other statements of its body that contain unsupported
+constructs are kept, and run in the class namespace.
 
 Module level `if`, `for` and `while` statements are split: when only some of
 the statements in their bodies are unsupported, only those are kept and the
@@ -25,7 +27,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from steelix.diagnostics import UnsupportedError
-from steelix.frontend.subset import FunctionLike, Issue
+from steelix.frontend.subset import WHOLE_CLASS_FEATURES, FunctionLike, Issue
 
 
 @dataclass
@@ -79,6 +81,8 @@ def split(stmt: ast.stmt, issues: list[Issue]) -> dict[ast.stmt, list[Issue]]:
     `issues` in `stmt`: `stmt` itself, or for an `if`, `for` or `while`
     whose header is supported, the statements of its bodies that contain
     them, split further the same way."""
+    if isinstance(stmt, ast.ClassDef):
+        return _split_class(stmt, issues)
     if not isinstance(stmt, _SPLIT):
         return {stmt: issues}
     children = [*stmt.body, *stmt.orelse]
@@ -95,6 +99,43 @@ def split(stmt: ast.stmt, issues: list[Issue]) -> dict[ast.stmt, list[Issue]]:
     if isinstance(stmt, ast.For | ast.While) and any(_jumps_out(s) for s in kept):
         return {stmt: issues}
     return kept
+
+
+def _split_class(cls: ast.ClassDef, issues: list[Issue]) -> dict[ast.stmt, list[Issue]]:
+    """Method level mixed mode: the class is created natively and only the
+    statements of its body that contain `issues` (methods, or other
+    statements, split further) are kept, and run in the class namespace.
+
+    The whole class is kept when an issue is in its header (decorators,
+    bases, keywords), changes how the rest of the body is compiled
+    (`WHOLE_CLASS_FEATURES`), or when a kept statement has annotations, which
+    belong to the class's `__annotate__`."""
+    by_child: dict[ast.stmt, list[Issue]] = {}
+    for issue in issues:
+        if issue.feature in WHOLE_CLASS_FEATURES or issue.feature == "type parameters":
+            return {cls: issues}
+        line, col = issue.location.line, issue.location.col
+        child = next((c for c in cls.body if _contains(c, line, col)), None)
+        if child is None:
+            return {cls: issues}
+        by_child.setdefault(child, []).append(issue)
+    kept: dict[ast.stmt, list[Issue]] = {}
+    for child, found in by_child.items():
+        kept.update(split(child, found))
+    for stmt in kept:
+        if any(isinstance(node, ast.AnnAssign) for node in _class_body_nodes(stmt)):
+            return {cls: issues}
+    return kept
+
+
+def _class_body_nodes(stmt: ast.AST) -> Iterator[ast.AST]:
+    """The nodes of a class body statement outside of nested functions and
+    classes (where annotations belong to the class)."""
+    yield stmt
+    if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+        return
+    for child in ast.iter_child_nodes(stmt):
+        yield from _class_body_nodes(child)  # type: ignore[arg-type]
 
 
 def _contains(stmt: ast.stmt, line: int, col: int) -> bool:
@@ -201,13 +242,14 @@ def _is_compound(stmt: ast.stmt) -> bool:
     return isinstance(stmt, _COMPOUND)
 
 
-def python_source(lines: list[str], stmts: list[ast.stmt]) -> str:
+def python_source(lines: list[str], stmts: list[ast.stmt], pad: bool = False) -> str:
     """The source text of consecutive statements, ending with a newline. A
     comment after the last statement on its line is included.
 
     Statements in the body of a compound statement keep their indentation
     (`rt::exec_python` compiles them in an `if True:` block, so that column
-    offsets stay those of the file)."""
+    offsets stay those of the file). Statements of a class body are always
+    indented (`pad`)."""
     start, end = first_line(stmts[0]), last_line(stmts[-1])
     # Compound and decorated statements always start a line; a simple
     # statement may follow another one after `;`.
@@ -220,8 +262,9 @@ def python_source(lines: list[str], stmts: list[ast.stmt]) -> str:
         # Another statement follows on the same line.
         text[-1] = text[-1][:end_col]
     if text[0][:start_col].strip():
-        # After `;`: only the statement itself.
-        text[0] = text[0][start_col:]
+        # After `;`: only the statement itself, or with `pad` spaces in
+        # place of what comes before it, which keeps its column.
+        text[0] = (b" " * start_col if pad else b"") + text[0][start_col:]
     return "\n".join(line.decode() for line in text) + "\n"
 
 

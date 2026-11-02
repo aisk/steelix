@@ -40,6 +40,12 @@ _FEATURES: dict[type[ast.AST], str] = {
 
 FunctionLike = ast.FunctionDef | ast.AsyncFunctionDef
 
+CLASS_ANNOTATION_IN_BLOCK = "annotation in a compound statement of a class body"
+CLASS_GLOBAL = "global or nonlocal declaration in a class body"
+WHOLE_CLASS_FEATURES = frozenset({CLASS_ANNOTATION_IN_BLOCK, CLASS_GLOBAL})
+"""Unsupported constructs in a class body that keep the whole class as
+Python: they change how the rest of the body is compiled."""
+
 
 @dataclass(frozen=True, eq=False)
 class Issue:
@@ -62,6 +68,8 @@ class SubsetChecker:
         """Number of enclosing functions and classes."""
         self.functions: list[FunctionLike] = []
         """The enclosing functions, outermost first."""
+        self.blocks: list[str] = []
+        """`class` and `function` for each enclosing class body and function."""
         self.issues: list[Issue] = []
 
     def fail(self, feature: str, node: ast.AST) -> None:
@@ -110,9 +118,39 @@ class SubsetChecker:
         self.check_defaults(fn.args)
         self.depth += 1
         self.functions.append(fn)
+        self.blocks.append("function")
         for stmt in fn.body:
             self.check_stmt(stmt)
+        self.blocks.pop()
         self.functions.pop()
+        self.depth -= 1
+
+    def in_class_body(self) -> bool:
+        return bool(self.blocks) and self.blocks[-1] == "class"
+
+    def check_class(self, cls: ast.ClassDef) -> None:
+        if cls.type_params:
+            self.fail("type parameters", cls)
+        for decorator in cls.decorator_list:
+            self.check_expr(decorator)
+        for base in cls.bases:
+            self.check_expr(base.value if isinstance(base, ast.Starred) else base)
+        for keyword in cls.keywords:
+            self.check_expr(keyword.value)
+        self.depth += 1
+        self.blocks.append("class")
+        for stmt in cls.body:
+            match stmt:
+                case ast.AnnAssign(ast.Name(), _, value, simple=1):
+                    # Evaluated lazily by the class's `__annotate__`.
+                    if value is not None:
+                        self.check_expr(value)
+                case ast.AnnAssign():
+                    self.fail("annotated assignment to an attribute or subscript", stmt)
+                    self.descend(stmt)
+                case _:
+                    self.check_stmt(stmt)
+        self.blocks.pop()
         self.depth -= 1
 
     def check_defaults(self, args: ast.arguments) -> None:
@@ -164,6 +202,8 @@ class SubsetChecker:
                 self.check_expr(test)
                 if msg is not None:
                     self.check_expr(msg)
+            case ast.Global() | ast.Nonlocal() if self.in_class_body():
+                self.fail(CLASS_GLOBAL, stmt)
             case ast.Pass() | ast.Break() | ast.Continue() | ast.Global() | ast.Nonlocal():
                 pass
             case ast.Raise(exc, cause):
@@ -185,6 +225,9 @@ class SubsetChecker:
                     if item.optional_vars is not None:
                         self.check_target(item.optional_vars)
                 self.check_body(body)
+            case ast.AnnAssign() if self.in_class_body():
+                self.fail(CLASS_ANNOTATION_IN_BLOCK, stmt)
+                self.descend(stmt)
             case ast.AnnAssign() if self.depth == 0:
                 self.fail("annotated assignment at module level", stmt)
                 self.descend(stmt)
@@ -196,13 +239,15 @@ class SubsetChecker:
             case ast.AsyncFunctionDef():
                 self.fail("async function", stmt)
                 self.check_def(stmt)
-            case ast.ClassDef():
-                # The methods are checked too: what else blocks them once
-                # classes are supported is worth knowing (coverage report).
-                self.fail("class definition", stmt)
+            case ast.ClassDef() if self.functions:
+                # The methods are checked too: what else blocks them is worth
+                # knowing (coverage report).
+                self.fail("class definition in a function", stmt)
                 self.depth += 1
                 self.descend(stmt)
                 self.depth -= 1
+            case ast.ClassDef():
+                self.check_class(stmt)
             case _:
                 self.unsupported(stmt)
 

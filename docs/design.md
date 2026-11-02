@@ -554,23 +554,123 @@ if let rt::Flow::Return(value) =
 
 手工改写的函数（第 15 节）对 Python 一侧抛出的异常类型要和原来一样，调用方的 `except` 才能照常工作。原生的错误用 Rust 的 `Result`/`Option` 表达，在 adapter 里转换成原来的 Python 异常，例如 `examples/logsum` 的 `parse_line` 把 `native::NotANumber` 转成和 `int()` 一样的 `ValueError`，生成的 `load` 照常用 `except ValueError` 接住
 
-## 10. 类
+## 10. 类（M5）
 
-默认用动态建类，语义等同 `__build_class__`（`types.new_class`：metaclass、`__prepare__`、`__set_name__`、`__init_subclass__`），方法是第 6 节的 `Function`。
-
-为了可读，每个类生成一个 Rust mod 放方法，加一个简短的建类函数
+类用动态建类，语义和 `builtins.__build_class__` 完全一样（metaclass、`__prepare__`、`__mro_entries__`、`__set_name__`、`__init_subclass__`、`__classcell__`），方法是第 6 节的 `Function`。为了可读，每个类生成一个 Rust mod，里面是类体 `body` 和每个方法一个 fn，class 语句本身是一个简短的 `rt::class!` 调用。下面是 `class Point(Base)` 生成的代码（节选）：
 
 ```rust
 pub mod point {
-    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>, x: &Bound<'py, PyAny>) -> PyResult<()> { ... }
-    pub fn norm<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> { ... }
+    use super::*;
+
+    // point.py:6
+    /// The body of `class Point`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::frame!(ns, "Point", 6, |frame| {
+            let __class__ = ns.class_cell();
+            frame.line(7);
+            ns.set(
+                "__init__",
+                rt::function!(ns, __init__(slf as "self", x, y), qualname = "Point.__init__")?,
+            )?;
+            frame.line(12);
+            let decorator = ns.get("property")?;
+            let function = rt::function!(ns, norm(slf as "self"), qualname = "Point.norm")?;
+            ns.set("norm", decorator.call1((&function,))?)?;
+            frame.line(19);
+            ns.set(
+                "describe",
+                rt::function!(ns, describe[&__class__](slf as "self"), qualname = "Point.describe")?,
+            )?;
+            Ok(())
+        })
+    }
+
+    // point.py:7
+    pub fn __init__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        x: &Bound<'py, PyAny>,
+        y: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Point.__init__", 7, |frame| {
+            frame.line(8);
+            slf.setattr("x", x)?;
+            frame.line(9);
+            slf.setattr("y", y)?;
+            Ok(rt::none(m.py()))
+        })
+    }
+
+    // point.py:19
+    pub fn describe<'py>(
+        m: &rt::Module<'py>,
+        __class__: &rt::Cell<'py>,
+        slf: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Point.describe", 19, |frame| {
+            frame.line(20);
+            rt::str(m.py(), "point on ").add(rt::super_(__class__, slf)?.call_method0("describe")?)
+        })
+    }
 }
+
+// 在 exec_module 里 class 语句原来的位置
+m.set_global(
+    "Point",
+    rt::class!(m, "Point"(m.global("Base")?), point::body, line = 6, attributes = ["x", "y"])?,
+)?;
 ```
 
-- 零参数 `super()` 降级为 `super(Cls, self)`，Cls 取建类后保存的类对象
-- Python 3.14（PEP 649）下需要在命名空间里提供 `__annotations__`/`__annotate__`，dataclass 才能工作
+### 建类
 
-不选 `#[pyclass]` 作为默认方案的原因（已验证）：不能继承 Python 定义的类（TestCase、Enum、NamedTuple、Thread 等），不支持 pickle/copy，和 Exception 混合继承会出现 layout conflict，类体内的逻辑、条件定义的类、局部类都无法表达。`#[pyclass]` 作为 M8 的可选升级路径，适用于只继承 object 或原生类型、且有类型注解的类，它更接近最终的 Rust 形态。
+- `rt::class!` 的第二个参数按 `rt::call!` 的写法列出名字、bases 和关键字（`metaclass=`、传给 `__init_subclass__` 的关键字、`*`、`**`），之后是类体 fn 和几个只读的选项：`line` 是 `__firstlineno__`（有装饰器时是第一个装饰器的行），`qualname` 只在和名字不同时给出（嵌套类），`attributes` 是 `__static_attributes__`，`annotations` 是类体里注解的源码。`__static_attributes__` 的规则由 CPython 的代码生成器决定，`frontend/classinfo.py` 把模块编译一次，从每个类体的代码里读出来
+- 宏创建一个 `rt::class::BuildClass` 对象，像 `__build_class__` 一样以名字和 bases 为位置参数调用，所以参数的求值顺序和 `*`/`**` 的报错与 CPython 一致。运行时（`class.rs` 的 `build_class`）逐步复刻 `__build_class__` 的 C 代码：`__mro_entries__`（以及 `__orig_bases__`）、确定 metaclass（`metaclass conflict`）、`__prepare__`（返回值必须是 mapping）、执行类体、调用 metaclass，最后检查 `__classcell__`。错误消息和 CPython 相同
+- 编译器在类体前后生成的代码也由运行时补上，顺序相同。之前是 `__module__`、`__qualname__`、`__firstlineno__`、`__doc__`（`from __future__ import annotations` 时还有 `__annotations__`），之后是 `__annotate_func__`、`__static_attributes__`、`__classdictcell__`、`__classcell__`
+- 装饰器在 `rt::class!` 之前求值，建类之后倒序应用，每次应用的行号是装饰器自己的那一行，最后绑定名字（与 CPython 一样）
+- `type.__new__` 只把 Python 函数类型的 `__new__`、`__init_subclass__`、`__class_getitem__` 自动包成 staticmethod/classmethod，运行时在建类之后对 `Function` 补上同样的包装
+
+### 类体
+
+- 类体在自己的帧里运行（`rt::frame!(ns, "Point", 6, ..)`，traceback 里是 `in Point`，`f_locals` 是命名空间）。`ns: &rt::Namespace` 包着 `__prepare__` 返回的命名空间，名字按 `LOAD_NAME` 的规则查找：先查命名空间（精确的 dict 走快速路径，别的 mapping 用 `__getitem__`，只接住 `KeyError`），再查 globals 和 builtins。读是 `ns.get("x")?`，写是 `ns.set("x", v)?`，`del x` 是 `ns.del("x")?`
+- 所以类体里的任意语句（`if`、`for`、`try`、`with`、嵌套类、条件定义的方法、有副作用的调用）都是原生代码，执行顺序和副作用与 CPython 一样
+- 方法、lambda 看不到类的命名空间（类作用域的规则），它们引用的名字照常是全局变量或闭包变量。方法里和类属性同名的全局变量读的仍是全局变量
+- 私有名字改编（类 `Point` 里的 `__x` 是 `_Point__x`）在 frontend 的 desugar 里按 `_Py_Mangle` 的规则做，和 symtable 一致，生成代码里直接写改编后的名字。`def`、`class` 的 `__name__` 不改编，只改编绑定的名字
+- 类体里不带参数的 `locals()`、`vars()`、`dir()`、`exec()`、`eval()`、`globals()`、`super()` 要看调用方的帧，原生的类体没有解释器帧，所在的语句保留为 Python（§13）
+
+### 方法
+
+- 类体里的 `def` 创建 `Function`，Rust fn 放在类的 mod 里，名字就是方法名，和模块级的函数名、mod 里别的名字冲突时加 `_`（property 的 setter、deleter 是 `label_`、`label__`）。`self` 参数叫 `slf`，`rt::function!` 里写成 `slf as "self"`
+- 方法和模块函数一样接收 `m`。实例属性是 `slf.getattr("x")?`、`slf.setattr("x", v)?`，调用自己的方法是 `slf.call_method0("describe")?`，都是动态的，和 Python 一样受子类覆盖、`__getattr__`、`__slots__` 影响；方法之间不直接调用
+- `staticmethod`、`classmethod`、`property` 和别的装饰器一样处理，不需要特殊支持
+- `Function` 有 `__get__`，绑定后是 `types.MethodType`，和 Python 函数一样。M5 还给它加了一个 `__code__`：没有字节码，只描述签名（`co_name`、`co_qualname`、参数个数、`co_varnames`、`co_freevars`、flags），给检查 `co_freevars` 的代码（`dataclass(slots=True)`）用
+
+### `super()` 和 `__class__`
+
+- 用了零参数 `super()` 或 `__class__` 的方法和 CPython 一样捕获类的 `__class__` cell：`body` 开头 `let __class__ = ns.class_cell();`，方法按闭包捕获它（`describe[&__class__](..)`，第 6 节），Rust 签名多一个 `__class__: &rt::Cell<'py>` 参数。cell 作为 `__classcell__` 交给 metaclass，由 `type.__new__` 设为新建的类，所以类装饰器换掉类、metaclass 改动类时，结果都和 CPython 一样
+- `super()` 生成 `rt::super_(__class__, slf)?`，第二个参数是方法的第一个位置参数，cell 为空或者不是类型时抛出和 CPython 相同的 `RuntimeError`/`TypeError`。在 classmethod、property、`__init_subclass__` 里同样可用。没有位置参数的方法、类体里的 `super()` 保留为 Python
+- 原来的设计是把 `super()` 降级成 `super(Cls, self)`，Cls 取名字绑定的类。没有这样做：类装饰器返回另一个类时，CPython 的 `super()` 用的是 cell 里原来的类，名字绑定的却是新的类，两者不同。cell 的做法和 CPython 完全相同，生成的代码一样短
+
+### 实例状态与继承
+
+实例状态在 `__dict__` 里（或 `__slots__` 声明的描述符里），由 Python 的对象模型管理，所以 pickle、`copy.deepcopy`、`__eq__`/`__hash__`、`__repr__`、`isinstance` 都和 CPython 一样。可以继承任何类：Python 定义的类（包括保留为 Python 的类，反过来也可以），Exception（自定义异常可以在原生代码和保留的代码之间抛出、接住），Enum、NamedTuple、TypedDict、`abc.ABC`、`threading.Thread`、`argparse.Action`，以及多重继承。dataclass 可用（含 `frozen=True`、`order=True`），见下面的注解。
+
+### 注解（PEP 649）
+
+- 类体里的注解编译成类的 `__annotate__`：运行时由 `annotations = [("x", "int")]` 创建 `__annotate_func__`，注解源码在第一次读取时 `eval`，名字先在类的命名空间（`__classdict__` cell）里找，再到 globals。FORWARDREF 格式得到的 `ForwardRef` 带 `owner` 和 `is_class`，和 CPython 一样。dataclass、`typing.get_type_hints`、`annotationlib.get_annotations` 的三种格式都可用
+- 有 `from __future__ import annotations` 时，类体开头 `ns.setup_annotations()?` 创建 `__annotations__`，每条带注解的赋值之后 `ns.annotate("x", "int")?`
+- 方法的注解按第 6 节处理，它们引用的类里的名字同样经过 `__classdict__` 查找（方法用 `ns` 作为 `rt::function!` 的第一个参数，就是为了拿到这个 cell）
+
+### 类出现的位置
+
+- 模块级的类、`if` 里或循环里的类、嵌套类都是原生代码。嵌套类的 mod 放在外层类的 mod 里，带 `qualname = "Outer.Inner"`
+- 函数里的 `class` 还不支持，所在的函数保留为 Python（标准库里有 9 个函数）。类体要能读外层函数的局部变量，需要把 cell 传给 `body`，以后再做
+- 带类型参数的类（`class C[T]:`，PEP 695）整个保留为 Python
+
+### 不选的方案
+
+- `types.new_class` 的语义和 `__build_class__` 相同，但类体要以 Python 回调的形式传进去，`__qualname__`、`__module__`、`__firstlineno__`、`__classcell__` 和类体的帧都要在回调外另外处理。直接复刻 `__build_class__` 的 C 代码，求值顺序和报错更容易对齐
+- `#[pyclass]` 不作为默认方案（已验证）：不能继承 Python 定义的类（TestCase、Enum、NamedTuple、Thread 等），不支持 pickle/copy，和 Exception 混合继承会出现 layout conflict，类体内的逻辑、条件定义的类、局部类都无法表达。它是手工改写时的升级路径（第 15 节），M9 计划为符合条件的类提供可选的自动升级，适用于只继承 object 或原生类型、且有类型注解的类，更接近最终的 Rust 形态
+- 方法级混合模式的另一种做法是把保留的方法单独编译成函数，再放进命名空间。没有这样做，因为 `super()`、`__class__`、私有名字改编、`__qualname__` 都依赖编译器把它当作类体的一部分编译。现在的做法见 §13
 
 ## 11. 输出模式
 
@@ -605,6 +705,7 @@ pub mod point {
 - 生成代码自己使用的名字和 Python 名字冲突时，改名 Python 名字，加 `_` 后缀直到不冲突。函数体内保留 `py`、`_guard`、`frame`、`_handling`、`Ok`、`Err`、`Some`、`None`；模块级函数名保留 `exec_module`、`m`、`module`、`py`、`frame`，它们是生成的函数的局部变量（名为 `m` 的 Python 函数生成 `fn m_`）。不需要改名的名字优先保留原拼写，改名不会抢占它们
 - 模块上下文参数叫 `m`，和 `#[pymodule]` 函数的模块参数一样。函数里有名为 `m` 的 Python 局部变量（常见的是正则的 match 对象）时，保留局部变量的名字，这个函数的上下文参数改叫 `module`
 - 嵌套函数的 Rust fn 和外层函数的局部变量、临时变量在同一个命名空间，冲突时同样加 `_` 后缀
+- 类的 Rust mod 名是类名的 snake case（`TextCalendar` 是 `text_calendar`），和模块里别的 mod、`rt`、`pyo3`、`std`、`body`、Rust 关键字冲突时加 `_`。mod 里的方法 fn 避开 `body`、模块级函数名（`use super::*` 会被遮蔽）和生成代码自己的名字，类体 fn 的局部变量 `ns`、`__class__` 同样保留
 - Python 可见的函数名由 `rt::def!` 去掉 `r#` 得到，改过名的用 `name = "..."` 显式给出。改过名的参数在签名里写成 `py_ as "py"`，报错信息、关键字参数和 `inspect.signature` 都用 Python 名字
 - 含孤立代理（lone surrogate）的字符串不能写成 Rust `&str` 字面量，用 `rt::str_surrogatepass(py, b"...")?` 从 `surrogatepass` 编码的字节构造
 - 字面量的具体写法：i32 范围内的整数直接写，超出的加 `i64`/`i128` 后缀，更大的用 `rt::bigint(py, "...")?`；浮点数用 `repr` 的最短往返表示，`inf` 写 `f64::INFINITY`；`None` 作参数时写 `py.None()`；`bytes` 一律用 `rt::bytes(py, b"...")`，不依赖 PyO3 对字节数组的隐式转换
@@ -632,9 +733,9 @@ pub mod point {
 - `ImportError` 的文字只覆盖常见情况，CPython 对循环 import 中"partially initialized module"和模块名遮蔽标准库的特殊提示没有复刻。模块级 import 传给 `__import__` 的 `locals` 是 `None`（CPython 传模块的 dict）
 - warning（例如 `DeprecationWarning`）的输出里没有源码行
 - 对自身模块的修改（第 7 节）只识别常见写法。识别不到的有：`importlib.import_module(__name__)`、`__import__(__name__)`、`getattr(sys, "modules")` 等其他取得模块对象的方式，经过参数、容器、属性传递的模块对象，ext 模式下按模块的真实名字 `import` 自己，`exec`/`eval` 的命名空间是别处得到的模块 dict，以及其他模块里的修改（`mock.patch("app.f")`）。这些情况下直接调用看不到替换
-- 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，没有 `__code__`（依赖字节码的工具无法使用）。`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）
+- 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，`__code__` 只描述签名，没有字节码，`co_firstlineno` 是 1（`dis`、`inspect.getsource` 等依赖字节码或源位置的工具无法使用）。`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）
 - `del f.__defaults__` 等删除元信息属性的操作抛 `AttributeError`，CPython 是把它设为 None。赋值为 None 的行为一致
-- 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；FORWARDREF 格式创建的 `ForwardRef` 没有 `owner`。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
+- 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；函数注解在 FORWARDREF 格式下创建的 `ForwardRef` 没有 `owner`（类注解的有）。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
 - 直接调用时省略的参数，不可变字面量的默认值直接写在调用处，所以别的模块给这个函数的 `__defaults__`/`__kwdefaults__` 赋值时直接调用看不到，这和直接调用看不到 monkeypatch 是同一类差异。本模块里的赋值会被识别，这时改为读函数对象（第 6 节）。字面量每次调用都创建新对象，见上面关于常量 identity 的一条
 - 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch，或者 `sys.modules[__name__].f = g`），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError: f() was replaced by <function g at 0x..>, but transpiled code calls the original directly and can not take the default of its parameter 'b' from the replacement`。CPython 会调用替换后的函数，要做到一样，直接调用就得在每次调用前检查 globals，失去了直接调用的意义，所以只保证报错清楚。M3c 之前这里会 panic默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
 - 模块级的条件定义（`if` 里的 `def`）和重复定义（第二个及以后的）保留为 Python（§13），条件定义所在的 `if` 本身是原生代码
@@ -647,19 +748,26 @@ pub mod point {
   - 有 `from __future__ import annotations` 时，CPython 在模块开头创建的 `__conditional_annotations__` 要等第一段带注解的保留代码执行时才有（这种模式下它不被使用）
 - Rust 的 panic（手工改写的代码里的 bug，或者 steelix 的 bug）在 bin 模式下和未捕获的 Python 异常一样处理：打印 `pyo3_runtime.PanicException` 的 traceback，退出码是 1，而不是 Rust 默认的 101。生成的代码和 runtime 不应该因为 Python 一侧可见的状态 panic，这类错误都转成 Python 异常
 - 嵌套函数的调用总是经过函数对象（性能差异，语义相同）
+- 类（第 10 节）的差异
+  - `dataclass(slots=True)` 重新建类时，只更新 Python 函数和 property 的 `__class__` cell（它用 `isinstance(f, types.FunctionType)` 挑选方法）。类里有用到 `super()` 或 `__class__` 的 property 时，同一个 cell 被更新，所有方法都正确；没有的话，原生方法里的零参数 `super()` 仍然指向原来的类，抛出 `TypeError: super(type, obj): obj (instance of P) is not an instance or subtype of type (P).`（`tests/cases/classes_dataclass_slots.py`）。别的重新建类的装饰器也是一样
+  - 原生的 class 语句不经过 `builtins.__build_class__`，替换它（`builtins.__build_class__ = ..`）只对保留为 Python 的类起作用，和特化的 builtin 一样
+  - `__classdictcell__`：CPython 在类体里有 `def` 或注解时总是创建这个 cell，steelix 在第一个 `def` 执行时才创建。只有类体里的 `def` 都没有执行（在不成立的 `if` 里）时，类的 `__dict__` 里少一个 `__classdictcell__`
+  - 类体里有保留为 Python 的语句（§13）时，运行时在每段保留代码执行前后读写命名空间的 `__module__`、`__qualname__`、`__firstlineno__`、`__static_attributes__` 几个键，把保留代码自己设置的值改回来。`__prepare__` 返回自定义 mapping 时能看到这些多出来的操作
+  - 多行的 class 语句（多个装饰器、多行的 bases）在建类时出错，模块帧只显示 `class` 所在的一行，和上面"多行语句只显示取值所在的一行"是同一个差异
 
 ## 13. 不支持特性的处理：混合模式（M3c）
 
 目标是 CPython 能运行的应用都能转换，并且行为一致。steelix 还不能降级的部分保留为 Python 源码，在模块的 globals 里执行。整个程序先跑起来，再逐步扩大原生转换的范围，覆盖率报告（下面）告诉我们下一步该支持什么。
 
 - 默认就是混合模式。`steelix transpile --no-fallback` 恢复以前的行为：遇到不支持的语法就报错，诊断信息带 `文件:行:列` 和特性名
-- 粒度是模块作用域里的语句。模块的作用域就是 globals 字典，所以不支持的模块级语句（类、`try`、`with`、模块级的推导式、条件定义的函数、带注解的赋值等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（generator、`try`、推导式、嵌套的类等）整个保留为 Python，嵌套函数一起保留
+- 粒度是模块作用域里的语句。模块的作用域就是 globals 字典，所以不支持的模块级语句（模块级的推导式、条件定义的函数、带注解的赋值、`import *` 等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（generator、推导式、函数里的类等）整个保留为 Python，嵌套函数一起保留
 - 模块级的 `if`、`for`、`while`（包括 `if __name__ == "__main__":`）会拆开（M3d）：只有体里的某些语句不支持时，只保留这些语句，`if`/循环本身和其余语句仍是原生代码。拆分是递归的，体里的 `if`/`for`/`while` 同样处理。不拆的情况：不支持的构造在条件、循环变量或被迭代的表达式里，整个语句保留；保留的语句里有跳出原生循环的 `break`/`continue`（单独编译是 `SyntaxError`），整个循环保留，这是最简单而且正确的做法，保留的循环自己的 `break`/`continue` 不受影响。保留的语句之间不用同步任何东西，它们读写的都是 globals
+- 类按方法拆开（M5，方法级的混合模式）：类本身原生创建，只有含不支持语法的方法和类体语句保留为 Python，在类的命名空间里执行，见下面的"类体里保留的语句"。类体里的 `if`/`for`/`while` 同样拆开
 - 原生函数里的一部分语句保留为 Python（更细的粒度）暂不做：那需要在 Rust 局部变量和 Python 代码之间同步局部变量。记录保留哪些语句的数据结构（`frontend/fallback.py` 的 `FallbackPlan`）按语句节点索引，现在已经放进模块级复合语句里的语句，以后可以直接放进函数里的语句
 
 ### 判定
 
-- `frontend/subset.py` 遍历整个模块，记录每个不支持的构造（特性名、位置、所在的最外层函数，即模块级 `def` 或类的方法），按顶层语句分组。遇到不支持的节点不停下，继续检查它的子节点，所以一个函数里所有的阻碍都会被统计。类的方法也照常检查，用来估计支持类之后还有什么挡着
+- `frontend/subset.py` 遍历整个模块，记录每个不支持的构造（特性名、位置、所在的最外层函数，即模块级 `def` 或类的方法），按顶层语句分组。遇到不支持的节点不停下，继续检查它的子节点，所以一个函数里所有的阻碍都会被统计。类的方法和模块级 `def` 一样统计
 - 少数不支持的情况要到分析或 lowering 时才发现（函数里不带参数的 `locals()`/`vars()`/`dir()`/`exec()`/`eval()`、嵌套函数的注解引用外层局部变量、超过参数个数上限的调用）。这时 lowering 抛出 `UnsupportedError`，按出错的位置找到所在的顶层语句，和它里面已经保留的语句一起按上面的规则重新拆分，然后从头重新分析和 lowering，因为保留一个 `def` 会改变别的函数能否直接调用它。正常情况下最多重试几次
 - 同名的模块级 `def` 出现多次时，第一个原生转换，后面的保留为 Python（两个 Rust 函数需要不同的名字）。名字绑定了不止一次，所以调用都走 globals
 
@@ -675,28 +783,19 @@ pub mod point {
 每个保留的复合语句（`def`、`class`、`try`、`with`、整个保留的循环等）单独一个 `rt::exec_python!` 调用，只有连续的简单语句合在一起（M3d 之前连续的保留语句都合成一段，一个 `exec_python!` 里可能有几百行、好几个函数和类）。源码写成 raw string，原样放在它执行的位置，前面一行注释给出源位置和保留的原因（特性和位置）。下面节选自 `tests/golden/mixed_mode.rs`：
 
 ```rust
-    rt::def!(m, log(event))?;
-    log(m, &rt::str(py, "native statement before the class"))?;
-    // mixed_mode.py:17, kept as Python: class definition at 17:1
-    rt::exec_python!(
-        m,
-        line = 17,
-        r#"
-class Counter:
-    """Kept as Python: classes are not lowered yet."""
-
-    instances = log("class body")
-
-    def __init__(self, start):
-        self.value = start
-
-    def bump(self):
-        # Python calling a native function.
-        self.value = double(self.value)
-        return self
+        rt::def!(m, double(x))?;
+        // mixed_mode.py:35, kept as Python: yield at 38:13
+        rt::exec_python!(
+            m,
+            line = 35,
+            r#"
+def evens(limit):
+    for n in range(limit):
+        if n % 2 == 0:
+            yield n
 "#
-    )?;
-    rt::def!(m, double(x))?;
+        )?;
+        rt::def!(m, use_counter(start))?;
 ```
 
 拆开的 `if` 里保留的语句保持原来的缩进：
@@ -720,13 +819,51 @@ class Counter:
 - 复合语句体里的语句保留原来的缩进，运行时在它前面一行补一个 `if True:` 再编译，所以列位置（traceback 里的 `^`）也和文件一致
 - 模块有 `from __future__ import annotations` 时写成 `rt::exec_python!(m, line = 17, future_annotations, r#"..."#)`，编译时带上对应的 flag
 - 生成的模块文件开头有一段模块文档，列出所有保留为 Python 的语句和原因，读代码的人一眼就能看出哪些已经是原生代码
-- 检查器（§2）认识这个宏：参数必须是模块上下文、`line = N`、可选的 `future_annotations` 或 `first_annotation = I`（见下面的模块注解）和 raw string，源码必须从新的一行开始，并且按这个行号（缩进的源码按上面的 `if True:`）能用 `compile()` 编译
+- 检查器（§2）认识这个宏：参数必须是模块上下文（类体里是命名空间 `ns`）、`line = N`、可选的 `future_annotations` 或 `first_annotation = I`（见下面的模块注解）和 raw string，源码必须从新的一行开始，并且按这个行号（缩进的源码按上面的 `if True:`）能用 `compile()` 编译
 
 运行时 `rt::python::exec_python` 在源码前面补 `line - 1` 个空行，用 `Py_CompileStringObject` 以模块的 `__file__` 为文件名编译，再用 `PyEval_EvalCode` 在模块的 globals 里执行（globals 和 locals 是同一个 dict，和模块级代码一样）。所以
 
 - 保留的 `def` 和 `class` 定义的对象和 CPython 完全一样：`__module__` 来自 globals 的 `__name__`，`__qualname__`、`__code__.co_filename`、`co_firstlineno` 都是原来的，`inspect.getsource` 能读到源码
 - 异常经过保留的代码时，traceback 里是原来的文件名和行号，并且能显示源码行
 - 原生代码和 Python 代码共享同一个 globals：Python 代码调用原生函数（`rt::def!` 绑定在 globals 里），原生代码通过 `m.global(..)` 调用 Python 定义的函数和类，两个方向都可以
+
+### 类体里保留的语句（M5）
+
+类体里不能降级的语句（方法、类属性的赋值、类体里的 `if` 等）保留为 Python，生成的 `body` 在原来的位置用类的命名空间执行它们，前后的语句仍是原生代码。下面节选自 `tests/golden/classes_mixed.rs`：
+
+```rust
+            frame.line(15);
+            ns.set("native_before", 1)?;
+            // classes_mixed.py:16, kept as Python: list comprehension at 16:15
+            rt::exec_python!(
+                ns,
+                line = 16,
+                r#"
+    squares = [i * i for i in range(4)]
+"#
+            )?;
+            frame.line(17);
+            ns.set("native_after", ns.get("squares")?.get_item(-1)?)?;
+            // classes_mixed.py:22, kept as Python: list comprehension at 23:18
+            rt::exec_python!(
+                ns,
+                line = 22,
+                r#"
+    def kept_greet(self):
+        values = [x for x in super().items()]
+        return f"kept:{super().greet()}:{values}:{__class__.__name__}"
+"#
+            )?;
+```
+
+运行时（`class.rs` 的 `exec_python`）把保留的源码当作类体编译，在它前面的几行补上外层类的 `class` 语句（嵌套类每层一行，名字取自 `__qualname__`），编译整段源码，取出最里层类体的代码对象，以模块的 globals 和类的命名空间为 locals 执行。所以
+
+- 保留的方法和 CPython 编译出来的完全一样：`__qualname__`、`co_firstlineno`、traceback 里的文件名和行号都是原来的，私有名字按真实的类名改编
+- 保留的方法里的 `super()` 和 `__class__` 用的是这段代码自己的 `__class__` cell。执行完运行时从命名空间里取走它放进去的 `__classcell__`、`__classdictcell__`，建类之后把类填进这些 cell，和原生方法的 cell 一样经过 metaclass 检查
+- 这段代码自己会设置 `__module__`、`__qualname__`、`__firstlineno__` 和 `__static_attributes__`，执行完改回类的值（`__static_attributes__` 在建类前由运行时统一设置），差异见第 12 节
+- 原生代码和保留代码共用同一个命名空间，互相读写类属性，调用彼此的方法
+
+整个类保留为 Python 的情况：不支持的构造在类的头部（装饰器、bases、关键字）或者是类型参数（`class C[T]:`）；类体里有 `global`/`nonlocal` 声明，或者复合语句里有带注解的赋值，它们会改变整个类体的编译方式；要保留的语句里有带注解的赋值（注解属于整个类的 `__annotate__`，不能分段编译）。标准库里只有 `typing` 的 3 个带类型参数的类整个保留。
 
 ### 模块注解
 
@@ -752,10 +889,10 @@ CPython 3.14 把模块里所有的注解编译成一个 `__annotate__` 函数，
 `steelix transpile` 结束时在 stderr 打印一段摘要，`-v` 列出每个不支持构造的位置，`-q` 不打印，`--report FILE` 写出 JSON（`coverage.py`），可以跨模块合并（`coverage.merge`），用来决定先支持什么
 
 ```
-stdlib_calendar.py: native 10/72 (14%) functions, 28/42 (67%) module statements, 200/838 (24%) lines
+stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements, 583/838 (70%) lines
   kept as Python by     functions  only  statements  occurrences
-  class definition             57    28          14           14
-  list comprehension           12     0           2           13
+  list comprehension            8     8           2           13
+  generator expression          8     8           0           12
 ```
 
 - 统计单位：函数是模块级 `def` 和类的方法（嵌套函数算在外层函数里），语句是除 `def` 以外的顶层语句，另外按行数统计
@@ -794,7 +931,8 @@ stdlib_calendar.py: native 10/72 (14%) functions, 28/42 (67%) module statements,
 1. **先改逻辑，数据留在 Python 容器里。** 函数体改成用 PyO3 的具体类型 API 直接操作原来的对象：`cast::<PyDict>()`、`cast::<PyList>()`、遍历、`get_item`、`set_item`，没有拷贝。参数和返回值仍是原来的 Python 对象，调用方和读取这些对象的其他函数都不受影响。例子里的 `tally` 就停在这一步：它返回的 dict 还被两个没改写的函数读取
 2. **生产方和所有读取方都改写后，再把容器换成 Rust 类型。** 一个 dict 记录变成 `struct`、一个计数 dict 变成 `HashMap` 或 `Vec`，要等创建它的函数和所有读取它的函数一起改写。只改其中一个，就要在边界上来回转换，既慢又容易在转换处丢掉语义（顺序、键的类型）。例子里的 `parse_line` 和 `percentile` 做完了这一步，它们的数据在适配层里转换一次
 
-类的方法要以整个类为单位改写（M5 之后）：实例的属性是方法之间共享的数据，只改写一个方法时它仍然要按 Python 对象读写这些属性，等同于第一步；把实例换成 Rust 结构体（`#[pyclass]`，§10）要求所有方法一起改写。
+类的两步见下面的"类的改写"。
+
 
 ### 转换放在哪里
 
@@ -845,6 +983,15 @@ pub fn percentile<'py>(
 作为 key 函数传给 `sorted`、注册成回调、赋给别的变量或者被装饰（`@functools.lru_cache`）的函数，都经过 `rt::def!` 创建的函数对象调用。函数对象按 Python 的规则绑定参数，再调用生成的函数，也就是适配层。所以这些函数的改写方式完全一样，不需要额外处理。装饰器包装的仍然是函数对象，`functools.wraps` 看到的名字和 docstring 来自 `rt::def!` 那一行，不受改写影响。
 
 嵌套函数和 lambda 也一样：生成的 fn item 就是适配层，捕获的变量（`&Bound` 或 `&rt::Cell`）在适配层里取出、转换后传给原生函数。
+
+### 类的改写（M5）
+
+每个类生成一个 mod（§10），改写也以 mod 为单位，两步和上面对应：
+
+1. **方法逐个改写，实例状态留在 `__dict__` 里。** 方法的 fn 就是适配层，签名 `(m, slf, ..)` 和普通函数一样不改。方法体可以把属性读出来转成原生类型，调用原生模块里的函数，再写回 `slf.setattr(..)`。只要读写的属性名和值的类型不变，同一个类的其他方法、子类和 Python 代码都不受影响。`rt::class!` 那一行和 `body` 不用动。也可以手工把类里保留为 Python 的方法改成原生的：在 mod 里加一个 fn，把 `body` 里的 `rt::exec_python!(ns, ..)?;` 换成 `ns.set("name", rt::function!(ns, name(slf as "self", ..), qualname = "C.name")?)?;`，方法里用了 `super()` 时在 `body` 开头 `let __class__ = ns.class_cell();` 并按闭包捕获它（照着同一个文件里生成的方法写）
+2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。M9 计划为符合条件的类自动生成这一步
+
+和函数一样，`self.method()` 在生成代码里总是动态调用，改写成原生代码之后，同一个结构体的方法之间可以直接调用，不经过 Python。
 
 ### 改写之后不再成立的东西
 

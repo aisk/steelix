@@ -43,7 +43,14 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
         ("from os import *\n", "star import", 1, 1),
         ("async def f():\n    pass\n", "async function", 1, 1),
         ("match x:\n    case 1:\n        pass\n", "match statement", 1, 1),
-        ("class A:\n    pass\n", "class definition", 1, 1),
+        ("def f():\n    class A:\n        pass\n", "class definition in a function", 2, 5),
+        ("class A[T]:\n    pass\n", "type parameters", 1, 1),
+        (
+            "class A:\n    if x:\n        y: int\n",
+            "annotation in a compound statement of a class body",
+            3,
+            9,
+        ),
         ("try:\n    pass\nexcept* E:\n    pass\n", "try/except*", 1, 1),
         (
             "def f():\n    try:\n        pass\n    except E as e:\n        pass\n    return e\n",
@@ -314,7 +321,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
         """
         x = 1
         # about the class
-        class A:
+        class A[T]:
             # inside the class
             pass
         ys = [i for i in range(3)]  # squares
@@ -325,10 +332,10 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
         """
     )
     assert out.count("rt::exec_python!(") == 3
-    comments = "// about the class\n        // m.py:4, kept as Python: class definition at 4:1\n"
+    comments = "// about the class\n        // m.py:4, kept as Python: type parameters at 4:1\n"
     assert comments in out
     assert "// inside the class" not in out
-    assert '"\nclass A:\n    # inside the class\n    pass\n"' in out
+    assert '"\nclass A[T]:\n    # inside the class\n    pass\n"' in out
     simple = "ys = [i for i in range(3)]  # squares\nzs = {i: i for i in ys}\n"
     assert f'"\n{simple}"' in out
     assert (
@@ -365,7 +372,7 @@ def test_future_annotations_reach_python_code() -> None:
     out = lower(
         """
         from __future__ import annotations
-        class A:
+        class A[T]:
             x: int
         """
     )

@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 
 from steelix.frontend.bindings import analyze_locals
+from steelix.frontend.desugar import annotation_source
 from steelix.frontend.scope import FunctionNode, FunctionScope, annotations_of
 from steelix.lower.context import Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
@@ -63,7 +64,7 @@ def lower_function(
         FUNCTION_RESERVED | renamed_fns,
     )
     module.names[scope] = names
-    by_value = {name for name in scope.frees if name in module.frozen[scope.owner(name)]}
+    by_value = {name for name in scope.frees if name in module.frozen.get(scope.owner(name), ())}
     info = FunctionInfo(fn, scope, locals_info, names, by_value)
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
     first_line = _first_line(fn)
@@ -224,9 +225,10 @@ def signature_text(
     annotations: dict[str, str] = {}
     if isinstance(node, ast.FunctionDef):
         for param, annotation in annotations_of(node):
-            source = ast.unparse(annotation)
             if module.future_annotations:
-                source = repr(source)
+                source = repr(annotation_source(annotation))
+            else:
+                source = ast.unparse(annotation)
             annotations[param] = string_literal(source)
 
     out: list[str | rs.Expr] = [rs.Path(rust_name)]
@@ -239,10 +241,14 @@ def signature_text(
     if scope.frees:
         out.append("[")
         for i, free in enumerate(scope.frees):
-            assert parent is not None
-            outer = parent.names[free]
+            if parent is None:
+                # A method: the `__class__` cell of the class body.
+                assert free == "__class__", free
+                outer = free
+            else:
+                outer = parent.names[free]
             separate(i)
-            if free in module.frozen[scope.owner(free)]:
+            if free in module.frozen.get(scope.owner(free), ()):
                 out.append(rs.Path(outer))
             else:
                 out.append(rs.Ref(rs.Path(outer)))
@@ -379,7 +385,7 @@ def _child_blocks(stmt: ast.stmt) -> list[list[ast.stmt]]:
     match stmt:
         case ast.If(_, body, orelse) | ast.While(_, body, orelse) | ast.For(_, _, body, orelse):
             return [body, orelse]
-        case ast.FunctionDef(body=body) | ast.With(body=body):
+        case ast.FunctionDef(body=body) | ast.With(body=body) | ast.ClassDef(body=body):
             return [body]
         case ast.Try(body, handlers, orelse, finalbody):
             return [body, *(h.body for h in handlers), orelse, finalbody]

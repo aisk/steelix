@@ -51,6 +51,16 @@ def print_item(item: rs.Item) -> str:
             return f"{'pub ' if public else ''}mod {name};"
         case rs.Fn():
             return _print_fn(item)
+        case rs.Mod(name, items, doc, comments):
+            lines = [f"// {c}".rstrip() for c in comments]
+            lines += [f"/// {d}".rstrip() for d in doc]
+            lines.append(f"pub mod {name} {{")
+            lines.append("use super::*;")
+            for inner in items:
+                lines.append("")
+                lines.append(print_item(inner))
+            lines.append("}")
+            return "\n".join(lines)
     raise TypeError(f"unknown item {item!r}")
 
 

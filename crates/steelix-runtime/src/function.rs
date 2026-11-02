@@ -84,9 +84,41 @@ pub struct FunctionDef<'py> {
     pub kwdefaults: Vec<(&'static str, Bound<'py, PyAny>)>,
     /// Cell objects of the captured variables.
     pub closure: Vec<Bound<'py, PyAny>>,
+    /// Names of the captured variables, as in `__code__.co_freevars`.
+    pub closure_names: &'static [&'static str],
     /// Annotations as Python source, evaluated lazily like PEP 649.
     pub annotations: &'static [(&'static str, &'static str)],
+    /// The `__classdict__` cell of the class body defining a method, where
+    /// its annotations look names up first.
+    pub classdict: Option<Bound<'py, PyAny>>,
     pub body: Body,
+}
+
+/// Where a `def` or `lambda` runs: in module (or function) code, or in a
+/// class body, whose names the annotations of its methods can see.
+#[doc(hidden)]
+pub trait Definer<'py> {
+    fn module(&self) -> &Module<'py>;
+    /// The `__classdict__` cell, for a function with annotations.
+    fn classdict(&self) -> Option<Bound<'py, PyAny>>;
+}
+
+impl<'py> Definer<'py> for Module<'py> {
+    fn module(&self) -> &Module<'py> {
+        self
+    }
+    fn classdict(&self) -> Option<Bound<'py, PyAny>> {
+        None
+    }
+}
+
+impl<'py> Definer<'py> for crate::Namespace<'py> {
+    fn module(&self) -> &Module<'py> {
+        crate::Namespace::module(self)
+    }
+    fn classdict(&self) -> Option<Bound<'py, PyAny>> {
+        Some(crate::Namespace::classdict(self).clone())
+    }
 }
 
 /// The writable attributes, behind a lock because the class is frozen. The
@@ -112,6 +144,7 @@ pub struct Function {
     body: Body,
     globals: Py<PyDict>,
     closure: Option<Py<PyTuple>>,
+    closure_names: &'static [&'static str],
     meta: Mutex<Meta>,
 }
 
@@ -147,6 +180,8 @@ impl Function {
         } else {
             let annotate = Annotate {
                 globals: globals.clone().unbind(),
+                owner: std::sync::OnceLock::new(),
+                classdict: def.classdict.map(Bound::unbind),
                 qualname: format!("{qualname}.__annotate__"),
                 entries: def.annotations,
             };
@@ -172,6 +207,7 @@ impl Function {
             body: def.body,
             globals: globals.clone().unbind(),
             closure: closure.map(Bound::unbind),
+            closure_names: def.closure_names,
             meta: Mutex::new(meta),
         };
         Ok(Bound::new(py, function)?.into_any())
@@ -457,8 +493,13 @@ impl Function {
     ) -> PyResult<Bound<'py, PyAny>> {
         match instance {
             Some(instance) if !instance.is_none() => {
-                let method_type = slf.py().import("types")?.getattr("MethodType")?;
-                method_type.call1((slf, instance))
+                // SAFETY: valid object pointers; the result is a new reference or NULL.
+                unsafe {
+                    Bound::from_owned_ptr_or_err(
+                        slf.py(),
+                        PyMethod_New(slf.as_ptr(), instance.as_ptr()),
+                    )
+                }
             }
             _ => Ok(slf.clone().into_any()),
         }
@@ -748,6 +789,50 @@ impl Function {
         self.closure.as_ref().map(|c| c.clone_ref(py))
     }
 
+    /// A code object describing the parameters and the captured variables
+    /// (`co_freevars`, in the order of `__closure__`), without bytecode.
+    /// `dataclass(slots=True)` uses it to find the `__class__` cell.
+    #[getter]
+    fn __code__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let py = slf.py();
+        let this = slf.get();
+        let sig = this.signature;
+        let module = Module::from_globals(this.globals.bind(py).clone());
+        let filename = crate::python::filename(&module)?;
+        let (name, qualname) = {
+            let meta = this.meta();
+            (meta.name.clone_ref(py), meta.qualname.clone_ref(py))
+        };
+        let empty = py
+            .import("builtins")?
+            .getattr("compile")?
+            .call1(("", filename, "exec"))?;
+        let names: Vec<&str> = (0..sig.names.len()).map(|i| sig.name(i)).collect();
+        // CO_OPTIMIZED | CO_NEWLOCALS, CO_VARARGS, CO_VARKEYWORDS, CO_NESTED.
+        let mut flags = 0x3;
+        if sig.varargs {
+            flags |= 0x4;
+        }
+        if sig.varkw {
+            flags |= 0x8;
+        }
+        if this.closure.is_some() {
+            flags |= 0x10;
+        }
+        let changes = PyDict::new(py);
+        changes.set_item("co_name", name)?;
+        changes.set_item("co_qualname", qualname)?;
+        changes.set_item("co_argcount", sig.positional)?;
+        changes.set_item("co_posonlyargcount", sig.posonly)?;
+        changes.set_item("co_kwonlyargcount", sig.kwonly)?;
+        changes.set_item("co_nlocals", names.len())?;
+        changes.set_item("co_varnames", PyTuple::new(py, &names)?)?;
+        let frees = this.closure_names.iter().map(|name| python_name(name));
+        changes.set_item("co_freevars", PyTuple::new(py, frees)?)?;
+        changes.set_item("co_flags", flags)?;
+        empty.call_method("replace", (), Some(&changes))
+    }
+
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
         visit.call(&self.globals)?;
         visit.call(&self.closure)?;
@@ -859,6 +944,36 @@ pub fn bind_global(module: &Module<'_>, function: Bound<'_, PyAny>) -> PyResult<
     module.globals().set_item(name, function)
 }
 
+unsafe extern "C" {
+    /// `types.MethodType(function, instance)`.
+    fn PyMethod_New(
+        function: *mut ffi::PyObject,
+        instance: *mut ffi::PyObject,
+    ) -> *mut ffi::PyObject;
+}
+
+/// The `__annotate__` of a class body (`__annotate_func__`), evaluating the
+/// annotations in the class dict first, then in the module globals.
+pub(crate) fn class_annotate<'py>(
+    module: &Module<'py>,
+    ns: &crate::Namespace<'py>,
+    entries: &'static [(&'static str, &'static str)],
+) -> PyResult<Bound<'py, Annotate>> {
+    let annotate = Annotate {
+        globals: module.globals().clone().unbind(),
+        owner: std::sync::OnceLock::new(),
+        classdict: Some(ns.classdict().clone().unbind()),
+        qualname: format!("{}.__annotate__", ns.qualname()),
+        entries,
+    };
+    Bound::new(module.py(), annotate)
+}
+
+/// Records the class that a class's `__annotate__` belongs to.
+pub(crate) fn set_annotate_owner(annotate: &Bound<'_, Annotate>, owner: &Bound<'_, PyAny>) {
+    let _ = annotate.get().owner.set(owner.clone().unbind());
+}
+
 const FORMAT_VALUE: i32 = 1;
 const FORMAT_FORWARDREF: i32 = 3;
 const FORMAT_STRING: i32 = 4;
@@ -866,8 +981,12 @@ const FORMAT_STRING: i32 = 4;
 /// `__annotate__` of a transpiled function (PEP 649): annotations are kept as
 /// Python source and evaluated in the module globals when asked for.
 #[pyclass(frozen, name = "annotate", module = "steelix_runtime")]
-struct Annotate {
+pub(crate) struct Annotate {
     globals: Py<PyDict>,
+    /// The class whose annotations these are, once it exists.
+    owner: std::sync::OnceLock<Py<PyAny>>,
+    /// The `__classdict__` cell of the class body the annotations are in.
+    classdict: Option<Py<PyAny>>,
     qualname: String,
     entries: &'static [(&'static str, &'static str)],
 }
@@ -877,16 +996,30 @@ impl Annotate {
     fn __call__<'py>(&self, py: Python<'py>, format: i32) -> PyResult<Bound<'py, PyDict>> {
         let result = PyDict::new(py);
         let globals = self.globals.bind(py);
+        let locals = self
+            .classdict
+            .as_ref()
+            .and_then(|cell| crate::class::classdict_value(cell.bind(py)));
+        let locals = locals.as_ref();
         for &(name, source) in self.entries {
             let name = python_name(name);
             let value = match format {
-                FORMAT_VALUE => eval(globals, source)?,
-                FORMAT_FORWARDREF => match eval(globals, source) {
+                FORMAT_VALUE => eval(globals, locals, source)?,
+                FORMAT_FORWARDREF => match eval(globals, locals, source) {
                     Err(err) if err.is_instance_of::<PyNameError>(py) => {
-                        py.import("annotationlib")?.getattr("ForwardRef")?.call(
-                            (source,),
-                            Some(&[("module", globals.get_item("__name__")?)].into_py_dict(py)?),
-                        )?
+                        let options = match self.owner.get() {
+                            // What `annotationlib` gives the annotations of a class.
+                            Some(owner) => {
+                                [("owner", owner.clone_ref(py).into_bound(py))].into_py_dict(py)?
+                            }
+                            None => [("module", globals.get_item("__name__")?)].into_py_dict(py)?,
+                        };
+                        if self.owner.get().is_some() {
+                            options.set_item("is_class", true)?;
+                        }
+                        py.import("annotationlib")?
+                            .getattr("ForwardRef")?
+                            .call((source,), Some(&options))?
                     }
                     other => other?,
                 },
@@ -906,16 +1039,36 @@ impl Annotate {
         format!("<function {qualname} at {:#x}>", slf.as_ptr() as usize)
     }
 
+    #[getter]
+    fn __name__(&self) -> &'static str {
+        "__annotate__"
+    }
+
+    #[getter]
+    fn __qualname__(&self) -> &str {
+        &self.qualname
+    }
+
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
-        visit.call(&self.globals)
+        visit.call(&self.globals)?;
+        visit.call(&self.classdict)?;
+        visit.call(self.owner.get())
     }
 }
 
 use pyo3::types::IntoPyDict;
 
-fn eval<'py>(globals: &Bound<'py, PyDict>, source: &str) -> PyResult<Bound<'py, PyAny>> {
+fn eval<'py>(
+    globals: &Bound<'py, PyDict>,
+    locals: Option<&Bound<'py, PyAny>>,
+    source: &str,
+) -> PyResult<Bound<'py, PyAny>> {
     let code = CString::new(source)?;
-    globals.py().eval(&code, Some(globals), None)
+    let py = globals.py();
+    let Some(locals) = locals else {
+        return py.eval(&code, Some(globals), None);
+    };
+    crate::builtin(py, "eval")?.call1((source, globals, locals))
 }
 
 /// The `STRING` format: the source, except that a string annotation is the

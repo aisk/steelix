@@ -1,8 +1,7 @@
-//! Parts of `mixed_future_annotations.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `mixed_future_annotations.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 8, `def kept`: yield
-//! - line 12, `class Box`: class definition, annotated assignment
 
 use pyo3::prelude::*;
 use steelix_runtime as rt;
@@ -13,6 +12,21 @@ pub fn native<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound
         frame.line(5);
         Ok(x.str()?.into_any())
     })
+}
+
+pub mod box_ {
+    use super::*;
+
+    // mixed_future_annotations.py:12
+    /// The body of `class Box`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::frame!(ns, "Box", 12, |frame| {
+            ns.setup_annotations()?;
+            frame.line(13);
+            ns.annotate("size", "Size")?;
+            Ok(())
+        })
+    }
 }
 
 /// Executes the body of `mixed_future_annotations.py` in the module `m`.
@@ -31,16 +45,8 @@ def kept(x: int) -> Iterator[str]:
     yield str(x)
 "#
         )?;
-        // mixed_future_annotations.py:12, kept as Python: class definition at 12:1, annotated assignment at 13:5
-        rt::exec_python!(
-            m,
-            line = 12,
-            future_annotations,
-            r#"
-class Box:
-    size: Size
-"#
-        )?;
+        frame.line(12);
+        m.set_global("Box", rt::class!(m, "Box"(), box_::body, line = 12)?)?;
         frame.line(16);
         rt::builtins::print(
             m.py(),

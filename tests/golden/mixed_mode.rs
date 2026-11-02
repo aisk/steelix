@@ -1,7 +1,6 @@
-//! Parts of `mixed_mode.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `mixed_mode.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 17, `class Counter`: class definition
 //! - line 35, `def evens`: yield
 //! - line 48, `assign` statement: list comprehension
 //! - line 62, `def pick`: function definition outside module top level
@@ -40,7 +39,7 @@ pub fn use_counter<'py>(
     start: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "use_counter", 41, |frame| {
-        // Native code calling the Python class and generator through globals.
+        // Native code calling the class and the Python generator through globals.
         frame.line(43);
         let counter = m
             .global("Counter")?
@@ -83,6 +82,63 @@ pub fn trace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bou
     })
 }
 
+/// A native class whose methods call native functions.
+pub mod counter {
+    use super::*;
+
+    // mixed_mode.py:17
+    /// The body of `class Counter`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::frame!(ns, "Counter", 17, |frame| {
+            frame.line(18);
+            ns.set(
+                "__doc__",
+                "A native class whose methods call native functions.",
+            )?;
+            frame.line(20);
+            ns.set("instances", ns.get("log")?.call1(("class body",))?)?;
+            frame.line(22);
+            ns.set(
+                "__init__",
+                rt::function!(
+                    ns,
+                    __init__(slf as "self", start),
+                    qualname = "Counter.__init__"
+                )?,
+            )?;
+            frame.line(25);
+            ns.set(
+                "bump",
+                rt::function!(ns, bump(slf as "self"), qualname = "Counter.bump")?,
+            )?;
+            Ok(())
+        })
+    }
+
+    // mixed_mode.py:22
+    pub fn __init__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        start: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Counter.__init__", 22, |frame| {
+            frame.line(23);
+            slf.setattr("value", start)?;
+            Ok(rt::none(m.py()))
+        })
+    }
+
+    // mixed_mode.py:25
+    pub fn bump<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Counter.bump", 25, |frame| {
+            // A method calling a native function.
+            frame.line(27);
+            slf.setattr("value", double(m, &slf.getattr("value")?)?)?;
+            Ok(slf.clone())
+        })
+    }
+}
+
 /// Executes the body of `mixed_mode.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
@@ -100,24 +156,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, log(event))?;
         frame.line(14);
         log(m, &rt::str(py, "native statement before the class"))?;
-        // mixed_mode.py:17, kept as Python: class definition at 17:1
-        rt::exec_python!(
-            m,
-            line = 17,
-            r#"
-class Counter:
-    """Kept as Python: classes are not lowered yet."""
-
-    instances = log("class body")
-
-    def __init__(self, start):
-        self.value = start
-
-    def bump(self):
-        # Python calling a native function.
-        self.value = double(self.value)
-        return self
-"#
+        frame.line(17);
+        m.set_global(
+            "Counter",
+            rt::class!(
+                m,
+                "Counter"(),
+                counter::body,
+                line = 17,
+                attributes = ["value"]
+            )?,
         )?;
         rt::def!(m, double(x))?;
         // mixed_mode.py:35, kept as Python: yield at 38:13

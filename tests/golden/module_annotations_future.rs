@@ -1,13 +1,22 @@
-//! Parts of `module_annotations_future.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `module_annotations_future.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 6, `annassign` statement: annotated assignment at module level
-//! - line 10, `class Box`: class definition
 //! - line 14, `annassign` statement: annotated assignment at module level
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use steelix_runtime as rt;
+
+pub mod box_ {
+    use super::*;
+
+    // module_annotations_future.py:10
+    /// The body of `class Box`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        Ok(())
+    }
+}
 
 /// Executes the body of `module_annotations_future.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
@@ -33,16 +42,8 @@ A: int = 1
         )?;
         frame.line(7);
         rt::builtins::print(py, (m.global("__annotations__")?,))?;
-        // module_annotations_future.py:10, kept as Python: class definition at 10:1
-        rt::exec_python!(
-            m,
-            line = 10,
-            future_annotations,
-            r#"
-class Box:
-    pass
-"#
-        )?;
+        frame.line(10);
+        m.set_global("Box", rt::class!(m, "Box"(), box_::body, line = 10)?)?;
         // module_annotations_future.py:14, kept as Python: annotated assignment at module level at 14:1
         rt::exec_python!(
             m,

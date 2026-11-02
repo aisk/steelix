@@ -1,5 +1,5 @@
-//! Parts of `tracebacks.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `tracebacks.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 17, `def no_carets`: generator expression
 //! - line 31, `def kept_middle`: list comprehension

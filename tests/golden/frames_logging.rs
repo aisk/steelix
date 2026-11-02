@@ -1,5 +1,5 @@
-//! Parts of `frames_logging.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `frames_logging.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 20, `def kept_step`: match statement
 //! - line 39, `def warn_kept`: match statement

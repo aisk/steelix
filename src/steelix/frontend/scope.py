@@ -49,12 +49,15 @@ class FunctionScope:
         return name not in self.locals and name not in self.frees
 
     def owner(self, name: str) -> FunctionScope:
-        """The function whose local a free variable `name` is."""
+        """The function whose local a free variable `name` is, or
+        `CLASS_SCOPE` for the `__class__` cell of a class body."""
         scope = self.parent
         while scope is not None:
             if scope.is_local(name):
                 return scope
             scope = scope.parent
+        if name == "__class__":
+            return CLASS_SCOPE
         raise AssertionError(f"free variable {name!r} has no owner")
 
     def descendants(self) -> Iterator[FunctionScope]:
@@ -63,22 +66,42 @@ class FunctionScope:
             yield from child.descendants()
 
 
+@dataclass(eq=False)
+class ClassScope:
+    """The body of a `class` statement."""
+
+    name: str
+    qualname: str
+    node: ast.ClassDef
+    parent: ClassScope | None
+    """The enclosing class, if the class is nested in one."""
+    globals: frozenset[str] = frozenset()
+    """Names declared `global` in the class body."""
+    methods: list[FunctionScope] = field(default_factory=list)
+    """Functions defined directly in the body (`def` and `lambda`)."""
+
+
 @dataclass
 class ModuleScopes:
     functions: dict[FunctionNode, FunctionScope]
     """Every function scope, nested ones included."""
     top_level: list[FunctionScope]
+    classes: dict[ast.ClassDef, ClassScope] = field(default_factory=dict)
+    """Every class lowered natively (not kept as Python)."""
 
     def of(self, fn: FunctionNode) -> FunctionScope:
         return self.functions[fn]
+
+    def class_of(self, node: ast.ClassDef) -> ClassScope:
+        return self.classes[node]
 
 
 def walk_scope(node: ast.AST, skip: Collection[ast.AST] = ()) -> Iterator[ast.AST]:
     """Like `ast.walk`, but only the nodes evaluated in the scope of `node`.
 
-    Nested `def` and `lambda` nodes are yielded themselves, together with the
-    parts evaluated where they are defined (defaults and decorators), but not
-    their bodies. Annotations are evaluated lazily in their own scope (PEP
+    Nested `def`, `lambda` and `class` nodes are yielded themselves, together
+    with the parts evaluated where they are defined (defaults, decorators and
+    bases), but not their bodies. Annotations are evaluated lazily in their own scope (PEP
     649) and are skipped too. The order follows `symtable`, which visits
     defaults before decorators and both before the function itself. Nodes in
     `skip` (statements kept as Python) are left out with everything in them.
@@ -86,6 +109,10 @@ def walk_scope(node: ast.AST, skip: Collection[ast.AST] = ()) -> Iterator[ast.AS
     if node in skip:
         return
     match node:
+        case ast.ClassDef(bases=bases, keywords=keywords, decorator_list=decorators):
+            # The body is a scope of its own, evaluated when the class is created.
+            yield from _walk_all([*bases, *(k.value for k in keywords), *decorators])
+            yield node
         case ast.FunctionDef(args=args, decorator_list=decorators):
             yield from _walk_all([*args.defaults, *_present(args.kw_defaults), *decorators])
             yield node
@@ -101,6 +128,10 @@ def walk_scope(node: ast.AST, skip: Collection[ast.AST] = ()) -> Iterator[ast.AS
 def _walk_all(nodes: list[ast.expr]) -> Iterator[ast.AST]:
     for node in nodes:
         yield from walk_scope(node)
+
+
+def nested_classes(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> list[ast.ClassDef]:
+    return [n for node in nodes for n in walk_scope(node, skip) if isinstance(n, ast.ClassDef)]
 
 
 def _present(nodes: list[ast.expr | None]) -> list[ast.expr]:
@@ -149,7 +180,9 @@ def analyze_scopes(
     `python` that are kept as Python source."""
     table = symtable.symtable(source, filename, "exec")
     functions: dict[FunctionNode, FunctionScope] = {}
-    top_level = _link(table, list(module.body), None, filename, functions, python)
+    classes: dict[ast.ClassDef, ClassScope] = {}
+    linker = _Linker(functions, classes, python)
+    top_level = linker.link(table, list(module.body), None, None)
     for scope in functions.values():
         for name in scope.frees:
             scope.owner(name).cells.add(name)
@@ -157,37 +190,64 @@ def analyze_scopes(
     for scope in functions.values():
         if not future_annotations:
             _check_annotations(scope, filename)
-    return ModuleScopes(functions, top_level)
+    return ModuleScopes(functions, top_level, classes)
 
 
-def _link(
-    table: symtable.SymbolTable,
-    body: list[ast.AST],
-    parent: FunctionScope | None,
-    filename: str,
-    functions: dict[FunctionNode, FunctionScope],
-    skip: Collection[ast.AST] = (),
-) -> list[FunctionScope]:
-    """Match the function tables nested in `table` with the AST nodes,
-    except those in `skip`."""
-    tables: dict[tuple[str, int], list[symtable.Function]] = {}
-    for child in table.get_children():
-        if child.get_type() == symtable.SymbolTableType.FUNCTION:
+@dataclass
+class _Linker:
+    """Matches the symbol tables nested in a table with the AST nodes of the
+    functions and classes they are for, except in the statements `skip`
+    (kept as Python)."""
+
+    functions: dict[FunctionNode, FunctionScope]
+    classes: dict[ast.ClassDef, ClassScope]
+    skip: Collection[ast.AST]
+
+    def link(
+        self,
+        table: symtable.SymbolTable,
+        body: list[ast.AST],
+        parent: FunctionScope | None,
+        owner: ClassScope | None,
+    ) -> list[FunctionScope]:
+        """Link the functions and classes defined in `body`, the body of the
+        function `parent` or of the class `owner` (or module code)."""
+        tables: dict[tuple[str, int, str], list[symtable.SymbolTable]] = {}
+        for child in table.get_children():
+            kind = child.get_type()
+            if kind in (symtable.SymbolTableType.FUNCTION, symtable.SymbolTableType.CLASS):
+                key = (child.get_name(), child.get_lineno(), kind.value)
+                tables.setdefault(key, []).append(child)
+        scopes = []
+        for node in nested_functions(body, self.skip):
+            name = node.name if isinstance(node, ast.FunctionDef) else "lambda"
+            child = tables[(name, node.lineno, "function")].pop(0)
             assert isinstance(child, symtable.Function)
-            tables.setdefault((child.get_name(), child.get_lineno()), []).append(child)
-    scopes = []
-    for node in nested_functions(body, skip):
-        name = node.name if isinstance(node, ast.FunctionDef) else "lambda"
-        child = tables[(name, node.lineno)].pop(0)
-        scope = _function_scope(child, node, parent)
-        functions[node] = scope
-        scope.children = _link(child, scope_body(node), scope, filename, functions)
-        scopes.append(scope)
-    return scopes
+            scope = _function_scope(child, node, parent, owner)
+            self.functions[node] = scope
+            scope.children = self.link(child, scope_body(node), scope, None)
+            scopes.append(scope)
+            if owner is not None:
+                owner.methods.append(scope)
+        for node in nested_classes(body, self.skip):
+            child = tables[(node.name, node.lineno, "class")].pop(0)
+            if parent is not None:
+                continue  # classes in functions are kept as Python
+            qualname = node.name if owner is None else f"{owner.qualname}.{node.name}"
+            declared = frozenset(
+                s.get_name() for s in child.get_symbols() if s.is_declared_global()
+            )
+            cls = ClassScope(node.name, qualname, node, owner, declared)
+            self.classes[node] = cls
+            scopes += self.link(child, list(node.body), None, cls)
+        return scopes
 
 
 def _function_scope(
-    table: symtable.Function, node: FunctionNode, parent: FunctionScope | None
+    table: symtable.Function,
+    node: FunctionNode,
+    parent: FunctionScope | None,
+    owner: ClassScope | None = None,
 ) -> FunctionScope:
     globals_ = set()
     for symbol in table.get_symbols():
@@ -195,7 +255,12 @@ def _function_scope(
         if symbol.is_global():
             globals_.add(symbol.get_name())
     name = node.name if isinstance(node, ast.FunctionDef) else "<lambda>"
-    qualname = name if parent is None else f"{parent.qualname}.<locals>.{name}"
+    if parent is not None:
+        qualname = f"{parent.qualname}.<locals>.{name}"
+    elif owner is not None:
+        qualname = f"{owner.qualname}.{name}"
+    else:
+        qualname = name
     return FunctionScope(
         name=name,
         params=params_of(node.args),
@@ -258,3 +323,6 @@ def _resolves_to_function(scope: FunctionScope | None, name: str) -> bool:
 
 MODULE_SCOPE = FunctionScope(name="<module>", params=(), locals=frozenset(), globals=frozenset())
 """Module level code has no locals: every name is a global."""
+
+CLASS_SCOPE = FunctionScope(name="<class>", params=(), locals=frozenset(), globals=frozenset())
+"""Stands for the class body owning the `__class__` cell of its methods."""

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.bindings import analyze_module_bindings, analyze_module_flow
 from steelix.frontend.callgraph import build_call_graph
+from steelix.frontend.classinfo import static_attributes
 from steelix.frontend.desugar import desugar
 from steelix.frontend.fallback import (
     FallbackPlan,
@@ -63,9 +64,10 @@ def lower_module(parsed: ParsedModule, *, fallback: bool = True) -> LoweredModul
         for stmt in tree.body:
             for kept in plan.within(stmt):
                 raise plan.python[kept][0].error()
+    attributes = static_attributes(parsed.source, parsed.filename)
     while True:
         try:
-            return _lower(parsed, plan)
+            return _lower(parsed, plan, attributes)
         except UnsupportedError as err:
             # Found while lowering rather than by the subset check: keep the
             # statement as Python and start over, since keeping it changes
@@ -87,7 +89,11 @@ def _keep_redefinitions(tree: ast.Module, plan: FallbackPlan, filename: str) -> 
         seen.add(stmt.name)
 
 
-def _lower(parsed: ParsedModule, plan: FallbackPlan) -> LoweredModule:
+def _lower(
+    parsed: ParsedModule,
+    plan: FallbackPlan,
+    attributes: dict[tuple[str, int], tuple[str, ...]],
+) -> LoweredModule:
     tree = parsed.tree
     python = plan.python
     scopes = analyze_scopes(tree, parsed.source, parsed.filename, python)
@@ -109,13 +115,16 @@ def _lower(parsed: ParsedModule, plan: FallbackPlan) -> LoweredModule:
         annotation_index={a: i for i, a in enumerate(annotations)},
         source_lines=source_lines(parsed.source),
         leading_comments=_leading_comments(tree, parsed, plan),
+        static_attributes=attributes,
     )
 
     items: list[rs.Item] = []
     for fn in defs:
         comments = module.comments.get(fn, [])
         items.append(lower_function(module, scopes.of(fn), fn_names[fn.name], comments, True))
-    items.append(_lower_exec_module(module, tree, parsed, plan))
+    exec_module = _lower_exec_module(module, tree, parsed, plan)
+    items += module.class_mods
+    items.append(exec_module)
 
     uses = ["pyo3::prelude::*"]
     uses += sorted(module.uses)
@@ -231,8 +240,8 @@ def _python_summary(parsed: ParsedModule, tree: ast.Module, plan: FallbackPlan) 
     if not plan.python:
         return ()
     out = [
-        f"Parts of `{parsed.filename}` kept as Python source and run by",
-        "`rt::exec_python!` in `exec_module` (steelix does not lower them yet):",
+        f"Parts of `{parsed.filename}` kept as Python source and run in place by",
+        "`rt::exec_python!` (steelix does not lower them yet):",
         "",
     ]
     for top in tree.body:

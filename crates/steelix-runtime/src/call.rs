@@ -140,7 +140,9 @@ macro_rules! call {
     };
     // A lone `*args`: converted to a tuple after the keyword arguments.
     (@parse $f:expr, [(star $value:expr)] [$($k:tt)*]) => {{
-        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = &$f;
+        // In two steps, so that `$f` may also be a reference.
+        let function = &$f;
+        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = function;
         // Borrowed, so that a local variable is not moved.
         let star = &$value;
         let kwargs = $crate::call!(@kwargs function, [$($k)*]);
@@ -151,13 +153,17 @@ macro_rules! call {
         )
     }};
     (@parse $f:expr, [$((arg $value:expr))*] [$($k:tt)*]) => {{
-        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = &$f;
+        // In two steps, so that `$f` may also be a reference.
+        let function = &$f;
+        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = function;
         let args = ($($value,)*);
         let kwargs = $crate::call!(@kwargs function, [$($k)*]);
         $crate::pyo3::types::PyAnyMethods::call(function, args, kwargs.as_ref())
     }};
     (@parse $f:expr, [$($p:tt)*] [$($k:tt)*]) => {{
-        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = &$f;
+        // In two steps, so that `$f` may also be a reference.
+        let function = &$f;
+        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = function;
         let args = $crate::pyo3::types::PyList::empty($crate::pyo3::Bound::py(function));
         $($crate::call!(@arg args, $p);)*
         let kwargs = $crate::call!(@kwargs function, [$($k)*]);

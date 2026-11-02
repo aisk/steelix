@@ -69,6 +69,43 @@ pub fn exec_python(
     result
 }
 
+/// Where `exec_python!` runs kept source: the module (module level
+/// statements) or the namespace of a class body.
+#[doc(hidden)]
+pub trait ExecPython {
+    fn exec_python(
+        &self,
+        line: usize,
+        source: &str,
+        future_annotations: bool,
+        first_annotation: Option<usize>,
+    ) -> PyResult<()>;
+}
+
+impl ExecPython for Module<'_> {
+    fn exec_python(
+        &self,
+        line: usize,
+        source: &str,
+        future_annotations: bool,
+        first_annotation: Option<usize>,
+    ) -> PyResult<()> {
+        exec_python(self, line, source, future_annotations, first_annotation)
+    }
+}
+
+impl ExecPython for crate::Namespace<'_> {
+    fn exec_python(
+        &self,
+        line: usize,
+        source: &str,
+        future_annotations: bool,
+        _first_annotation: Option<usize>,
+    ) -> PyResult<()> {
+        crate::class::exec_python(self, line, source, future_annotations)
+    }
+}
+
 /// Defines the module's `__annotate__` for its module level annotations
 /// (`(line, "name: annotation")`, in source order), as CPython does before
 /// running the first statement of a module.
@@ -124,6 +161,14 @@ pub(crate) fn filename<'py>(module: &Module<'py>) -> PyResult<Bound<'py, PyStrin
 }
 
 /// Compiles `source` as module code with the module's file name.
+pub(crate) fn compile_source<'py>(
+    module: &Module<'py>,
+    source: String,
+    future_annotations: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    compile(module, source, future_annotations)
+}
+
 fn compile<'py>(
     module: &Module<'py>,
     source: String,
@@ -176,7 +221,7 @@ fn compile<'py>(
 #[macro_export]
 macro_rules! exec_python {
     ($module:expr, line = $line:literal, future_annotations, $source:literal $(,)?) => {
-        $crate::python::exec_python(
+        $crate::python::ExecPython::exec_python(
             $module,
             $line,
             $crate::python::strip_first_newline($source),
@@ -185,7 +230,7 @@ macro_rules! exec_python {
         )
     };
     ($module:expr, line = $line:literal, first_annotation = $first:literal, $source:literal $(,)?) => {
-        $crate::python::exec_python(
+        $crate::python::ExecPython::exec_python(
             $module,
             $line,
             $crate::python::strip_first_newline($source),
@@ -194,7 +239,7 @@ macro_rules! exec_python {
         )
     };
     ($module:expr, line = $line:literal, $source:literal $(,)?) => {
-        $crate::python::exec_python(
+        $crate::python::ExecPython::exec_python(
             $module,
             $line,
             $crate::python::strip_first_newline($source),

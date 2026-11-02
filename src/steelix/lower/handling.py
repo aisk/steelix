@@ -146,7 +146,7 @@ class HandlingLowering:
             mode = "unit"
             if next_:
                 tail = _ok(rs.Tuple(()))
-        lifetime = "'py" if self.ctx.function is not None else "'_"
+        lifetime = self.ctx.lifetime()
         result = {
             "unit": "()",
             "value": f"Bound<{lifetime}, PyAny>",
@@ -269,7 +269,7 @@ class HandlingLowering:
             scrutinee, hoisted = self.hoist_builtins(scrutinee, inner)
             prelude = items + self.mark(statement_line(body), [*inner, rs.Return(scrutinee)])
             prelude += hoisted
-            lifetime = "'py" if self.ctx.function is not None else "'_"
+            lifetime = self.ctx.lifetime()
             ret = f"PyResult<Bound<{lifetime}, PyAny>>"
             if inner:
                 # The expression needs statements first: they can raise too.
@@ -390,15 +390,13 @@ class HandlingLowering:
             else:
                 exception = self.ctx.binding("exception")
                 head.append(rs.Let(exception, init=catch))
-                setter = self.exprs.module_call(
-                    "set_global", rs.StrLit(name), rs.Ref(rs.Path(exception))
-                )
+                setter = self.exprs.scope_call("set", rs.StrLit(name), rs.Ref(rs.Path(exception)))
                 head.append(rs.ExprStmt(rs.Try(setter)))
                 head.append(
                     rs.Let("_handling", init=rs.Call(handling, (rs.Ref(rs.Path(exception)),)))
                 )
                 # The implicit `del name` at the end of the handler.
-                unbind = self.exprs.module_call("unbind_global", rs.StrLit(name))
+                unbind = self.exprs.scope_call("unbind", rs.StrLit(name))
                 tail.append(rs.ExprStmt(rs.Try(unbind)))
         body = list(self.block(handler.body).stmts)
         if tail and not diverges(body):

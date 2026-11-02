@@ -1,8 +1,6 @@
-//! Parts of `try_except.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `try_except.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 5, `class AppError`: class definition
-//! - line 9, `class SubError`: class definition
 //! - line 196, `def gen`: yield
 //! - line 222, `def groups`: try/except*
 //! - line 232, `def name_after_handler`: except-as name used outside its handler
@@ -595,6 +593,26 @@ pub fn loop_with_try<'py>(
     })
 }
 
+pub mod app_error {
+    use super::*;
+
+    // try_except.py:5
+    /// The body of `class AppError`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        Ok(())
+    }
+}
+
+pub mod sub_error {
+    use super::*;
+
+    // try_except.py:9
+    /// The body of `class SubError`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        Ok(())
+    }
+}
+
 /// Executes the body of `try_except.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
@@ -602,23 +620,25 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // try/except in native functions: matching, `as` names, `else`, chaining.
         frame.line(2);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        // try_except.py:5, kept as Python: class definition at 5:1
-        rt::exec_python!(
-            m,
-            line = 5,
-            r#"
-class AppError(Exception):
-    pass
-"#
+        frame.line(5);
+        m.set_global(
+            "AppError",
+            rt::class!(
+                m,
+                "AppError"(m.global("Exception")?),
+                app_error::body,
+                line = 5
+            )?,
         )?;
-        // try_except.py:9, kept as Python: class definition at 9:1
-        rt::exec_python!(
-            m,
-            line = 9,
-            r#"
-class SubError(AppError):
-    pass
-"#
+        frame.line(9);
+        m.set_global(
+            "SubError",
+            rt::class!(
+                m,
+                "SubError"(m.global("AppError")?),
+                sub_error::body,
+                line = 9
+            )?,
         )?;
         rt::def!(m, parse(s))?;
         rt::def!(m, parse_or_none(s))?;

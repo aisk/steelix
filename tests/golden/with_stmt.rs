@@ -1,10 +1,8 @@
-//! Parts of `with_stmt.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `with_stmt.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 7, `class Manager`: class definition
-//! - line 28, `class NoExit`: class definition
-//! - line 33, `class Async`: class definition, async function
-//! - line 41, `class InstanceMethods`: class definition
+//! - line 34, `def __aenter__`: async function
+//! - line 37, `def __aexit__`: async function
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -364,6 +362,200 @@ pub fn suppress_in_loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
     })
 }
 
+pub mod manager {
+    use super::*;
+
+    // with_stmt.py:7
+    /// The body of `class Manager`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::frame!(ns, "Manager", 7, |frame| {
+            frame.line(8);
+            ns.set("__init__", rt::function!(
+    ns,
+    __init__(slf as "self", name, suppress = false, fail_enter = false, fail_exit = false),
+    qualname = "Manager.__init__"
+)?)?;
+            frame.line(14);
+            ns.set(
+                "__enter__",
+                rt::function!(
+                    ns,
+                    __enter__(slf as "self"),
+                    qualname = "Manager.__enter__"
+                )?,
+            )?;
+            frame.line(20);
+            ns.set(
+                "__exit__",
+                rt::function!(
+                    ns,
+                    __exit__(slf as "self", exc_type, exc, tb),
+                    qualname = "Manager.__exit__"
+                )?,
+            )?;
+            Ok(())
+        })
+    }
+
+    // with_stmt.py:8
+    pub fn __init__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        name: &Bound<'py, PyAny>,
+        suppress: &Bound<'py, PyAny>,
+        fail_enter: &Bound<'py, PyAny>,
+        fail_exit: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Manager.__init__", 8, |frame| {
+            frame.line(9);
+            slf.setattr("name", name)?;
+            frame.line(10);
+            slf.setattr("suppress", suppress)?;
+            frame.line(11);
+            slf.setattr("fail_enter", fail_enter)?;
+            frame.line(12);
+            slf.setattr("fail_exit", fail_exit)?;
+            Ok(rt::none(m.py()))
+        })
+    }
+
+    // with_stmt.py:14
+    pub fn __enter__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Manager.__enter__", 14, |frame| {
+            frame.line(15);
+            m.global("print")?.call1(("enter", slf.getattr("name")?))?;
+            frame.line(16);
+            if slf.getattr("fail_enter")?.is_truthy()? {
+                frame.line(17);
+                return Err(frame.raise(
+                    m.global("RuntimeError")?
+                        .call1((rt::str(py, "enter failed: ").add(slf.getattr("name")?)?,))?,
+                ));
+            }
+            frame.line(18);
+            Ok(PyTuple::new(
+                py,
+                [
+                    &slf.getattr("name")?,
+                    &m.global("len")?.call1((slf.getattr("name")?,))?,
+                ],
+            )?
+            .into_any())
+        })
+    }
+
+    // with_stmt.py:20
+    pub fn __exit__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        exc_type: &Bound<'py, PyAny>,
+        exc: &Bound<'py, PyAny>,
+        tb: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Manager.__exit__", 20, |frame| {
+            frame.line(21);
+            m.global("print")?.call1((
+                "exit",
+                slf.getattr("name")?,
+                if exc_type.is_truthy()? {
+                    exc_type.getattr("__name__")?
+                } else {
+                    rt::none(py)
+                },
+                m.global("repr")?.call1((exc,))?,
+                !tb.is_none(),
+                "handled:",
+                m.global("repr")?
+                    .call1((m.global("sys")?.call_method0("exception")?,))?,
+            ))?;
+            frame.line(23);
+            if slf.getattr("fail_exit")?.is_truthy()? {
+                frame.line(24);
+                return Err(frame.raise(
+                    m.global("KeyError")?
+                        .call1((rt::str(py, "exit failed: ").add(slf.getattr("name")?)?,))?,
+                ));
+            }
+            frame.line(25);
+            slf.getattr("suppress")
+        })
+    }
+}
+
+pub mod no_exit {
+    use super::*;
+
+    // with_stmt.py:28
+    /// The body of `class NoExit`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::frame!(ns, "NoExit", 28, |frame| {
+            frame.line(29);
+            ns.set(
+                "__enter__",
+                rt::function!(
+                    ns,
+                    __enter__(slf as "self"),
+                    qualname = "NoExit.__enter__"
+                )?,
+            )?;
+            Ok(())
+        })
+    }
+
+    // with_stmt.py:29
+    pub fn __enter__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        Ok(slf.clone())
+    }
+}
+
+pub mod async_ {
+    use super::*;
+
+    // with_stmt.py:33
+    /// The body of `class Async`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::frame!(ns, "Async", 33, |_| {
+            // with_stmt.py:34, kept as Python: async function at 34:5
+            rt::exec_python!(
+                ns,
+                line = 34,
+                r#"
+    async def __aenter__(self):
+        return self
+"#
+            )?;
+            // with_stmt.py:37, kept as Python: async function at 37:5
+            rt::exec_python!(
+                ns,
+                line = 37,
+                r#"
+    async def __aexit__(self, *args):
+        return False
+"#
+            )?;
+            Ok(())
+        })
+    }
+}
+
+pub mod instance_methods {
+    use super::*;
+
+    // with_stmt.py:41
+    /// The body of `class InstanceMethods`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        Ok(())
+    }
+}
+
 /// Executes the body of `with_stmt.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
@@ -375,63 +567,28 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("sys", rt::import(m, "sys")?)?;
         frame.line(4);
         m.set_global("tempfile", rt::import(m, "tempfile")?)?;
-        // with_stmt.py:7, kept as Python: class definition at 7:1
-        rt::exec_python!(
-            m,
-            line = 7,
-            r#"
-class Manager:
-    def __init__(self, name, suppress=False, fail_enter=False, fail_exit=False):
-        self.name = name
-        self.suppress = suppress
-        self.fail_enter = fail_enter
-        self.fail_exit = fail_exit
-
-    def __enter__(self):
-        print("enter", self.name)
-        if self.fail_enter:
-            raise RuntimeError("enter failed: " + self.name)
-        return (self.name, len(self.name))
-
-    def __exit__(self, exc_type, exc, tb):
-        print("exit", self.name, exc_type.__name__ if exc_type else None, repr(exc),
-              tb is not None, "handled:", repr(sys.exception()))
-        if self.fail_exit:
-            raise KeyError("exit failed: " + self.name)
-        return self.suppress
-"#
+        frame.line(7);
+        m.set_global(
+            "Manager",
+            rt::class!(
+                m,
+                "Manager"(),
+                manager::body,
+                line = 7,
+                attributes = ["fail_enter", "fail_exit", "name", "suppress"]
+            )?,
         )?;
-        // with_stmt.py:28, kept as Python: class definition at 28:1
-        rt::exec_python!(
-            m,
-            line = 28,
-            r#"
-class NoExit:
-    def __enter__(self):
-        return self
-"#
+        frame.line(28);
+        m.set_global(
+            "NoExit",
+            rt::class!(m, "NoExit"(), no_exit::body, line = 28)?,
         )?;
-        // with_stmt.py:33, kept as Python: class definition at 33:1, async function at 34:5
-        rt::exec_python!(
-            m,
-            line = 33,
-            r#"
-class Async:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        return False
-"#
-        )?;
-        // with_stmt.py:41, kept as Python: class definition at 41:1
-        rt::exec_python!(
-            m,
-            line = 41,
-            r#"
-class InstanceMethods:
-    pass
-"#
+        frame.line(33);
+        m.set_global("Async", rt::class!(m, "Async"(), async_::body, line = 33)?)?;
+        frame.line(41);
+        m.set_global(
+            "InstanceMethods",
+            rt::class!(m, "InstanceMethods"(), instance_methods::body, line = 41)?,
         )?;
         rt::def!(m, write_and_read(path))?;
         rt::def!(m, target_kinds())?;

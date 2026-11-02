@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass, field
 
+from steelix.frontend.desugar import binding_name
 from steelix.frontend.regions import (
     Region,
     expression_body,
@@ -299,6 +300,13 @@ def _uses_namespace_builtins(node: ast.AST, local_names: set[str]) -> bool:
         return any(_uses_namespace_builtins(n, local_names) for n in outer) or any(
             _uses_namespace_builtins(stmt, inner) for stmt in body
         )
+    if isinstance(node, ast.ClassDef):
+        # In a class body `locals()` and `vars()` are the class namespace.
+        outer = [*node.decorator_list, *node.bases, *node.keywords]
+        inner = local_names | {"locals", "vars"}
+        return any(_uses_namespace_builtins(n, local_names) for n in outer) or any(
+            _uses_namespace_builtins(stmt, inner) for stmt in node.body
+        )
     if (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -335,8 +343,8 @@ def _bound_names(node: ast.AST) -> list[str]:
     match node:
         case ast.Name(id, ast.Store() | ast.Del()):
             return [id]
-        case ast.FunctionDef(name) | ast.AsyncFunctionDef(name) | ast.ClassDef(name):
-            return [name]
+        case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef():
+            return [binding_name(node)]
         case ast.Import(names) | ast.ImportFrom(names=names):
             return [
                 alias.asname or alias.name.split(".")[0] for alias in names if alias.name != "*"
@@ -528,7 +536,16 @@ class _DefiniteAssignment:
                 for expr in [*decorators, *args.defaults, *args.kw_defaults]:
                     if expr is not None:
                         self.reads(expr, state)
-                return self.assign_name(name, state)
+                return self.assign_name(binding_name(stmt), state)
+            case ast.ClassDef(bases=bases, keywords=keywords, decorator_list=decorators):
+                for expr in [*decorators, *bases, *(k.value for k in keywords)]:
+                    self.reads(expr, state)
+                return self.assign_name(binding_name(stmt), state)
+            case ast.AnnAssign(target, _, value):
+                # In a class body: the annotation is evaluated lazily.
+                if value is not None:
+                    self.reads(value, state)
+                    return self.store(target, state)
             case ast.Pass() | ast.Global() | ast.Nonlocal():
                 pass
             case ast.Raise(exc, cause):
@@ -1038,7 +1055,9 @@ def _assigned_names(nodes: list[ast.AST]) -> set[str]:
             match node:
                 case ast.Name(id, ast.Store() | ast.Del()):
                     names.add(id)
-                case ast.FunctionDef(name) | ast.ExceptHandler(name=str(name)):
+                case ast.FunctionDef() | ast.ClassDef():
+                    names.add(binding_name(node))
+                case ast.ExceptHandler(name=str(name)):
                     names.add(name)
                 case ast.Import(aliases) | ast.ImportFrom(names=aliases):
                     names.update(_import_name(alias) for alias in aliases)
@@ -1161,3 +1180,9 @@ def analyze_module_flow(module: ast.Module, python: Collection[ast.stmt] = ()) -
     """Reachability of module level statements (there are no locals).
     Statements kept as Python source are opaque: control continues after them."""
     return _DefiniteAssignment(MODULE_SCOPE, opaque=python).run(module.body)
+
+
+def analyze_class_flow(node: ast.ClassDef, python: Collection[ast.stmt] = ()) -> LocalsInfo:
+    """Reachability of the statements of a class body, whose names all live
+    in the class namespace, like module level code."""
+    return _DefiniteAssignment(MODULE_SCOPE, opaque=python).run(node.body)

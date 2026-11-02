@@ -55,7 +55,7 @@ impl Code {
         self.qualname.rsplit('.').next().unwrap_or(self.qualname)
     }
 
-    fn object<'py>(&self, module: &Module<'py>) -> PyResult<&Bound<'py, PyAny>> {
+    fn object<'py>(&self, module: &Module<'py>, class: bool) -> PyResult<&Bound<'py, PyAny>> {
         let py = module.py();
         self.object
             .get_or_try_init(py, || {
@@ -75,7 +75,7 @@ impl Code {
                 };
                 let changes = PyDict::new(py);
                 changes.set_item("co_qualname", self.qualname)?;
-                if !self.is_module() {
+                if !self.is_module() && !class {
                     // CO_OPTIMIZED | CO_NEWLOCALS, like the code of a `def`.
                     changes.set_item("co_flags", 0x3)?;
                 }
@@ -89,6 +89,8 @@ impl Code {
 /// body. Created by [`frame!`](crate::frame).
 pub struct Frame<'py> {
     globals: Bound<'py, PyDict>,
+    /// The namespace of a class body, which runs in its own frame.
+    class_namespace: Option<Bound<'py, PyAny>>,
     code: &'static Code,
     line: Cell<u32>,
     /// The frame object, created when the first exception needs it and
@@ -100,15 +102,41 @@ pub struct Frame<'py> {
     entered: RefCell<Option<Bound<'py, PyAny>>>,
 }
 
-/// Runs the body of a native function (or module) in a traceback frame. Use
-/// it through [`frame!`](crate::frame).
+/// What code runs in: a module (for the module body and functions) or the
+/// namespace of a class body.
+#[doc(hidden)]
+pub trait Scope<'py> {
+    fn globals(&self) -> &Bound<'py, PyDict>;
+    fn class_namespace(&self) -> Option<&Bound<'py, PyAny>> {
+        None
+    }
+}
+
+impl<'py> Scope<'py> for Module<'py> {
+    fn globals(&self) -> &Bound<'py, PyDict> {
+        Module::globals(self)
+    }
+}
+
+impl<'py> Scope<'py> for crate::Namespace<'py> {
+    fn globals(&self) -> &Bound<'py, PyDict> {
+        self.module().globals()
+    }
+    fn class_namespace(&self) -> Option<&Bound<'py, PyAny>> {
+        Some(self.mapping())
+    }
+}
+
+/// Runs the body of a native function (or module, or class) in a traceback
+/// frame. Use it through [`frame!`](crate::frame).
 pub fn run<'py, T>(
-    module: &Module<'py>,
+    scope: &impl Scope<'py>,
     code: &'static Code,
     body: impl FnOnce(&Frame<'py>) -> PyResult<T>,
 ) -> PyResult<T> {
     let frame = Frame {
-        globals: module.globals().clone(),
+        globals: scope.globals().clone(),
+        class_namespace: scope.class_namespace().cloned(),
         code,
         line: Cell::new(code.first_line),
         object: RefCell::new(None),
@@ -136,7 +164,7 @@ impl<'py> Frame<'py> {
         let exception = err.into_value(py).into_bound(py).into_any();
         let entered = self.entered.borrow_mut().take();
         let here = entered.is_some_and(|entered| entered.is(&exception))
-            || self.raised_by_module_code(&exception);
+            || self.raised_by_kept_code(&exception);
         if !here {
             // Adding the entry can only fail when Python itself is in
             // trouble (no memory, no stack left); the traceback then just
@@ -296,8 +324,10 @@ impl<'py> Frame<'py> {
         }
         let py = self.py();
         let module = Module::from_globals(self.globals.clone());
-        let code = self.code.object(&module)?;
-        let locals = if self.code.is_module() {
+        let code = self.code.object(&module, self.class_namespace.is_some())?;
+        let locals = if let Some(namespace) = &self.class_namespace {
+            namespace.as_ptr()
+        } else if self.code.is_module() {
             self.globals.as_ptr()
         } else {
             std::ptr::null_mut()
@@ -320,11 +350,12 @@ impl<'py> Frame<'py> {
         Ok(frame)
     }
 
-    /// Whether `exception` was raised by module level code kept as Python
-    /// (`rt::exec_python!`) in this module: its traceback starts with that
-    /// code's `<module>` frame, which stands for the module body already.
-    fn raised_by_module_code(&self, exception: &Bound<'py, PyAny>) -> bool {
-        if !self.code.is_module() {
+    /// Whether `exception` was raised by module level (or class body) code
+    /// kept as Python (`rt::exec_python!`) in this module or class body: its
+    /// traceback starts with that code's `<module>` (or class body) frame,
+    /// which stands for this frame already.
+    fn raised_by_kept_code(&self, exception: &Bound<'py, PyAny>) -> bool {
+        if !self.code.is_module() && self.class_namespace.is_none() {
             return false;
         }
         let head = || -> PyResult<bool> {
@@ -333,11 +364,15 @@ impl<'py> Frame<'py> {
                 return Ok(false);
             }
             let frame = traceback.getattr("tb_frame")?;
-            Ok(frame.getattr("f_globals")?.is(&self.globals)
-                && frame
-                    .getattr("f_code")?
-                    .getattr("co_name")?
-                    .eq("<module>")?)
+            let code = frame.getattr("f_code")?;
+            let same_code = if self.code.is_module() {
+                code.getattr("co_name")?.eq("<module>")?
+            } else {
+                // Class body code, which has no `CO_OPTIMIZED` flag.
+                code.getattr("co_qualname")?.eq(self.code.qualname)?
+                    && code.getattr("co_flags")?.extract::<u32>()? & 0x1 == 0
+            };
+            Ok(frame.getattr("f_globals")?.is(&self.globals) && same_code)
         };
         head().unwrap_or(false)
     }
@@ -578,7 +613,9 @@ fn traceback_type(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// ```
 ///
 /// The arguments are the module, the function's `__qualname__` (`<module>`
-/// for the module body) and the line of its `def`.
+/// for the module body) and the line of its `def`. A class body passes its
+/// namespace instead of the module, its `__qualname__` and the line of its
+/// first decorator (or `class`).
 #[macro_export]
 macro_rules! frame {
     ($module:expr, $qualname:literal, $line:literal, $body:expr $(,)?) => {{

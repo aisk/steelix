@@ -21,6 +21,7 @@ use crate::Function;
 ///
 /// A function object keeps the globals of the module that defined it, so a
 /// call through Python passes the same module as a direct call from Rust.
+#[derive(Clone)]
 pub struct Module<'py> {
     globals: Bound<'py, PyDict>,
 }

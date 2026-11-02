@@ -199,3 +199,21 @@ def test_exec_python_shape() -> None:
     assert "malformed" in problem
     [problem] = problems(exec_python(p("module"), rs.Tokens(("line = 1",)), source), params=(M,))
     assert "`module` is not in scope" in problem
+
+
+def test_class_mod_items() -> None:
+    """A class's `mod` sees the items of the file through `use super::*`
+    and its own items, but its items are not visible outside of it."""
+    helper = rs.Fn("helper", (PY,), "PyResult<()>", rs.Block())
+    call_helper = rs.ExprStmt(rs.Try(rs.Call(p("helper"), (p("py"),))))
+    method = rs.Fn("method", (PY,), "PyResult<()>", rs.Block((call_helper,)))
+    call_method = rs.ExprStmt(rs.Try(rs.Call(p("method"), (p("py"),))))
+    body = rs.Fn("body", (PY,), "PyResult<()>", rs.Block((call_method,)))
+    mod = rs.Mod("point", (body, method))
+    assert not check(rs.File([*USES, helper, mod]))
+    by_path = rs.ExprStmt(rs.Try(rs.Call(p("point::body"), (p("py"),))))
+    user = rs.Fn("user", (PY,), "PyResult<()>", rs.Block((by_path,)))
+    assert not check(rs.File([*USES, helper, mod, user]))
+    bare = rs.Fn("user", (PY,), "PyResult<()>", rs.Block((call_method,)))
+    [problem] = check(rs.File([*USES, helper, mod, bare]))
+    assert "`method` is not in scope" in problem

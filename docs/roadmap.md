@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 → M8 → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
 
 ## M0 项目骨架 ✅
 
@@ -126,15 +126,20 @@
 
 覆盖率的变化见 `coverage.md`：6 个工具的原生函数从 23% 到 37%，标准库从 14% 到 22%，和 M3c 时的预测一致。顺带把循环里的 `check_signals` 从迭代开头移到结尾，`KeyboardInterrupt` 的行号和 CPython 一样。
 
-## M5 类
+## M5 类 ✅
 
-- [ ] 动态建类（`types.new_class` 语义），每个类一个 Rust mod（§10）
-- [ ] 方法级的混合模式：类原生创建，用了不支持语法的方法保留为 Python 源码放进类的命名空间（`coverage.md`：不做的话 M5 在标准库上的收益从 +48 降到 +9 个百分点）
-- [ ] 方法、`__init__`、实例属性、类属性
-- [ ] 继承（含继承 Python 定义的类）、`super()` 降级为 `super(Cls, self)`
-- [ ] `staticmethod`、`classmethod`、`property`
-- [ ] 自定义异常类
-- [ ] PEP 649 注解，验证 dataclass 可用
+- [x] 动态建类，语义和 `__build_class__` 完全一样（metaclass、`__prepare__`、`__mro_entries__`、`__set_name__`、`__init_subclass__`、`__classcell__`、类体前后编译器生成的 `__module__`、`__qualname__`、`__firstlineno__`、`__static_attributes__`），类体里任意语句都是原生代码，装饰器、私有名字改编。每个类一个 Rust mod，class 语句是一个 `rt::class!` 调用（§10）
+- [x] 方法级的混合模式：类原生创建，用了不支持语法的方法和类体语句保留为 Python 源码，按类体编译后在类的命名空间里执行，`super()`、`__class__`、私有名字、`__qualname__` 和行号都和 CPython 一样（§13）。整个类保留的情况只有头部不支持、类型参数、类体里的 `global`/`nonlocal` 和要保留的注解
+- [x] 方法、`__init__`、实例属性（`slf.getattr`/`setattr`）、类属性
+- [x] 继承（Python 定义的类、保留为 Python 的类、Exception、Enum、NamedTuple、TypedDict、`abc.ABC`、`threading.Thread`、`argparse.Action`，多重继承）
+- [x] 零参数 `super()` 和 `__class__` 用真实的 `__class__` cell（不是原计划的 `super(Cls, self)`），类装饰器替换类时也和 CPython 一样
+- [x] `staticmethod`、`classmethod`、`property` 按普通装饰器处理
+- [x] 自定义异常类，在原生代码和保留的代码之间抛出、接住
+- [x] PEP 649 注解（`__annotate__`、`__annotations__`、`typing.get_type_hints`），dataclass（含 `frozen=True`、`order=True`），`from __future__ import annotations`
+- [x] 改写约定补充类的两步（§15）
+- 函数里的 `class` 还不支持（所在的函数保留为 Python，标准库里 9 个函数）
+
+覆盖率的变化见 `coverage.md`：6 个工具的原生函数从 37% 到 73%，标准库从 22% 到 90%，和 M3c 时按方法级混合模式的预测一致（71%、88%）。标准库里只有 3 个带类型参数的类整个保留为 Python。顺带修了 `rt::call!` 在被调用的是引用（`rt::local(..)?` 返回的 `&Bound`）时编译失败的问题（`tests/cases/call_ref_callee.py`）。
 
 ## M6 多模块应用
 

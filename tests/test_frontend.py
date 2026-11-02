@@ -499,3 +499,76 @@ def test_cells_and_frozen_captures() -> None:
     # `b` is rebound by `g`, `late` after the capture, and `early` is
     # captured before it is assigned: those need real cells.
     assert info.frozen == {"a", "c"}
+
+
+# --- classes -------------------------------------------------------------------
+
+
+def test_mangle_matches_cpython() -> None:
+    from steelix.frontend.desugar import mangle
+
+    assert mangle("Point", "__x") == "_Point__x"
+    assert mangle("_Point", "__x") == "_Point__x"
+    assert mangle("Point", "__x__") == "__x__"
+    assert mangle("Point", "_x") == "_x"
+    assert mangle("___", "__x") == "__x"
+    assert mangle("Point", "__a.b") == "__a.b"
+
+
+def test_private_names_are_mangled_in_classes() -> None:
+    from steelix.frontend.desugar import binding_name, desugar
+
+    tree, _ = parse(
+        """
+        __x = 0
+        class A:
+            __y = __x
+            def __m(self, __p):
+                return self.__y, f(__k=1)
+            class __B:
+                __z = 1
+        """
+    )
+    desugar(tree)
+    cls = tree.body[1]
+    assert isinstance(cls, ast.ClassDef)
+    assign, method, inner = cls.body
+    assert ast.unparse(assign) == "_A__y = _A__x"
+    assert isinstance(method, ast.FunctionDef) and isinstance(inner, ast.ClassDef)
+    assert method.name == "__m" and binding_name(method) == "_A__m"
+    assert method.args.args[1].arg == "_A__p"
+    assert ast.unparse(method.body[0]) == "return (self._A__y, f(__k=1))"
+    assert inner.name == "__B" and binding_name(inner) == "_A__B"
+    assert ast.unparse(inner.body[0]) == "_B__z = 1"
+    assert ast.unparse(tree.body[0]) == "__x = 0"
+
+
+def test_class_is_split_by_method() -> None:
+    from steelix.diagnostics import SourceLocation
+    from steelix.frontend.fallback import split
+    from steelix.frontend.subset import Issue
+
+    tree, _ = parse(
+        """
+        class A:
+            x = 1
+            def f(self):
+                return [i for i in self]
+            def g(self):
+                return 1
+            if x:
+                y = (i for i in "ab")
+                z = 2
+        """
+    )
+    cls = tree.body[0]
+    assert isinstance(cls, ast.ClassDef)
+
+    def kept(*lines: int) -> list[int]:
+        issues = [Issue("comprehension", SourceLocation("m", line, 8)) for line in lines]
+        return sorted(stmt.lineno for stmt in split(cls, issues))
+
+    assert kept(5) == [4]
+    assert kept(5, 9) == [4, 9]
+    # In the header: the whole class.
+    assert kept(2) == [2]

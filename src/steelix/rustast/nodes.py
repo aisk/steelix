@@ -314,6 +314,16 @@ class ModDecl(Item):
     public: bool = False
 
 
+@dataclass(frozen=True)
+class Mod(Item):
+    """`pub mod name { use super::*; .. }`: the module of a Python class."""
+
+    name: str
+    items: tuple[Item, ...]
+    doc: tuple[str, ...] = ()
+    comments: tuple[str, ...] = ()
+
+
 @dataclass
 class File:
     items: list[Item] = field(default_factory=list)

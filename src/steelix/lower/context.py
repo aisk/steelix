@@ -9,7 +9,7 @@ from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.bindings import LocalsInfo, ModuleBindings
 from steelix.frontend.callgraph import CallGraph
 from steelix.frontend.fallback import FallbackPlan
-from steelix.frontend.scope import FunctionNode, FunctionScope, ModuleScopes
+from steelix.frontend.scope import ClassScope, FunctionNode, FunctionScope, ModuleScopes
 from steelix.lower.names import CONTEXT, FUNCTION_RESERVED, RUST_KEYWORDS, Renamer
 from steelix.rustast import nodes as rs
 
@@ -42,6 +42,12 @@ class ModuleContext:
     """Cells of each function that nested functions receive by value."""
     uses: set[str] = field(default_factory=set)
     """`use` paths the generated module needs besides the fixed ones."""
+    class_mods: list[rs.Mod] = field(default_factory=list)
+    """The Rust modules of the classes defined in module code."""
+    mod_names: set[str] = field(default_factory=set)
+    """Names of the Rust modules in `class_mods`."""
+    static_attributes: dict[tuple[str, int], tuple[str, ...]] = field(default_factory=dict)
+    """`__static_attributes__` of each class by qualified name and first line."""
 
     def unsupported(self, feature: str, node: ast.AST) -> UnsupportedError:
         return UnsupportedError(feature, SourceLocation.of(self.filename, node))
@@ -78,6 +84,26 @@ class FunctionInfo:
 
 
 @dataclass
+class ClassBody:
+    """What lowering a class body needs to know: its names live in the
+    class namespace `ns`, and its methods are items of the class's Rust
+    module."""
+
+    scope: ClassScope
+    mod: str
+    """The name of the class's Rust module."""
+    method_names: dict[ast.AST, str]
+    """The Rust names of the functions defined in the body."""
+    items: list[rs.Item] = field(default_factory=list)
+    """Methods and modules of nested classes, in source order."""
+    mod_names: set[str] = field(default_factory=set)
+
+
+NAMESPACE = "ns"
+"""The `&rt::Namespace<'py>` parameter of a class body."""
+
+
+@dataclass
 class Context:
     """Lowering state for one Rust function body: a `def` or `exec_module`."""
 
@@ -93,12 +119,22 @@ class Context:
     items: list[rs.Fn] = field(default_factory=list)
     """Nested functions waiting to be declared before the current statement."""
     item_names: set[str] = field(default_factory=set)
+    class_body: ClassBody | None = None
+    """Set while lowering the body of a class."""
     _temps: set[str] = field(default_factory=set)
     _labels: set[str] = field(default_factory=set)
 
     @property
     def at_module_level(self) -> bool:
-        return self.function is None
+        return self.function is None and self.class_body is None
+
+    def namespace(self) -> str:
+        """What code kept as Python runs in: the class namespace or the module."""
+        return NAMESPACE if self.class_body is not None else self.context()
+
+    def lifetime(self) -> str:
+        """The lifetime of `Bound` values in closure signatures."""
+        return "'_" if self.at_module_level else "'py"
 
     def py(self) -> str:
         """The `Python<'py>` token, bound by `bind_py` where the body uses it."""

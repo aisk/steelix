@@ -1,5 +1,5 @@
-//! Parts of `namespaces.py` kept as Python source and run by
-//! `rt::exec_python!` in `exec_module` (steelix does not lower them yet):
+//! Parts of `namespaces.py` kept as Python source and run in place by
+//! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 8, `def local_names`: locals() in a function
 

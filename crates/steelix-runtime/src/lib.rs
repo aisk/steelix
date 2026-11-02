@@ -23,6 +23,8 @@ use std::mem::ManuallyDrop;
 pub mod call;
 mod cell;
 #[doc(hidden)]
+pub mod class;
+#[doc(hidden)]
 pub mod function;
 mod import;
 mod module;
@@ -41,6 +43,7 @@ pub mod frame;
 pub use frame::{Flow, Frame, Handling, IntoException, matches};
 
 pub use cell::Cell;
+pub use class::{Namespace, super_};
 pub use function::{Body, Function, FunctionDef, Signature};
 pub use import::{import, import_from, import_module, import_names};
 pub use module::Module;
@@ -398,7 +401,8 @@ macro_rules! function {
             $($(($pon, $poa),)?)* $($(($pn, $pa),)?)* $($(($vn, $va),)?)?
             $($(($kn, $ka),)?)* $($(($vkn, $vka),)?)? $(("return", $ret),)?
         ];
-        let module: &$crate::Module<'_> = $module;
+        let definer = $module;
+        let module: &$crate::Module<'_> = $crate::function::Definer::module(definer);
         let py = module.py();
         let defaults = ::std::vec![
             $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pod, py)?,)?)*
@@ -408,6 +412,7 @@ macro_rules! function {
             $($(($kn, $crate::pyo3::IntoPyObjectExt::into_bound_py_any($kd, py)?),)?)*
         ];
         let closure = ::std::vec![$($crate::function!(@capture $ck $c),)*];
+        static CLOSURE_NAMES: &[&str] = &[$($cn),*];
         let body: $crate::Body = |module, closure, args| {
             // Named before the parameters, which may shadow the function.
             let target = $f;
@@ -431,7 +436,9 @@ macro_rules! function {
             defaults,
             kwdefaults,
             closure,
+            closure_names: CLOSURE_NAMES,
             annotations: ANNOTATIONS,
+            classdict: $crate::function::Definer::classdict(definer),
             body,
         })
     }};

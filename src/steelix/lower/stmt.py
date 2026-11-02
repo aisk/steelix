@@ -10,8 +10,9 @@ import ast
 from dataclasses import dataclass
 
 from steelix.frontend.bindings import is_constant_true
+from steelix.frontend.desugar import annotation_source, binding_name
 from steelix.frontend.fallback import first_line, python_runs, python_source
-from steelix.lower.context import Context
+from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
 from steelix.lower.function import cell_declared_at, lower_nested
 from steelix.lower.handling import HandlingLowering
@@ -96,7 +97,7 @@ class StmtLowering(HandlingLowering):
                 features.setdefault(issue.feature, f"{location.line}:{location.col + 1}")
         reasons = ", ".join(f"{feature} at {where}" for feature, where in features.items())
         line = first_line(stmts[0])
-        args: list[rs.Expr] = [rs.Path(self.ctx.context()), rs.Tokens((f"line = {line}",))]
+        args: list[rs.Expr] = [rs.Path(self.ctx.namespace()), rs.Tokens((f"line = {line}",))]
         if module.future_annotations:
             args.append(rs.Tokens(("future_annotations",)))
         annotations = [
@@ -107,7 +108,8 @@ class StmtLowering(HandlingLowering):
         ]
         if annotations:
             args.append(rs.Tokens((f"first_annotation = {min(annotations)}",)))
-        args.append(rs.RawStrLit("\n" + python_source(module.source_lines, stmts)))
+        pad = self.ctx.class_body is not None
+        args.append(rs.RawStrLit("\n" + python_source(module.source_lines, stmts, pad)))
         call = rs.Try(rs.MacroCall("rt::exec_python", tuple(args)))
         comments = [rs.Comment(text) for text in module.leading_comments.get(stmts[0], [])]
         header = rs.Comment(f"{module.filename}:{line}, kept as Python: {reasons}")
@@ -120,6 +122,10 @@ class StmtLowering(HandlingLowering):
         comments = self.comments(stmt)
         if stmt in self.ctx.flow.unreachable:
             return comments
+        if isinstance(stmt, ast.ClassDef):
+            from steelix.lower.classes import lower_class_def
+
+            return comments + lower_class_def(self, stmt)
         if isinstance(stmt, ast.Break | ast.Continue):
             # Not worth a line of its own: the signal check before the next
             # iteration then reports the line before.
@@ -185,6 +191,8 @@ class StmtLowering(HandlingLowering):
                 return self.try_stmt(stmt)
             case ast.With():
                 return self.with_stmt(stmt)
+            case ast.AnnAssign():
+                return self.class_annotation(stmt)
             case ast.Pass() | ast.Global() | ast.Nonlocal():
                 return []
         raise self.ctx.unsupported(type(stmt).__name__, stmt)
@@ -192,11 +200,32 @@ class StmtLowering(HandlingLowering):
     # --- functions ---
 
     def function_def(self, stmt: ast.FunctionDef) -> list[rs.Stmt]:
-        """A nested `def`: a Rust fn item, then the function object bound to
-        the local name."""
-        rust = lower_nested(self.ctx, stmt)
+        """A nested `def` or a method: a Rust fn item, then the function
+        object bound to the local name (in a class body, the namespace)."""
+        if self.ctx.class_body is not None and self.ctx.function is None:
+            from steelix.lower.classes import lower_method
+
+            rust = lower_method(self.ctx, stmt)
+        else:
+            rust = lower_nested(self.ctx, stmt)
         value = self.exprs.function_value(stmt, rust)
-        return [self.store_name(stmt, stmt.name, value)]
+        return [self.store_name(stmt, binding_name(stmt), value)]
+
+    def class_annotation(self, stmt: ast.AnnAssign) -> list[rs.Stmt]:
+        """`name: annotation [= value]` in a class body. The annotation goes
+        into the class's `__annotate__` (`rt::class!(.., annotations = ..)`),
+        or with `from __future__ import annotations` into `__annotations__`
+        as a string, after the value is assigned."""
+        if self.ctx.class_body is None or not isinstance(stmt.target, ast.Name):
+            raise self.ctx.unsupported("annotated assignment", stmt)
+        out: list[rs.Stmt] = []
+        if stmt.value is not None:
+            out += self.store(stmt, stmt.target, self.exprs.value(stmt.value))
+        if self.ctx.module.future_annotations:
+            text = rs.StrLit(annotation_source(stmt.annotation))
+            call = rs.MethodCall(rs.Path(NAMESPACE), "annotate", (rs.StrLit(stmt.target.id), text))
+            out.append(_try_stmt(call))
+        return out
 
     def module_def(self, stmt: ast.FunctionDef, rust: str) -> list[rs.Stmt]:
         """A module level `def`, whose Rust fn is an item of the module."""
@@ -501,7 +530,7 @@ class StmtLowering(HandlingLowering):
     def store_name(self, stmt: ast.stmt, name: str, value: Value) -> rs.Stmt:
         fn = self.ctx.function
         if fn is None or fn.scope.is_global(name):
-            return _try_stmt(self.exprs.module_call("set_global", rs.StrLit(name), value.arg()))
+            return _try_stmt(self.exprs.scope_call("set", rs.StrLit(name), value.arg()))
         rust = fn.names[name]
         if fn.is_cell(name):
             if cell_declared_at(fn, name, stmt):
@@ -610,7 +639,7 @@ class StmtLowering(HandlingLowering):
             case ast.Name(id):
                 fn = self.ctx.function
                 if fn is None or fn.scope.is_global(id):
-                    return [_try_stmt(exprs.module_call("del_global", rs.StrLit(id)))]
+                    return [_try_stmt(exprs.scope_call("del", rs.StrLit(id)))]
                 rust = fn.names[id]
                 if fn.is_cell(id):
                     return [_try_stmt(rs.MethodCall(rs.Path(rust), "delete"))]

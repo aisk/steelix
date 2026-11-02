@@ -31,7 +31,7 @@ from enum import Enum
 from steelix.frontend.bindings import is_immutable_constant
 from steelix.frontend.resolve import Direct, Lookup, resolve_call, resolve_global
 from steelix.frontend.scope import FunctionNode, default_of, params_of
-from steelix.lower.context import Context
+from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.names import rust_ident
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
@@ -268,6 +268,13 @@ class ExprLowering:
         """`m.method(args)` on the `rt::Module` context."""
         return rs.MethodCall(self.module(), method, args)
 
+    def scope_call(self, method: str, *args: rs.Expr) -> rs.MethodCall:
+        """`set`, `del` or `unbind` a name of the current non-function scope:
+        `ns.set(..)` in a class body, `m.set_global(..)` in module code."""
+        if self.ctx.class_body is not None:
+            return rs.MethodCall(rs.Path(NAMESPACE), method, args)
+        return self.module_call(f"{method}_global", *args)
+
     def use(self, path: str) -> None:
         self.ctx.module.uses.add(path)
 
@@ -492,6 +499,10 @@ class ExprLowering:
 
     def name(self, name: str, node: ast.expr) -> Value:
         fn = self.ctx.function
+        if fn is None and self.ctx.class_body is not None:
+            # `LOAD_NAME`: the class namespace, then globals and builtins.
+            get = rs.MethodCall(rs.Path(NAMESPACE), "get", (rs.StrLit(name),))
+            return Value(_try(get), Kind.OWNED)
         if fn is not None and not fn.scope.is_global(name):
             rust = fn.names[name]
             if fn.is_cell(name):
@@ -755,6 +766,15 @@ class ExprLowering:
         self, func: ast.expr, args: list[ast.expr], keywords: list[ast.keyword], node: ast.Call
     ) -> Value:
         plain = not keywords and not any(isinstance(a, ast.Starred) for a in args)
+        if (
+            self.ctx.class_body is not None
+            and self.ctx.function is None
+            and isinstance(func, ast.Name)
+            and func.id in _FRAME_BUILTINS
+            and len(args) + len(keywords) < (2 if func.id in ("exec", "eval") else 1)
+        ):
+            # They look at the calling frame, which a native class body does not have.
+            raise self.ctx.unsupported(f"{func.id}() in a class body", node)
         if isinstance(func, ast.Name) and self.is_global(func.id):
             special = self.global_call(func.id, node, plain)
             if special is not None:
@@ -831,13 +851,19 @@ class ExprLowering:
         return self.call_value(callee, values)
 
     def is_global(self, name: str) -> bool:
+        """Whether `name` is looked up in the module globals (and builtins)."""
         fn = self.ctx.function
-        return fn is None or fn.scope.is_global(name)
+        if fn is None:
+            return self.ctx.class_body is None
+        return fn.scope.is_global(name)
 
     def global_call(self, name: str, node: ast.Call, plain: bool) -> Value | None:
         """Calls of module functions and builtins with a direct Rust spelling."""
         bindings = self.ctx.module.bindings
         args = node.args
+        if name == "super" and not args and not node.keywords:
+            if not bindings.is_module_bound(name):
+                return self.zero_arg_super(node)
         if not bindings.is_module_bound(name) and not args and not node.keywords:
             # At module level the local namespace is the globals dict.
             namespace_name = name == "globals" or (
@@ -881,6 +907,19 @@ class ExprLowering:
         if (name, len(args)) in _SPECIAL_BUILTINS:
             return self.builtin_call(name, self.operands(list(args)))
         return None
+
+    def zero_arg_super(self, node: ast.Call) -> Value:
+        """`super()` in a method: `rt::super_(&__class__, slf)`, the class
+        from the `__class__` cell and the first argument of the function."""
+        fn = self.ctx.function
+        if fn is None or not fn.scope.is_free("__class__"):
+            raise self.ctx.unsupported("super() without arguments outside a method", node)
+        positional = fn.node.args.posonlyargs + fn.node.args.args
+        if not positional:
+            raise self.ctx.unsupported("super() without arguments and no first argument", node)
+        first = self.name(positional[0].arg, node)
+        cell = rs.Path(fn.names["__class__"])
+        return Value(_try(_rt("super_", cell, first.ref())), Kind.OWNED)
 
     def builtin_call(self, name: str, args: list[Value]) -> Value:
         """Builtins whose PyO3 method does exactly what the builtin does."""
@@ -1009,7 +1048,16 @@ class ExprLowering:
         default_exprs = [v.arg() for v in self.operands(list(defaults))]
         signature = signature_text(self.ctx, scope, rust, default_exprs)
         options = function_options(self.ctx, scope, rust)
-        macro_args = (self.module(), signature, *(rs.Tokens((o,)) for o in options))
+        definer = self.module()
+        if (
+            self.ctx.class_body is not None
+            and self.ctx.function is None
+            and isinstance(node, ast.FunctionDef)
+            and not self.ctx.module.future_annotations
+        ):
+            # A method: its annotations see the class namespace (`__classdict__`).
+            definer = rs.Path(NAMESPACE)
+        macro_args = (definer, signature, *(rs.Tokens((o,)) for o in options))
         macro = rs.MacroCall("rt::def" if bind else "rt::function", macro_args)
         value = Value(_try(macro), Kind.OWNED)
         if not decorator_values:
@@ -1020,6 +1068,14 @@ class ExprLowering:
             applied = self.call_value(decorator, [value])
             self.prelude.append(rs.Let(value.expr.text, init=applied.expr))
         return self.call_value(decorator_values[0], [value])
+
+
+_FRAME_BUILTINS = frozenset({"locals", "vars", "dir", "exec", "eval", "globals", "super"})
+"""Builtins that use the namespace of the calling frame when called without one."""
+
+
+def keyword_arg(name: str) -> str:
+    return _keyword(name)
 
 
 def _keyword(name: str) -> str:

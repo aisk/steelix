@@ -15,7 +15,7 @@ log("native statement before the class")
 
 
 class Counter:
-    """Kept as Python: classes are not lowered yet."""
+    """A native class whose methods call native functions."""
 
     instances = log("class body")
 
@@ -23,7 +23,7 @@ class Counter:
         self.value = start
 
     def bump(self):
-        # Python calling a native function.
+        # A method calling a native function.
         self.value = double(self.value)
         return self
 
@@ -39,7 +39,7 @@ def evens(limit):
 
 
 def use_counter(start):
-    # Native code calling the Python class and generator through globals.
+    # Native code calling the class and the Python generator through globals.
     counter = Counter(start).bump().bump()
     return counter.value + sum(evens(5))
 
