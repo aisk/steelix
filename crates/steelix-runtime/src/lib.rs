@@ -27,6 +27,8 @@ pub mod function;
 mod import;
 mod module;
 mod ops;
+#[doc(hidden)]
+pub mod python;
 mod unpack;
 
 #[cfg(unix)]
@@ -384,6 +386,8 @@ macro_rules! function {
         ];
         let closure = ::std::vec![$($crate::function!(@capture $ck $c),)*];
         let body: $crate::Body = |module, closure, args| {
+            // Named before the parameters, which may shadow the function.
+            let target = $f;
             let [$($c),*] = closure else {
                 unreachable!("the closure has one cell per captured variable")
             };
@@ -393,7 +397,7 @@ macro_rules! function {
             };
             $(let $v = $crate::function::as_tuple($v);)?
             $(let $vk = $crate::function::as_dict($vk);)?
-            $crate::function!(@call $f(module; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
+            $crate::function!(@call target(module; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
         };
         $crate::Function::create(module, $crate::FunctionDef {
             name: $crate::function!(@opt name [$($key = $value),*]),

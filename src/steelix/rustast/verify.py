@@ -20,6 +20,7 @@ in their expression parts; their text is not checked.
 """
 
 from __future__ import annotations
+import __future__
 
 import re
 from dataclasses import dataclass, field
@@ -33,6 +34,8 @@ _PRELUDE = frozenset({"Ok", "Err", "Some", "None", "Option", "Vec", "String", "s
 _PYO3_PRELUDE = frozenset({"Python", "Bound", "Py", "PyAny", "PyResult", "PyErr", "PyModule"})
 
 _IDENT = re.compile(r"(?:r#)?[A-Za-z_][A-Za-z0-9_]*")
+_EXEC_LINE = re.compile(r"line = [1-9][0-9]*")
+_FUTURE_ANNOTATIONS = rs.Tokens(("future_annotations",))
 _BOUND_TYPE = re.compile(r"Bound<'\w+, (Py\w+)>")
 
 # Constructors of typed values, by path.
@@ -227,6 +230,10 @@ class _Verifier:
                 self.path(text, scope)
             case rs.IntLit() | rs.FloatLit() | rs.StrLit() | rs.ByteStrLit() | rs.BoolLit():
                 pass
+            case rs.RawStrLit():
+                pass
+            case rs.MacroCall("rt::exec_python", args):
+                self.exec_python(args, scope)
             case rs.Call(func, args):
                 self.expr(func, scope)
                 self.exprs(args, scope)
@@ -261,6 +268,31 @@ class _Verifier:
                     self.block(orelse, scope)
             case _:
                 self.problem(f"unknown expression {type(expr).__name__}")
+
+    def exec_python(self, args: tuple[rs.Expr, ...], scope: _Scope) -> None:
+        """`rt::exec_python!(m, line = N, [future_annotations,] r#"source"#)`:
+        the source must start on the line after `r#"` and compile at line N."""
+        match args:
+            case (
+                rs.Path() as module,
+                rs.Tokens((str(line),)),
+                *options,
+                rs.RawStrLit(source),
+            ) if _EXEC_LINE.fullmatch(line) and options in ([], [_FUTURE_ANNOTATIONS]):
+                self.expr(module, scope)
+            case _:
+                self.problem("malformed `rt::exec_python!` call")
+                return
+        if not source.startswith("\n"):
+            self.problem("the source of `rt::exec_python!` must start on a new line")
+            return
+        number = int(line.removeprefix("line = "))
+        flags = __future__.annotations.compiler_flag if options else 0
+        padded = "\n" * (number - 2) + source
+        try:
+            compile(padded, "<exec_python>", "exec", flags=flags, dont_inherit=True)
+        except SyntaxError as err:
+            self.problem(f"the source of `rt::exec_python!` does not compile: {err}")
 
     def exprs(self, exprs: tuple[rs.Expr, ...], scope: _Scope) -> None:
         for expr in exprs:

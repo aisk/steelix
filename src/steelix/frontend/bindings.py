@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field
 
 from steelix.frontend.scope import (
@@ -79,13 +80,18 @@ class ModuleBindings:
         return self.defs[name][1]
 
 
-def analyze_module_bindings(module: ast.Module) -> ModuleBindings:
+def analyze_module_bindings(
+    module: ast.Module, python: Collection[ast.stmt] = ()
+) -> ModuleBindings:
+    """Bindings of the module globals. A `def` among the statements `python`
+    that are kept as Python source is not a target of direct calls: it has
+    no Rust function, so calls go through globals."""
     counts: Counter[str] = Counter()
     defs: dict[str, tuple[ast.FunctionDef, int]] = {}
     star_import = False
 
     for index, stmt in enumerate(module.body):
-        if isinstance(stmt, ast.FunctionDef):
+        if isinstance(stmt, ast.FunctionDef) and stmt not in python:
             defs[stmt.name] = (stmt, index)
 
     def visit_module_level(node: ast.AST) -> None:
@@ -100,6 +106,10 @@ def analyze_module_bindings(module: ast.Module) -> ModuleBindings:
             for child in _scope_children(node):
                 visit_nested_scope(child, declared_global)
             return
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            # `:=` in a comprehension binds in the enclosing scope (PEP 572).
+            for name in _comprehension_walrus_targets(node):
+                counts[name] += 1
         if isinstance(
             node, ast.Lambda | ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
         ):
@@ -134,6 +144,18 @@ def analyze_module_bindings(module: ast.Module) -> ModuleBindings:
     writes_defaults = _writes_defaults(module)
 
     return ModuleBindings(counts, defs, star_import, namespace_access, writes_defaults)
+
+
+def _comprehension_walrus_targets(node: ast.AST) -> list[str]:
+    """Names bound by `:=` in a comprehension, nested comprehensions included."""
+    names = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Lambda | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        if isinstance(child, ast.NamedExpr) and isinstance(child.target, ast.Name):
+            names.append(child.target.id)
+        names += _comprehension_walrus_targets(child)
+    return names
 
 
 _DEFAULTS_ATTRS = frozenset({"__defaults__", "__kwdefaults__"})
@@ -287,9 +309,16 @@ class _Loop:
 
 
 class _DefiniteAssignment:
-    def __init__(self, scope: FunctionScope, scopes: ModuleScopes | None = None) -> None:
+    def __init__(
+        self,
+        scope: FunctionScope,
+        scopes: ModuleScopes | None = None,
+        opaque: Collection[ast.stmt] = (),
+    ) -> None:
         self.scope = scope
         self.scopes = scopes
+        self.opaque = opaque
+        """Statements kept as Python source, which bind no locals here."""
         self.info = LocalsInfo()
         self.loops: list[_Loop] = []
 
@@ -319,6 +348,8 @@ class _DefiniteAssignment:
         return state
 
     def stmt(self, stmt: ast.stmt, state: _Flow) -> State:
+        if stmt in self.opaque:
+            return state
         match stmt:
             case ast.Expr(value):
                 self.reads(value, state)
@@ -660,6 +691,7 @@ def analyze_locals(scope: FunctionScope, scopes: ModuleScopes | None = None) -> 
     return _DefiniteAssignment(scope, scopes).run(body)  # type: ignore[arg-type]
 
 
-def analyze_module_flow(module: ast.Module) -> LocalsInfo:
-    """Reachability of module level statements (there are no locals)."""
-    return _DefiniteAssignment(MODULE_SCOPE).run(module.body)
+def analyze_module_flow(module: ast.Module, python: Collection[ast.stmt] = ()) -> LocalsInfo:
+    """Reachability of module level statements (there are no locals).
+    Statements kept as Python source are opaque: control continues after them."""
+    return _DefiniteAssignment(MODULE_SCOPE, opaque=python).run(module.body)

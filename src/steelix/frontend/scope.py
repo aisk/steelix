@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ast
 import symtable
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, field
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
@@ -136,10 +136,18 @@ def default_of(args: ast.arguments, param: str) -> ast.expr:
     raise KeyError(param)
 
 
-def analyze_scopes(module: ast.Module, source: str, filename: str) -> ModuleScopes:
+def analyze_scopes(
+    module: ast.Module,
+    source: str,
+    filename: str,
+    python: Collection[ast.stmt] = (),
+) -> ModuleScopes:
+    """Scopes of the functions in `module`, except in the top-level
+    statements `python` that are kept as Python source."""
     table = symtable.symtable(source, filename, "exec")
     functions: dict[FunctionNode, FunctionScope] = {}
-    top_level = _link(table, list(module.body), None, filename, functions)
+    body = [stmt for stmt in module.body if stmt not in python]
+    top_level = _link(table, list(body), None, filename, functions)
     for scope in functions.values():
         for name in scope.frees:
             scope.owner(name).cells.add(name)

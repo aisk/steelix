@@ -18,7 +18,7 @@
 
 - 性能优化，类型推导出原生类型（后续可基于类型注解做可选的 typed lowering）
 - 100% 语义兼容。允许有文档化的差异（见第 12 节）
-- generator、async/await、match、metaclass 自定义、`exec`/`eval` 等复杂特性
+- generator、async/await、match、metaclass 自定义、`exec`/`eval` 等复杂特性的原生转换。用到它们的代码通过混合模式保留为 Python 源码照常运行（第 13 节）
 
 ## 2. 总体流水线
 
@@ -27,13 +27,14 @@
   │  frontend/parse.py     ast.parse + tokenize 收集注释
   ▼
 Python AST + 注释
+  │  frontend/subset.py    找出不支持的构造，所在的顶层语句保留为 Python（§13）
   │  frontend/scope.py     symtable 分析作用域（local/global/nonlocal/cell/free）
   │  frontend/bindings.py  自行遍历 AST，统计模块级名字的绑定次数，
   │                        局部变量的定值分析（definite assignment）
   ▼
 带作用域信息的 AST
   │  lower/*               逐节点降级，按 Python 求值顺序生成临时变量，
-  │                        遇到不支持的语法抛 UnsupportedError
+  │                        保留的语句生成 rt::exec_python!
   ▼
 Rust AST（rustast/nodes.py）
   │  rustast/verify.py     检查作用域、跳转标签、带类型的接收者
@@ -65,9 +66,11 @@ steelix/
 ├── CLAUDE.md                  给后续会话的约定与命令速查
 ├── docs/
 │   ├── design.md              本文档
-│   └── roadmap.md             里程碑与任务拆解
+│   ├── roadmap.md             里程碑与任务拆解
+│   └── coverage.md            真实应用的转换覆盖率与优先级建议
 ├── src/steelix/
 │   ├── cli.py                 命令行入口 `steelix transpile`
+│   ├── coverage.py            转换覆盖率报告
 │   ├── diagnostics.py         诊断信息、源码位置、UnsupportedError
 │   ├── frontend/              解析、作用域分析、绑定分析
 │   ├── lower/                 Python AST → Rust AST
@@ -78,6 +81,7 @@ steelix/
 ├── examples/                  示例应用：转换的原样输出和手工改写的版本（第 15 节）
 └── tests/
     ├── cases/                 端到端用例（*.py），同时作为 golden 输入
+    ├── apps/                  从标准库复制的真实命令行工具（混合模式）
     ├── golden/                期望生成的 .rs（快照测试）
     └── test_*.py
 ```
@@ -305,9 +309,9 @@ Python 注释保留为 `//` 注释，放在它所属的语句前面：单独一�
 - 包只导出一个 `PyInit_*`。包初始化时安装一个 meta path finder，子模块在被 import 时才执行，保持 Python 的惰性 import 顺序和副作用
 - **全局变量不用进程级 static 保存模块对象**，因为 `importlib.reload` 或删除 `sys.modules` 后重新 import 会产生新的模块对象。globals 由 `Function` 持有，包装成模块上下文 `rt::Module` 显式传给每个函数体。以后需要按模块保存的状态（例如混合模式里编译好的 Python 代码）也放在这里
 - **只绑定一次的全局名字仍然每次查 globals**（M3b 评估过）。`import os`、`LIMIT = 10` 这类名字在模块里只绑定一次（`ModuleBindings` 能数出来），可以考虑在函数里缓存它们的值，但没有这样做
-  - 别的模块可以改这些名字。测试里 `monkeypatch.setattr(app, "LIMIT", 1)`、`mock.patch("app.requests")` 很常见，缓存会让它们悄悄失效。函数在名字绑定之前被调用时还要抛 `NameError`
-  - 能保持语义的做法是用 dict watcher（`PyDict_AddWatcher`）在 globals 或 builtins 变化时让缓存失效，但每个使用点需要一个缓存槽（生成代码里多一个宏或 static），每个解释器最多只有 8 个 watcher，实现和审查的成本都高
-  - 可读性上没有收益：有了模块上下文，`m.global("LIMIT")?` 已经和 Python 的写法一一对应。函数被改写成原生 Rust 时，常量自然变成 Rust 的 `const`（第 15 节）
+  - 主要原因是缓存在可读性上没有收益：有了模块上下文，`m.global("LIMIT")?` 已经和 Python 的写法一一对应，缓存只会让生成代码多出缓存槽。函数被改写成原生 Rust 时，常量自然变成 Rust 的 `const`（第 15 节）
+  - 动态查找顺带让替换全局变量（`monkeypatch.setattr(app, "LIMIT", 1)`、`mock.patch("app.requests")`）照常生效，函数在名字绑定之前被调用时也照常抛 `NameError`。但这不是完整的 monkeypatch 支持：对模块函数的直接调用本来就看不到替换（下面和第 12 节），所以不能拿它作为不缓存的理由
+  - 缓存而又保持语义的做法是用 dict watcher（`PyDict_AddWatcher`）在 globals 或 builtins 变化时让缓存失效，但每个使用点需要一个缓存槽（生成代码里多一个宏或 static），每个解释器最多只有 8 个 watcher，实现和审查的成本都高
   - 性能上，实测一次全局读取 44 ns，CPython 特化后的 `LOAD_GLOBAL` 约 1.5 ns。其中大部分是每次从 `&str` 新建并哈希一个 Python 字符串，所以 `m.global` 和 `rt::builtin` 只接受 `'static` 的名字，按地址缓存驻留字符串，降到 18 ns，语义不变。剩下的差距等专门做性能时再考虑 dict watcher
 - **直接调用的条件**：名字在模块内只绑定一次（`def` 算一次），没有装饰器，模块里没有 `from x import *`、`globals()`、对自身模块的 `setattr`，并且调用的参数能在转换时绑定（第 6 节）。否则走 globals 字典动态查找。调用名为 `globals`、`vars`、`locals` 的函数时保守地按 `globals()` 处理，即使这个名字是模块自己定义的函数
 - 直接调用无法感知其他模块的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。应用场景里别的模块很少 patch 应用自身的函数，所以影响不大。以后如有需要再提供 `--dynamic-globals` 选项让所有全局调用都走动态查找
@@ -463,7 +467,7 @@ pub mod point {
 已知且有意保留的语义差异
 
 - 直接调用的模块函数不受其他模块 monkeypatch 影响（可用 `--dynamic-globals` 关闭）
-- traceback 里没有 Python 行号（缓解措施见第 14 节）
+- 原生函数在 traceback 里没有帧，也就没有 Python 行号（缓解措施见第 14 节）。保留为 Python 的代码（§13）的帧和 CPython 一样，有原来的文件名、行号和源码行
 - 只有 C API 调用的热循环不经过解释器的检查点，Ctrl-C 需要 `PyErr_CheckSignals` 才能打断，PoC 阶段在循环里插入检查，或者先作为已知问题记录
 - 同理，这类循环里 GIL 不会自动切换
 - 直接调用的递归受 C 栈大小限制而不是 `sys.getrecursionlimit()`，`RecursionError` 的信息是 `Stack overflow (used N kB) ...` 而不是 `maximum recursion depth exceeded`
@@ -478,14 +482,89 @@ pub mod point {
 - `del f.__defaults__` 等删除元信息属性的操作抛 `AttributeError`，CPython 是把它设为 None。赋值为 None 的行为一致
 - 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；FORWARDREF 格式创建的 `ForwardRef` 没有 `owner`。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
 - 直接调用时省略的参数，不可变字面量的默认值直接写在调用处，所以别的模块给这个函数的 `__defaults__`/`__kwdefaults__` 赋值时直接调用看不到，这和直接调用看不到 monkeypatch 是同一类差异。本模块里的赋值会被识别，这时改为读函数对象（第 6 节）。字面量每次调用都创建新对象，见上面关于常量 identity 的一条
-- 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError`。默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
-- 模块级的条件定义（`if` 里的 `def`）和重复定义暂不支持，报 `UnsupportedError`
+- 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch，或者 `sys.modules[__name__].f = g`），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError: f() was replaced by <function g at 0x..>, but transpiled code calls the original directly and can not take the default of its parameter 'b' from the replacement`。CPython 会调用替换后的函数，要做到一样，直接调用就得在每次调用前检查 globals，失去了直接调用的意义，所以只保证报错清楚。M3c 之前这里会 panic默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
+- 模块级的条件定义（`if` 里的 `def`）和重复定义（第二个及以后的）保留为 Python（§13）
+- 模块级不带参数的 `globals()`、`locals()`、`vars()` 都是模块的 globals 字典，`dir()` 是排好序的名字列表（`m.dir()?`），和 CPython 一样。函数里不带参数的 `locals()`、`vars()`、`dir()` 要读局部变量，所在的函数保留为 Python
+- 混合模式（§13）的差异：每段保留的代码单独编译，模块级的带注解赋值分在几段里时，后一段的 `__annotate__` 会覆盖前一段的，模块的 `__annotations__` 只有最后一段的注解；跟在 `;` 后面的保留语句，第一行在 traceback 里的列位置会偏；ext 模式下文件名用模块的 `__file__`，也就是扩展模块的路径，traceback 显示不出源码行
+- Rust 的 panic（手工改写的代码里的 bug，或者 steelix 的 bug）在 bin 模式下和未捕获的 Python 异常一样处理：打印 `pyo3_runtime.PanicException` 的 traceback，退出码是 1，而不是 Rust 默认的 101。生成的代码和 runtime 不应该因为 Python 一侧可见的状态 panic，这类错误都转成 Python 异常
 - 嵌套函数的调用总是经过函数对象（性能差异，语义相同）
 
-## 13. 不支持特性的处理
+## 13. 不支持特性的处理：混合模式（M3c）
 
-- 默认遇到不支持的语法就报错，诊断信息带 `文件:行:列` 和特性名，便于统计覆盖率
-- **混合模式**：不支持的函数或类保留原 Python 源码嵌入 crate，在模块执行时编译并绑定到 globals。整个项目可以先跑起来，再逐步扩大可转换的范围。generator、async 适合用这种方式兜底。这是转换真实项目的前提，在 M3c 实现。粒度是函数和模块级语句：模块的作用域就是 globals 字典，不支持的顶层语句可以就地从源码执行
+目标是 CPython 能运行的应用都能转换，并且行为一致。steelix 还不能降级的部分保留为 Python 源码，在模块的 globals 里执行。整个程序先跑起来，再逐步扩大原生转换的范围，覆盖率报告（下面）告诉我们下一步该支持什么。
+
+- 默认就是混合模式。`steelix transpile --no-fallback` 恢复以前的行为：遇到不支持的语法就报错，诊断信息带 `文件:行:列` 和特性名
+- 粒度是模块的顶层语句。模块的作用域就是 globals 字典，所以不支持的顶层语句（类、`try`、`with`、模块级的推导式、条件定义的函数、带注解的赋值等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（generator、`try`、推导式、嵌套的类等）整个保留为 Python，嵌套函数一起保留
+- 原生函数里的一部分语句保留为 Python（更细的粒度）暂不做：那需要在 Rust 局部变量和 Python 代码之间同步局部变量。记录保留哪些语句的数据结构（`frontend/fallback.py` 的 `FallbackPlan`）按语句节点索引而不是按模块下标，以后可以直接放进函数里的语句
+
+### 判定
+
+- `frontend/subset.py` 遍历整个模块，记录每个不支持的构造（特性名、位置、所在的最外层函数，即模块级 `def` 或类的方法），按顶层语句分组。遇到不支持的节点不停下，继续检查它的子节点，所以一个函数里所有的阻碍都会被统计。类的方法也照常检查，用来估计支持类之后还有什么挡着
+- 少数不支持的情况要到分析或 lowering 时才发现（函数里不带参数的 `locals()`/`vars()`/`dir()`、嵌套函数的注解引用外层局部变量、超过参数个数上限的调用）。这时 lowering 抛出 `UnsupportedError`，按出错的行找到所在的顶层语句，把它加入保留列表，然后从头重新分析和 lowering，因为保留一个 `def` 会改变别的函数能否直接调用它。正常情况下最多重试几次
+- 同名的模块级 `def` 出现多次时，第一个原生转换，后面的保留为 Python（两个 Rust 函数需要不同的名字）。名字绑定了不止一次，所以调用都走 globals
+
+### 对分析的影响
+
+- 保留为 Python 的 `def` 不是直接调用的目标（`ModuleBindings.direct_function` 不返回它），对它的调用一律走 globals 查找。它的名字照常计入绑定次数，所以它和别的定义同名时，原生函数也不会被直接调用
+- 保留的语句里的绑定照常统计。推导式里的 `:=` 绑定外层作用域（PEP 572），在模块级就是全局变量，同样计入，否则原生代码可能把同名的名字当成 builtin
+- 作用域分析（symtable）只链接原生语句里的函数，保留的语句里可能有类和推导式，它们的符号表结构不同
+- 模块级的可达性分析把保留的语句看作不透明的普通语句：执行完继续往下
+
+### 生成的代码
+
+连续的保留语句合成一个 `rt::exec_python!` 调用，源码写成 raw string，原样放在它执行的位置，前面的注释说明为什么保留（特性和位置）。下面节选自 `tests/golden/mixed_mode.rs`：
+
+```rust
+    rt::def!(m, log(event))?;
+    log(m, &rt::str(py, "native statement before the class"))?;
+    // Kept as Python: class definition at 17:1
+    rt::exec_python!(
+        m,
+        line = 17,
+        r#"
+class Counter:
+    """Kept as Python: classes are not lowered yet."""
+
+    instances = log("class body")
+
+    def __init__(self, start):
+        self.value = start
+
+    def bump(self):
+        # Python calling a native function.
+        self.value = double(self.value)
+        return self
+"#
+    )?;
+    rt::def!(m, double(x))?;
+```
+
+- raw string 从 `r#"` 的下一行开始，`line = 17` 是第一行在 Python 文件里的行号。源码里出现 `"#` 时自动加更多的 `#`
+- 语句之间、保留的语句前面的注释仍然生成 Rust 注释；保留的语句内部的注释留在源码里。复合语句和带装饰器的语句总是从行首开始；跟在 `;` 后面的简单语句只截取它自己
+- 模块有 `from __future__ import annotations` 时写成 `rt::exec_python!(m, line = 17, future_annotations, r#"..."#)`，编译时带上对应的 flag
+- 生成的模块文件开头有一段模块文档，列出所有保留为 Python 的语句和原因，读代码的人一眼就能看出哪些已经是原生代码
+- 检查器（§2）认识这个宏：参数必须是模块上下文、`line = N`、可选的 `future_annotations` 和 raw string，源码必须从新的一行开始，并且按这个行号能用 `compile()` 编译
+
+运行时 `rt::python::exec_python` 在源码前面补 `line - 1` 个空行，用 `Py_CompileStringObject` 以模块的 `__file__` 为文件名编译，再用 `PyEval_EvalCode` 在模块的 globals 里执行（globals 和 locals 是同一个 dict，和模块级代码一样）。所以
+
+- 保留的 `def` 和 `class` 定义的对象和 CPython 完全一样：`__module__` 来自 globals 的 `__name__`，`__qualname__`、`__code__.co_filename`、`co_firstlineno` 都是原来的，`inspect.getsource` 能读到源码
+- 异常经过保留的代码时，traceback 里是原来的文件名和行号，并且能显示源码行
+- 原生代码和 Python 代码共享同一个 globals：Python 代码调用原生函数（`rt::def!` 绑定在 globals 里），原生代码通过 `m.global(..)` 调用 Python 定义的函数和类，两个方向都可以
+
+### 覆盖率报告
+
+`steelix transpile` 结束时在 stderr 打印一段摘要，`-v` 列出每个不支持构造的位置，`-q` 不打印，`--report FILE` 写出 JSON（`coverage.py`），可以跨模块合并（`coverage.merge`），用来决定先支持什么
+
+```
+stdlib_calendar.py: native 10/72 (14%) functions, 28/42 (67%) module statements, 200/838 (24%) lines
+  kept as Python by     functions  only  statements  occurrences
+  class definition             57    28          14           14
+  list comprehension           12     0           2           13
+```
+
+- 统计单位：函数是模块级 `def` 和类的方法（嵌套函数算在外层函数里），语句是除 `def` 以外的顶层语句，另外按行数统计
+- 每个特性的列：`functions` 是它出现在其中的函数个数（类出现时算类的所有方法），`only` 是只被它挡住的函数个数（支持它就能让这些函数变成原生代码），`statements` 是函数以外的顶层语句个数，`occurrences` 是出现次数
+- JSON 里还列出每个保留的函数和语句以及挡住它的特性。真实应用的数据和据此提出的优先级见 `coverage.md`
 
 ## 14. 测试与构建
 
@@ -495,6 +574,9 @@ pub mod point {
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码，以及 stderr 最后一行（异常类型和消息，不比较 traceback）。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
+  - 文档化的差异里有 CPython 成功而生成的程序报错的情况（§12 里被替换的直接调用）。这类用例用 `# steelix-test: expect-error 消息` 注释写明期望的错误，测试检查输出是 CPython 输出的前缀，并且最后一行是这条消息
+  - 混合模式：保留为 Python 的代码的 traceback 帧必须和 CPython 的最后几帧完全相同（文件名、行号、源码行）。bin 模式下的 panic 必须以退出码 1 结束（用手写的模块文件替换生成的文件来触发）
+- **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（有 traceback 时只比较最后一行）。它们的覆盖率数据见 `coverage.md`
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
 - **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
@@ -505,7 +587,16 @@ pub mod point {
 
 ## 15. 把函数改写成原生 Rust（M3b）
 
-迁移的第 3 步是人逐个把生成的函数改写成地道的 Rust，程序的其余部分照常工作。`examples/logsum` 是完整的例子：`generated/` 是转换的原样输出，`rewritten/` 把其中两个函数改写成了原生 Rust，`tests/test_examples.py` 验证两者的输出都与 CPython 一致。
+迁移的第 3 步是人逐个把生成的函数改写成地道的 Rust，程序的其余部分照常工作。`examples/logsum` 是完整的例子：`generated/` 是转换的原样输出，`rewritten/` 把其中一个函数改写到第一步、两个函数改写成了原生 Rust，`tests/test_examples.py` 验证两者的输出都与 CPython 一致（除了下面说的一处有意的差异）。
+
+### 两步走
+
+生成的代码里，Python 的 list、dict 仍然是 libpython 的容器（`Bound<PyList>`、`Bound<PyDict>`），这是预期的起点。改写分两步：
+
+1. **先改逻辑，数据留在 Python 容器里。** 函数体改成用 PyO3 的具体类型 API 直接操作原来的对象：`cast::<PyDict>()`、`cast::<PyList>()`、遍历、`get_item`、`set_item`，没有拷贝。参数和返回值仍是原来的 Python 对象，调用方和读取这些对象的其他函数都不受影响。例子里的 `tally` 就停在这一步：它返回的 dict 还被两个没改写的函数读取
+2. **生产方和所有读取方都改写后，再把容器换成 Rust 类型。** 一个 dict 记录变成 `struct`、一个计数 dict 变成 `HashMap` 或 `Vec`，要等创建它的函数和所有读取它的函数一起改写。只改其中一个，就要在边界上来回转换，既慢又容易在转换处丢掉语义（顺序、键的类型）。例子里的 `parse_line` 和 `percentile` 做完了这一步，它们的数据在适配层里转换一次
+
+类的方法要以整个类为单位改写（M5 之后）：实例的属性是方法之间共享的数据，只改写一个方法时它仍然要按 Python 对象读写这些属性，等同于第一步；把实例换成 Rust 结构体（`#[pyclass]`，§10）要求所有方法一起改写。
 
 ### 转换放在哪里
 
@@ -535,12 +626,14 @@ pub fn percentile<'py>(
 
 ### 改写步骤
 
+下面是第二步（换成原生类型）的步骤，第一步只需要第 1、4 步，改的是函数体本身。
+
 1. 选一个函数，读它的 Python 源码和调用方，确定参数和返回值的原生类型。可能是 `None` 的值用 `Option`，固定键的 dict 可以变成 struct。按调用图从叶子往上改写最省事
 2. 在原生模块里写新函数，顺手写单元测试
 3. 把生成的函数体换成转换加调用。原来返回 dict 或 tuple 的，在适配层里按原来的键和顺序构造，Python 一侧看到的结构不变
 4. 跑端到端测试，确认输出仍与 CPython 一致
 
-转换要与原来的 Python 语义对齐，对不齐的地方要有意识地决定。例如 `extract::<u64>()` 对负数抛 `OverflowError`、对 float 抛 `TypeError`，原来的 Python 代码也许接受它们；Rust 的 `split_whitespace`、`parse` 和 Python 的 `str.split`、`int()` 在非 ASCII 空白、带下划线的数字等边界上不同；`HashMap` 没有插入顺序，转回 Python 的 dict 顺序会变，如果下游依赖 dict 的顺序（直接遍历输出，或者排序时只比较部分键），就要用 `Vec` 或保持顺序的 map。
+转换要与原来的 Python 语义对齐，对不齐的地方要有意识地决定。例如 `extract::<u64>()` 对负数抛 `OverflowError`、对 float 抛 `TypeError`，原来的 Python 代码也许接受它们；Rust 的 `split_whitespace`、`parse` 和 Python 的 `str.split`、`int()` 在非 ASCII 空白、负号、带下划线的数字、非 ASCII 数字等边界上不同（例子里的 `parse_line` 有意把这些行当成格式错误，README 和测试里写明了）；`HashMap` 没有插入顺序，转回 Python 的 dict 顺序会变，如果下游依赖 dict 的顺序（直接遍历输出，或者排序时只比较部分键），就要用 `Vec` 或保持顺序的 map。
 
 ### 调用方
 

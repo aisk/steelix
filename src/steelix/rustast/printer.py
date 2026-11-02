@@ -157,6 +157,8 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
             return _float(value)
         case rs.StrLit(value):
             return string_literal(value)
+        case rs.RawStrLit(value):
+            return raw_string_literal(value)
         case rs.ByteStrLit(value):
             return byte_string_literal(value)
         case rs.BoolLit(value):
@@ -262,3 +264,13 @@ def byte_string_literal(value: bytes) -> str:
         else:
             out.append(f"\\x{byte:02x}")
     return 'b"' + "".join(out) + '"'
+
+
+def raw_string_literal(value: str) -> str:
+    """A Rust raw string literal, with as many `#` as it takes to hold `value`."""
+    if "\r" in value:
+        raise ValueError("a raw string literal can not hold a carriage return")
+    hashes = "#"
+    while '"' + hashes in value:
+        hashes += "#"
+    return f'r{hashes}"{value}"{hashes}'

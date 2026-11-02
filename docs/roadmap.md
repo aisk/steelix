@@ -82,19 +82,19 @@
 - [x] `examples/` 下放一个小应用：转换后手工把其中一个函数改写成地道的 Rust（原生参数和返回类型），e2e 测试证明输出仍与 CPython 一致
 - [x] 把改写约定写进 design.md（适配层、`extract`/`into_pyobject` 放在哪里、直接调用方如何调整）
 
-## M3c 混合模式与真实应用
+## M3c 混合模式与真实应用 ✅
 
 开头先处理 M3b 之后 Fable review 发现的问题。
 
-- [ ] 直接调用的目标被替换成另一个没有对应参数的函数时，`Function::default` 会 panic，改成抛 `TypeError`
-- [ ] `run_main` 兜住 panic，转成 traceback 并以退出码 1 结束，而不是 Rust 的 101
-- [ ] 不带参数的 `dir()`、`vars()`、`locals()` 现在报 `SystemError: frame does not exist`，按 `globals()` 的方式处理
-- [ ] logsum 示例：README 补全行为差异（负数、下划线、非 ASCII 数字也会被当成格式错误），`access.log` 加覆盖这些情况的行
-- [ ] §15 改成两步走：先改逻辑但数据仍用 Python 容器（`downcast::<PyDict>()` 等，没有拷贝），等某个容器的生产方和所有读取方都改写后，再整体换成 Rust 类型。logsum 加一个只做第一步的函数作为对照。同时说明类的方法要以整个类为单位改写
-- [ ] §7 的措辞：保持全局变量动态查找是因为不影响可读性，而不是因为能完整支持 monkeypatch（直接调用本来就不支持）
-- [ ] 混合模式：不支持的函数和模块级语句保留 Python 源码，在模块的 globals 里执行（§13）
-- [ ] 转换覆盖率统计（原生转换的函数比例、每种不支持特性出现的次数）
-- [ ] 找一两个真实的小应用跑通，根据结果决定 M4、M5 的先后和范围
+- [x] 直接调用的目标被替换成另一个没有对应参数的函数时，`Function::default` 会 panic，改成抛 `TypeError`（CPython 会调用替换后的函数，直接调用做不到，§12）
+- [x] `run_main` 兜住 panic，转成 traceback 并以退出码 1 结束，而不是 Rust 的 101
+- [x] 不带参数的 `dir()`、`vars()`、`locals()` 现在报 `SystemError: frame does not exist`，按 `globals()` 的方式处理（模块级；函数里的保留为 Python）
+- [x] logsum 示例：README 补全行为差异（负数、下划线、非 ASCII 数字也会被当成格式错误），`access.log` 加覆盖这些情况的行，测试明确检查改写版本的输出与 CPython 的差异
+- [x] §15 改成两步走：先改逻辑但数据仍用 Python 容器（`cast::<PyDict>()` 等，没有拷贝），等某个容器的生产方和所有读取方都改写后，再整体换成 Rust 类型。logsum 的 `tally` 只做第一步作为对照。同时说明类的方法要以整个类为单位改写
+- [x] §7 的措辞：保持全局变量动态查找是因为不影响可读性，而不是因为能完整支持 monkeypatch（直接调用本来就不支持）
+- [x] 混合模式：不支持的函数和模块级语句保留 Python 源码，用 `rt::exec_python!` 在模块的 globals 里就地执行，保留原来的文件名和行号，默认开启，`--no-fallback` 恢复报错（§13）
+- [x] 转换覆盖率统计：`steelix transpile` 打印摘要，`--report` 写 JSON，`steelix coverage` 合并多个模块（§13）
+- [x] 真实应用：标准库的 6 个命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool）在混合模式下与 CPython 一致，放进 `tests/apps/`。修复了发现的 3 个编译问题，数据和建议的 M4、M5、M8 顺序见 `coverage.md`
 
 ## M4 异常与上下文管理
 
@@ -110,6 +110,7 @@
 ## M5 类
 
 - [ ] 动态建类（`types.new_class` 语义），每个类一个 Rust mod（§10）
+- [ ] 方法级的混合模式：类原生创建，用了不支持语法的方法保留为 Python 源码放进类的命名空间（`coverage.md`：不做的话 M5 在标准库上的收益从 +48 降到 +9 个百分点）
 - [ ] 方法、`__init__`、实例属性、类属性
 - [ ] 继承（含继承 Python 定义的类）、`super()` 降级为 `super(Cls, self)`
 - [ ] `staticmethod`、`classmethod`、`property`

@@ -11,12 +11,13 @@ Two output modes share the generated module file, which only exposes
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from steelix.frontend.parse import ParsedModule
-from steelix.lower.module import lower_module
+from steelix.lower.module import LoweredModule, lower_module
 from steelix.lower.names import Renamer
 from steelix.rustast.fmt import config_text, rustfmt
 from steelix.rustast.printer import print_file, string_literal
@@ -63,27 +64,41 @@ class CrateOptions:
     """Path dependency on `steelix-runtime`; `None` uses the published version."""
     standalone: bool = True
     """Add an empty `[workspace]` so the crate builds even inside another workspace."""
+    fallback: bool = True
+    """Mixed mode: keep unsupported statements as Python source (design §13).
+    `False` makes them an error instead."""
 
 
 def rust_module_name(name: str) -> str:
+    """The Rust module for the Python module `name`, which as a script name
+    (`my-tool.py`) need not be an identifier."""
+    ident = re.sub(r"\W", "_", name)
+    if not ident.isidentifier():
+        ident = "m_" + ident
     # `main` and `lib` would collide with the crate root files.
-    return Renamer([name], {"main", "lib", "build"})[name]
+    return Renamer([ident], {"main", "lib", "build"})[ident]
 
 
-def render_module(parsed: ParsedModule) -> str:
-    """The formatted Rust source for one Python module.
+def render_module(parsed: ParsedModule, *, fallback: bool = True) -> str:
+    """The formatted Rust source for one Python module."""
+    return render(lower_module(parsed, fallback=fallback))
+
+
+def render(lowered: LoweredModule) -> str:
+    """The formatted Rust source of a lowered module.
 
     The generated code is verified first (`rustast.verify`): a failure is a
     bug of steelix, reported instead of writing code that does not compile
     or does the wrong thing.
     """
-    file = lower_module(parsed).file
-    verify(file)
-    return rustfmt(print_file(file))
+    verify(lowered.file)
+    return rustfmt(print_file(lowered.file))
 
 
-def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> None:
-    module_rs = render_module(parsed)
+def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> LoweredModule:
+    """Write the crate; the result tells which statements stayed Python."""
+    lowered = lower_module(parsed, fallback=options.fallback)
+    module_rs = render(lowered)
     rust_mod = rust_module_name(parsed.name)
     src = out_dir / "src"
     src.mkdir(parents=True, exist_ok=True)
@@ -95,6 +110,7 @@ def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> No
         (src / "main.rs").write_text(rustfmt(main_rs(parsed, rust_mod)))
     else:
         (src / "lib.rs").write_text(rustfmt(lib_rs(parsed, rust_mod)))
+    return lowered
 
 
 def crate_name(module_name: str) -> str:

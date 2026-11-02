@@ -1,6 +1,6 @@
 //! `Module`: the context every generated function receives.
 
-use pyo3::exceptions::PyNameError;
+use pyo3::exceptions::{PyNameError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -79,13 +79,33 @@ impl<'py> Module<'py> {
     ///
     /// Like a call through Python, it reads `__defaults__` / `__kwdefaults__`
     /// of the function object at call time, so assigning to them is honoured.
+    ///
+    /// A direct call is bound to the `def` at transpile time. If the global
+    /// now holds another object (a monkeypatch from another module), there is
+    /// no default to read and this raises `TypeError` (design §12).
     pub fn default(&self, function: &str, param: &str) -> PyResult<Bound<'py, PyAny>> {
         let Some(object) = self.globals.get_item(function)? else {
             return Err(PyNameError::new_err(format!(
                 "name '{function}' is not defined"
             )));
         };
-        let function = object.cast::<Function>()?;
-        function.get().default(self.py(), param)
+        match object.cast::<Function>() {
+            Ok(found) if found.get().is_def(function, &self.globals) => {
+                found.get().default(self.py(), param)
+            }
+            _ => Err(PyTypeError::new_err(format!(
+                "{function}() was replaced by {}, but transpiled code calls the original \
+                 directly and can not take the default of its parameter '{param}' from the \
+                 replacement",
+                object.repr()?
+            ))),
+        }
+    }
+
+    /// `dir()` at module level: the sorted names of the module's globals.
+    pub fn dir(&self) -> PyResult<Bound<'py, PyAny>> {
+        let names = self.globals.keys();
+        names.sort()?;
+        Ok(names.into_any())
     }
 }

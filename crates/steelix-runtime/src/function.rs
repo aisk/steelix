@@ -105,6 +105,9 @@ struct Meta {
 
 #[pyclass(frozen, dict, weakref, name = "function", module = "steelix_runtime")]
 pub struct Function {
+    /// The name the `def` gave it, which `Module::default` uses to tell the
+    /// function a direct call was compiled against from a replacement.
+    def_name: &'static str,
     signature: &'static Signature,
     body: Body,
     globals: Py<PyDict>,
@@ -164,6 +167,7 @@ impl Function {
             type_params: PyTuple::empty(py).unbind(),
         };
         let function = Function {
+            def_name: name,
             signature: def.signature,
             body: def.body,
             globals: globals.clone().unbind(),
@@ -181,6 +185,11 @@ impl Function {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Whether this is the function that `def name` created in `globals`.
+    pub(crate) fn is_def(&self, name: &str, globals: &Bound<'_, PyDict>) -> bool {
+        self.def_name == name && self.globals.bind(globals.py()).is(globals)
+    }
+
     fn qualname(&self, py: Python<'_>) -> String {
         self.meta().qualname.bind(py).to_string()
     }
@@ -189,9 +198,12 @@ impl Function {
     /// `__kwdefaults__` like CPython does at call time.
     pub(crate) fn default<'py>(&self, py: Python<'py>, param: &str) -> PyResult<Bound<'py, PyAny>> {
         let sig = self.signature;
-        let index = (0..sig.names.len())
-            .find(|&i| sig.name(i) == param)
-            .unwrap_or_else(|| panic!("`{param}` is not a parameter"));
+        let Some(index) = (0..sig.names.len()).find(|&i| sig.name(i) == param) else {
+            return Err(PyTypeError::new_err(format!(
+                "{}() has no parameter '{param}'",
+                self.qualname(py)
+            )));
+        };
         let (defaults, kwdefaults) = {
             let meta = self.meta();
             (

@@ -39,6 +39,14 @@ class StrLit(Expr):
 
 
 @dataclass(frozen=True)
+class RawStrLit(Expr):
+    """A raw string literal `r#"..."#`, used for Python source kept as is.
+    The value must not contain a carriage return (rustc rejects a bare CR)."""
+
+    value: str
+
+
+@dataclass(frozen=True)
 class ByteStrLit(Expr):
     value: bytes
 

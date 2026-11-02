@@ -837,13 +837,20 @@ class ExprLowering:
         bindings = self.ctx.module.bindings
         args = node.args
         if not bindings.is_module_bound(name) and not args and not node.keywords:
-            if name == "globals":
+            # At module level the local namespace is the globals dict.
+            namespace_name = name == "globals" or (
+                name in ("locals", "vars") and self.ctx.at_module_level
+            )
+            if namespace_name:
                 namespace = self.module_call("globals")
                 owned = rs.MethodCall(rs.MethodCall(namespace, "clone"), "into_any")
                 return Value(owned, Kind.OWNED)
-            if name in ("locals", "vars"):
-                # They read the calling frame, which transpiled code does not have.
-                raise self.ctx.unsupported(f"{name}()", node)
+            if name == "dir" and self.ctx.at_module_level:
+                return Value(_try(self.module_call("dir")), Kind.OWNED)
+            if name in ("locals", "vars", "dir"):
+                # In a function they read the calling frame, which transpiled
+                # code does not have.
+                raise self.ctx.unsupported(f"{name}() in a function", node)
         resolution = resolve_call(bindings, name, node, module_index=self.ctx.statement_index)
         if isinstance(resolution, Direct):
             return self.direct_call(resolution, node)

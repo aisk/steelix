@@ -17,6 +17,7 @@ from steelix.frontend.parse import parse_file
 ROOT = Path(__file__).resolve().parents[1]
 CASES_DIR = ROOT / "tests" / "cases"
 CORPUS_DIR = ROOT / "tests" / "corpus"
+APPS_DIR = ROOT / "tests" / "apps"
 GOLDEN_DIR = ROOT / "tests" / "golden"
 RUNTIME = ROOT / "crates" / "steelix-runtime"
 PYTHON = ROOT / ".venv" / "bin" / "python"

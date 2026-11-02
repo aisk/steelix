@@ -119,3 +119,36 @@ SOURCES = sorted(CASES_DIR.glob("*.py")) + sorted(CORPUS_DIR.glob("*.py"))
 @pytest.mark.parametrize("source", SOURCES, ids=lambda path: path.stem)
 def test_generated_code_verifies(source: Path) -> None:
     assert check(lower_module(parse_file(source)).file) == []
+
+
+def exec_python(*args: rs.Expr) -> rs.Stmt:
+    return rs.ExprStmt(rs.Try(rs.MacroCall("rt::exec_python", args)))
+
+
+M = rs.Param("m", "&rt::Module<'py>")
+
+
+def test_exec_python_passes() -> None:
+    line = rs.Tokens(("line = 3",))
+    source = rs.RawStrLit("\nclass A:\n    pass\n")
+    future = rs.Tokens(("future_annotations",))
+    assert not problems(exec_python(p("m"), line, source), params=(M,))
+    assert not problems(exec_python(p("m"), line, future, source), params=(M,))
+
+
+def test_exec_python_source_must_compile() -> None:
+    line = rs.Tokens(("line = 3",))
+    [problem] = problems(exec_python(p("m"), line, rs.RawStrLit("\nclass A\n")), params=(M,))
+    assert "does not compile" in problem
+    [problem] = problems(exec_python(p("m"), line, rs.RawStrLit("x = 1\n")), params=(M,))
+    assert "must start on a new line" in problem
+
+
+def test_exec_python_shape() -> None:
+    source = rs.RawStrLit("\nx = 1\n")
+    [problem] = problems(exec_python(p("m"), rs.Tokens(("line = 0",)), source), params=(M,))
+    assert "malformed" in problem
+    [problem] = problems(exec_python(p("m"), source), params=(M,))
+    assert "malformed" in problem
+    [problem] = problems(exec_python(p("module"), rs.Tokens(("line = 1",)), source), params=(M,))
+    assert "`module` is not in scope" in problem

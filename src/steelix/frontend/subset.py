@@ -1,13 +1,16 @@
-"""Reject Python constructs that have no lowering yet.
+"""Find Python constructs that have no lowering yet.
 
 Running this before any analysis keeps the analyses and the lowering simple:
-they only ever see the supported subset, and every unsupported construct is
-reported with its source location instead of producing wrong code.
+they only ever see the supported subset. Every unsupported construct is
+recorded with its source location, grouped by the top-level statement that
+contains it. In mixed mode (the default) those statements are kept as Python
+source (design §13); with `--no-fallback` the first one is an error.
 """
 
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
 
@@ -38,36 +41,81 @@ _FEATURES: dict[type[ast.AST], str] = {
 }
 
 
+FunctionLike = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+@dataclass(frozen=True, eq=False)
+class Issue:
+    """One unsupported construct."""
+
+    feature: str
+    location: SourceLocation
+    owner: FunctionLike | None = None
+    """The outermost function (a module level `def` or a method) containing
+    the construct, `None` outside of functions."""
+
+    def error(self) -> UnsupportedError:
+        return UnsupportedError(self.feature, self.location)
+
+
 class SubsetChecker:
     def __init__(self, filename: str) -> None:
         self.filename = filename
         self.depth = 0
-        """Number of enclosing functions."""
+        """Number of enclosing functions and classes."""
+        self.functions: list[FunctionLike] = []
+        """The enclosing functions, outermost first."""
+        self.issues: list[Issue] = []
 
-    def fail(self, feature: str, node: ast.AST) -> UnsupportedError:
-        return UnsupportedError(feature, SourceLocation.of(self.filename, node))
+    def fail(self, feature: str, node: ast.AST) -> None:
+        owner = self.functions[0] if self.functions else None
+        self.issues.append(Issue(feature, SourceLocation.of(self.filename, node), owner))
 
-    def unsupported(self, node: ast.AST) -> UnsupportedError:
-        feature = _FEATURES.get(type(node), type(node).__name__)
-        return self.fail(feature, node)
+    def unsupported(self, node: ast.AST) -> None:
+        """Record `node` as unsupported, then look for more inside it."""
+        self.fail(_FEATURES.get(type(node), type(node).__name__), node)
+        self.descend(node)
 
-    def check_module(self, module: ast.Module) -> None:
+    def descend(self, node: ast.AST) -> None:
+        """Check the children of an unsupported node, so that every
+        unsupported construct is found, not only the outermost one."""
+        for child in ast.iter_child_nodes(node):
+            match child:
+                case ast.stmt():
+                    self.check_stmt(child)
+                case ast.Starred() | ast.Slice() | ast.FormattedValue() | ast.Interpolation():
+                    # Parts of a larger expression, not unsupported themselves.
+                    self.descend(child)
+                case ast.expr():
+                    self.check_expr(child)
+                case _:
+                    self.descend(child)
+
+    def check_module(self, module: ast.Module) -> dict[ast.stmt, list[Issue]]:
+        """The unsupported constructs of each top-level statement that has any."""
+        found: dict[ast.stmt, list[Issue]] = {}
         for stmt in module.body:
+            self.issues = []
             if isinstance(stmt, ast.FunctionDef):
                 self.check_def(stmt)
             else:
                 self.check_stmt(stmt)
+            if self.issues:
+                found[stmt] = self.issues
+        return found
 
-    def check_def(self, fn: ast.FunctionDef) -> None:
+    def check_def(self, fn: FunctionLike) -> None:
         if fn.type_params:
-            raise self.fail("type parameters", fn)
+            self.fail("type parameters", fn)
         for decorator in fn.decorator_list:
             self.check_expr(decorator)
         # Annotations are kept as source and evaluated lazily by the runtime.
         self.check_defaults(fn.args)
         self.depth += 1
+        self.functions.append(fn)
         for stmt in fn.body:
             self.check_stmt(stmt)
+        self.functions.pop()
         self.depth -= 1
 
     def check_defaults(self, args: ast.arguments) -> None:
@@ -85,8 +133,9 @@ class SubsetChecker:
                 self.check_expr(value)
             case ast.AugAssign(target, _, value):
                 if not isinstance(target, ast.Name | ast.Attribute | ast.Subscript):
-                    raise self.unsupported(target)
-                self.check_target(target)
+                    self.unsupported(target)
+                else:
+                    self.check_target(target)
                 self.check_expr(value)
             case ast.Delete(targets):
                 for target in targets:
@@ -111,9 +160,9 @@ class SubsetChecker:
                 pass
             case ast.ImportFrom(_, names, level):
                 if level:
-                    raise self.fail("relative import", stmt)
+                    self.fail("relative import", stmt)
                 if any(alias.name == "*" for alias in names):
-                    raise self.fail("star import", stmt)
+                    self.fail("star import", stmt)
             case ast.Assert(test, msg):
                 self.check_expr(test)
                 if msg is not None:
@@ -121,13 +170,25 @@ class SubsetChecker:
             case ast.Pass() | ast.Break() | ast.Continue() | ast.Global() | ast.Nonlocal():
                 pass
             case ast.AnnAssign() if self.depth == 0:
-                raise self.fail("annotated assignment at module level", stmt)
+                self.fail("annotated assignment at module level", stmt)
+                self.descend(stmt)
             case ast.FunctionDef() if self.depth > 0:
                 self.check_def(stmt)
             case ast.FunctionDef():
-                raise self.fail("function definition outside module top level", stmt)
+                self.fail("function definition outside module top level", stmt)
+                self.check_def(stmt)
+            case ast.AsyncFunctionDef():
+                self.fail("async function", stmt)
+                self.check_def(stmt)
+            case ast.ClassDef():
+                # The methods are checked too: what else blocks them once
+                # classes are supported is worth knowing (coverage report).
+                self.fail("class definition", stmt)
+                self.depth += 1
+                self.descend(stmt)
+                self.depth -= 1
             case _:
-                raise self.unsupported(stmt)
+                self.unsupported(stmt)
 
     def check_body(self, body: list[ast.stmt]) -> None:
         for stmt in body:
@@ -147,12 +208,13 @@ class SubsetChecker:
                 for elt in elts:
                     if isinstance(elt, ast.Starred):
                         if not starred:
-                            raise self.unsupported(elt)
-                        self.check_target(elt.value)
+                            self.unsupported(elt)
+                        else:
+                            self.check_target(elt.value)
                     else:
                         self.check_target(elt, starred)
             case _:
-                raise self.unsupported(target)
+                self.unsupported(target)
 
     def check_index(self, index: ast.expr) -> None:
         """The part between the brackets of a subscript, where slices may appear."""
@@ -173,7 +235,7 @@ class SubsetChecker:
                 if value is not Ellipsis and not isinstance(
                     value, int | float | str | bytes | None
                 ):
-                    raise self.fail(f"{type(value).__name__} constant", expr)
+                    self.fail(f"{type(value).__name__} constant", expr)
             case ast.Name():
                 pass
             case ast.UnaryOp(_, operand):
@@ -211,13 +273,16 @@ class SubsetChecker:
             case ast.List(elts) | ast.Tuple(elts) | ast.Set(elts):
                 for elt in elts:
                     if isinstance(elt, ast.Starred):
-                        raise self.fail("unpacking in a display", elt)
-                    self.check_expr(elt)
+                        self.fail("unpacking in a display", elt)
+                        self.check_expr(elt.value)
+                    else:
+                        self.check_expr(elt)
             case ast.Dict(keys, values):
                 for key, value in zip(keys, values, strict=True):
                     if key is None:
-                        raise self.fail("unpacking in a display", value)
-                    self.check_expr(key)
+                        self.fail("unpacking in a display", value)
+                    else:
+                        self.check_expr(key)
                     self.check_expr(value)
             case ast.JoinedStr(values):
                 for value in values:
@@ -226,9 +291,16 @@ class SubsetChecker:
                         if value.format_spec is not None:
                             self.check_expr(value.format_spec)
             case _:
-                raise self.unsupported(expr)
+                self.unsupported(expr)
+
+
+def find_unsupported(module: ast.Module, filename: str) -> dict[ast.stmt, list[Issue]]:
+    """The unsupported constructs of `module`, by top-level statement, in
+    source order."""
+    return SubsetChecker(filename).check_module(module)
 
 
 def check_supported(module: ast.Module, filename: str) -> None:
     """Raise `UnsupportedError` for the first construct outside the supported subset."""
-    SubsetChecker(filename).check_module(module)
+    for issues in find_unsupported(module, filename).values():
+        raise issues[0].error()

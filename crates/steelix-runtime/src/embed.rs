@@ -1,11 +1,15 @@
 //! Running a transpiled program as an executable that embeds libpython.
 
+use std::any::Any;
 use std::ffi::{CString, c_char};
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStringExt;
 use std::process::ExitCode;
 
+use std::panic::{self, AssertUnwindSafe};
+
 use pyo3::ffi;
+use pyo3::panic::PanicException;
 use pyo3::prelude::*;
 
 /// The `exec_module` function generated for a Python module.
@@ -33,14 +37,21 @@ pub struct Script {
 /// The exit code follows CPython: `SystemExit` exits with its code, any other
 /// uncaught exception prints a traceback and exits with 1, and a failure while
 /// finalizing exits with 120.
+///
+/// A Rust panic (a bug in hand-written code, or in steelix) is reported like
+/// an uncaught Python exception, as PyO3's `PanicException`, and also exits
+/// with 1 instead of Rust's usual 101.
 pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> ExitCode {
     // SAFETY: called once, before anything else touches the interpreter.
     unsafe { initialize(executable, script) };
     let failed = Python::attach(|py| {
-        let result = py.import("__main__").and_then(|main| {
+        let run = || {
+            let main = py.import("__main__")?;
             prepare_main(&main, script)?;
             exec_module(&crate::Module::new(&main))
-        });
+        };
+        let result = panic::catch_unwind(AssertUnwindSafe(run))
+            .unwrap_or_else(|payload| Err(panic_error(payload)));
         flush_io(py);
         match result {
             Ok(()) => false,
@@ -62,6 +73,18 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// The `PanicException` for a caught panic, carrying its message.
+fn panic_error(payload: Box<dyn Any + Send>) -> PyErr {
+    let message = if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "panic with a non-string payload".to_owned()
+    };
+    PanicException::new_err(message)
 }
 
 /// Flushes `sys.stderr` and `sys.stdout`, ignoring errors, like CPython's

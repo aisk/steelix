@@ -141,11 +141,12 @@ macro_rules! call {
     // A lone `*args`: converted to a tuple after the keyword arguments.
     (@parse $f:expr, [(star $value:expr)] [$($k:tt)*]) => {{
         let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = &$f;
-        let star = $value;
+        // Borrowed, so that a local variable is not moved.
+        let star = &$value;
         let kwargs = $crate::call!(@kwargs function, [$($k)*]);
         $crate::pyo3::types::PyAnyMethods::call(
             function,
-            $crate::call::star_args(function, &star)?,
+            $crate::call::star_args(function, star)?,
             kwargs.as_ref(),
         )
     }};
@@ -170,9 +171,10 @@ macro_rules! call {
         $crate::pyo3::types::PyListMethods::append(&$args, $value)?
     };
     (@arg $args:ident, (star $value:expr)) => {{
-        // Bound first so that `?` inside `$value` keeps its own type.
-        let value = $value;
-        $crate::call::extend_args(&$args, &value)?
+        // Bound first so that `?` inside `$value` keeps its own type, and
+        // borrowed so that a local variable is not moved.
+        let value = &$value;
+        $crate::call::extend_args(&$args, value)?
     }};
     (@kwargs $function:ident, []) => {
         ::std::option::Option::<$crate::pyo3::Bound<'_, $crate::pyo3::types::PyDict>>::None
@@ -193,8 +195,8 @@ macro_rules! call {
         $crate::pyo3::types::PyDictMethods::set_item(&$kwargs, $name, $value)?
     };
     (@kwarg $function:ident, $kwargs:ident, (merge $value:expr)) => {{
-        let value = $value;
-        $crate::call::merge_kwargs($function, &$kwargs, &value)?
+        let value = &$value;
+        $crate::call::merge_kwargs($function, &$kwargs, value)?
     }};
     ($f:expr $(, $($args:tt)*)?) => {
         $crate::call!(@parse $f, [] [] $($($args)*)?)

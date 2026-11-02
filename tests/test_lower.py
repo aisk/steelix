@@ -10,8 +10,8 @@ from steelix.frontend.parse import parse_source
 from steelix.lower.names import Renamer, rust_ident
 
 
-def lower(source: str) -> str:
-    return render_module(parse_source(textwrap.dedent(source), "m"))
+def lower(source: str, *, fallback: bool = True) -> str:
+    return render_module(parse_source(textwrap.dedent(source), "m"), fallback=fallback)
 
 
 def test_rust_ident() -> None:
@@ -54,7 +54,7 @@ def test_unsupported_constructs_report_location(
     source: str, feature: str, line: int, col: int
 ) -> None:
     with pytest.raises(UnsupportedError) as info:
-        lower(source)
+        lower(source, fallback=False)
     assert info.value.feature == feature
     assert (info.value.location.line, info.value.location.col + 1) == (line, col)
     assert str(info.value).startswith(f"m.py:{line}:{col}: unsupported: {feature}")
@@ -282,3 +282,73 @@ def test_assigned_defaults_are_read_from_the_function() -> None:
         """
     )
     assert 'f(m, &rt::int(py, 1), &m.default("f", "b")?)' in out
+
+
+def test_python_kept_def_is_called_through_globals() -> None:
+    out = lower(
+        """
+        def gen(n):
+            yield n
+
+        def use():
+            return gen(1)
+        """
+    )
+    assert "pub fn gen" not in out
+    assert 'm.global("gen")?.call1((1,))' in out
+    assert "// Kept as Python: yield at 3:5\n" in out
+    assert "line = 2,\n" in out
+
+
+def test_consecutive_python_statements_share_one_block() -> None:
+    out = lower(
+        """
+        x = 1
+        # about the class
+        class A:
+            # inside the class
+            pass
+        ys = [i for i in range(3)]  # squares
+        print(x)
+        """
+    )
+    assert out.count("rt::exec_python!(") == 1
+    assert "    // about the class\n" in out
+    assert "// inside the class" not in out
+    source = "class A:\n    # inside the class\n    pass\nys = [i for i in range(3)]  # squares\n"
+    assert f'"\n{source}"' in out
+
+
+def test_python_statement_after_semicolon() -> None:
+    out = lower("x = 1; y = [i for i in 'ab']; print(y)\n")
+    assert 'm.set_global("x", 1)?;' in out
+    assert "line = 1,\n        r#\"\ny = [i for i in 'ab']\n\"#" in out
+    assert 'rt::builtins::print(m.py(), (m.global("y")?,))?;' in out
+
+
+def test_raw_string_delimiter_avoids_the_source() -> None:
+    out = lower("""x = [s for s in ('"#', '"##')]\n""")
+    assert 'r###"\n' in out
+
+
+def test_unsupported_found_while_lowering_is_kept_as_python() -> None:
+    source = """
+        def names():
+            return locals()
+        """
+    out = lower(source)
+    assert "// Kept as Python: locals() in a function at 3:12" in out
+    with pytest.raises(UnsupportedError) as info:
+        lower(source, fallback=False)
+    assert info.value.feature == "locals() in a function"
+
+
+def test_future_annotations_reach_python_code() -> None:
+    out = lower(
+        """
+        from __future__ import annotations
+        class A:
+            x: int
+        """
+    )
+    assert "line = 3,\n        future_annotations,\n" in out

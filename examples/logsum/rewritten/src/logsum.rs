@@ -1,6 +1,7 @@
 mod native;
 
 use pyo3::IntoPyObjectExt;
+use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use pyo3::types::PyDict;
@@ -116,19 +117,29 @@ pub fn bar<'py>(
 }
 
 // logsum.py:80
+/// Rewritten in the first step of design §15: the loop is Rust, but the
+/// records and the counts stay Python objects, read and written in place
+/// through typed PyO3 APIs. `print_paths` and `print_hours`, which are still
+/// generated, read the dict this returns, so it stays a dict until they are
+/// rewritten too.
 pub fn tally<'py>(
     m: &rt::Module<'py>,
     requests: &Bound<'py, PyAny>,
     field: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut key: Bound<'py, PyAny>;
-    let counts = PyDict::new(m.py()).into_any();
-    for request in requests.try_iter()? {
-        let request = request?;
-        key = request.get_item(field)?;
-        counts.set_item(&key, counts.call_method1("get", (&key, 0))?.add(1)?)?;
+    let counts = PyDict::new(m.py());
+    for request in requests.cast::<PyList>()? {
+        let Some(key) = request.cast::<PyDict>()?.get_item(field)? else {
+            // `request[field]` raised `KeyError`.
+            return Err(PyKeyError::new_err(field.clone().unbind()));
+        };
+        let count = match counts.get_item(&key)? {
+            Some(count) => count.extract::<u64>()? + 1,
+            None => 1,
+        };
+        counts.set_item(key, count)?;
     }
-    Ok(counts)
+    Ok(counts.into_any())
 }
 
 // logsum.py:88

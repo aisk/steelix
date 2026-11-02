@@ -82,16 +82,45 @@ def example_workspace() -> Workspace:
     return workspace
 
 
+# Numbers that Python's `int()` accepts and the rewritten `parse_line`, which
+# uses `str::parse::<u64>`, does not: a negative size, digits grouped with an
+# underscore and non-ASCII digits. This is a deliberate difference, documented
+# in the README: the rewritten program counts these lines as malformed.
+REWRITE_REJECTS = [" -5 ", " 1_024 ", " \u0664\u0662ms"]
+
+
+def rewritten_log(tmp_path: Path) -> Path:
+    """A copy of the example directory whose `access.log` has the lines that
+    the rewritten program rejects replaced by malformed ones, so that CPython
+    prints what the rewritten program is expected to print for the original."""
+    shutil.copyfile(EXAMPLE / "logsum.py", tmp_path / "logsum.py")
+    lines = (EXAMPLE / "access.log").read_text(encoding="utf-8").splitlines(keepends=True)
+    changed = [
+        "### rejected by the rewritten parse_line ###\n"
+        if any(token in line for token in REWRITE_REJECTS)
+        else line
+        for line in lines
+    ]
+    assert len([a for a, b in zip(lines, changed, strict=True) if a != b]) == len(REWRITE_REJECTS)
+    (tmp_path / "access.log").write_text("".join(changed), encoding="utf-8")
+    return tmp_path
+
+
 @pytest.mark.e2e
 @pytest.mark.cargo
 @pytest.mark.parametrize("args", ARGS, ids=lambda args: " ".join(args) or "no-args")
 @pytest.mark.parametrize("variant", VARIANTS)
 def test_example_matches_python(
-    variant: str, args: list[str], example_workspace: Workspace
+    variant: str, args: list[str], example_workspace: Workspace, tmp_path: Path
 ) -> None:
     expected = run([str(PYTHON), "logsum.py", *args], EXAMPLE)
     binary = cargo_env(extension=False)["CARGO_TARGET_DIR"]
     actual = run([str(Path(binary) / "debug" / f"logsum-{variant}"), *args], EXAMPLE)
+    if variant == "rewritten" and "access.log" in args:
+        # The documented difference: not CPython's output for this log, but
+        # CPython's output for the log with those lines made malformed.
+        assert actual != expected
+        expected = run([str(PYTHON), "logsum.py", *args], rewritten_log(tmp_path))
     assert actual == expected
 
 

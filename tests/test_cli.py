@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from steelix.cli import build_parser, main
@@ -47,8 +48,84 @@ def test_transpile_ext_mode(tmp_path: Path) -> None:
     assert '#[pymodule(name = "lib_mod")]' in (out / "src" / "lib.rs").read_text()
 
 
-def test_transpile_reports_unsupported(tmp_path: Path, capsys) -> None:
+def test_no_fallback_reports_unsupported(tmp_path: Path, capsys) -> None:
     source = tmp_path / "bad.py"
     source.write_text("class A:\n    pass\n")
-    assert main(["transpile", str(source), "-o", str(tmp_path / "out")]) == 1
+    args = ["transpile", str(source), "-o", str(tmp_path / "out"), "--no-fallback"]
+    assert main(args) == 1
     assert "bad.py:1:1: unsupported: class definition" in capsys.readouterr().err
+
+
+def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, capsys) -> None:
+    source = tmp_path / "app.py"
+    source.write_text(
+        "def f(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "class A:\n"
+        "    def m(self):\n"
+        "        return [i for i in self]\n"
+        "\n"
+        "\n"
+        "def g(xs):\n"
+        "    return (x for x in xs)\n"
+        "\n"
+        "\n"
+        "print(f(1))\n"
+    )
+    report = tmp_path / "report.json"
+    args = ["transpile", str(source), "-o", str(tmp_path / "out"), "--report", str(report)]
+    assert main([*args, "-v"]) == 0
+    err = capsys.readouterr().err
+    assert "app.py: native 1/3 (33%) functions, 1/2 (50%) module statements" in err
+    assert "      app.py:11:12" in err  # the generator expression, with -v
+    data = json.loads(report.read_text())
+    assert data["functions"] == {"native": 1, "total": 3}
+    features = {f["feature"]: f for f in data["features"]}
+    assert features["class definition"]["functions"] == 1
+    assert features["list comprehension"] == {
+        "feature": "list comprehension",
+        "occurrences": 1,
+        "functions": 1,
+        "only": 0,
+        "statements": 0,
+        "locations": ["app.py:7:16"],
+    }
+    assert features["generator expression"]["only"] == 1
+    assert [(p["kind"], p["name"]) for p in data["python"]] == [
+        ("function", "A.m"),
+        ("statement", "A"),
+        ("function", "g"),
+    ]
+    module_rs = (tmp_path / "out" / "src" / "app.rs").read_text()
+    assert "pub fn f<'py>(" in module_rs
+    assert "line = 5," in module_rs
+    assert "class A:\n" in module_rs
+
+
+def test_coverage_merges_modules(tmp_path: Path, capsys) -> None:
+    (tmp_path / "a.py").write_text("def f():\n    yield 1\n")
+    (tmp_path / "b.py").write_text("def g():\n    yield 2\n\n\ndef h():\n    return 3\n")
+    report = tmp_path / "report.json"
+    args = ["coverage", str(tmp_path / "a.py"), str(tmp_path / "b.py"), "--report", str(report)]
+    assert main(args) == 0
+    out = capsys.readouterr().out
+    assert "b.py: native 1/2 (50%) functions" in out
+    assert "all 2 modules:" in out
+    data = json.loads(report.read_text())
+    assert [m["module"] for m in data["modules"]] == ["a.py", "b.py"]
+    assert data["features"] == [
+        {"feature": "yield", "occurrences": 2, "functions": 2, "only": 2, "statements": 0}
+    ]
+    assert not (tmp_path / "out").exists()
+
+
+def test_script_name_that_is_not_an_identifier(tmp_path: Path) -> None:
+    source = tmp_path / "my-tool.py"
+    source.write_text("print(1)\n")
+    out = tmp_path / "out"
+    assert main(["transpile", str(source), "-o", str(out), "-q"]) == 0
+    assert "mod my_tool;" in (out / "src" / "main.rs").read_text()
+    assert (out / "src" / "my_tool.rs").is_file()
+    assert 'name = "my-tool"' in (out / "Cargo.toml").read_text()
