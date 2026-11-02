@@ -2,6 +2,8 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d → M4 → M5 → M8 → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
+
 ## M0 项目骨架 ✅
 
 - [x] uv 初始化，Python 3.14.9，dev 依赖 pytest、ruff
@@ -71,7 +73,7 @@
 - [x] 一批"真实风格"的脚本作为语料（`tests/corpus/`），要求能转换、编译没有警告，输出与 CPython 一致。发现并修复了 `if`/`while`/`for` 头部的 lambda 的 fn item 被放进分支或循环体的问题
 - [x] 生成的 crate 在 dev profile 下提高 `opt-level`，文档说明函数改写前不会比 CPython 快
 
-## M3b 改写边界
+## M3b 改写边界 ✅
 
 验证迁移路线的第 3 步：人把某个生成的函数改写成普通 Rust，程序其余部分照常工作。
 
@@ -96,6 +98,19 @@
 - [x] 转换覆盖率统计：`steelix transpile` 打印摘要，`--report` 写 JSON，`steelix coverage` 合并多个模块（§13）
 - [x] 真实应用：标准库的 6 个命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool）在混合模式下与 CPython 一致，放进 `tests/apps/`。修复了发现的 3 个编译问题，数据和建议的 M4、M5、M8 顺序见 `coverage.md`
 
+## M3d 混合模式之后的小修
+
+来自 M3c 之后的 Fable review，都有复现。
+
+- [ ] 模块级嵌套语句的细粒度保留：`if`/`for`/`while`/`if __name__ == "__main__"` 里只有某个子语句不支持时，只保留那个子语句，其余仍然原生（模块作用域就是 globals，不需要同步局部变量；注意被保留的子语句里的 `break`/`continue`）
+- [ ] 原生的 `while`/`for` 循环里调用 `PyErr_CheckSignals`，现在纯原生循环按 Ctrl-C 停不下来
+- [ ] 每个被保留的 `def`/`class` 单独一个 `exec_python!`，各自带源位置和原因，只合并连续的简单语句。§13/§15 补充如何把保留为 Python 的函数手工改成原生
+- [ ] 对自身模块的 `setattr`/`delattr`（`sys.modules[__name__]`、`__main__` 等）关闭直接调用，与 design.md §7 的描述一致。`exec` 同理
+- [ ] `rt::builtin` 改为查 builtins 的字典，而不是对 builtins 模块 `getattr`（现在 `__annotations__` 等名字会读到模块对象的属性）
+- [ ] 模块注解分散在多个保留块时合并，而不是只保留最后一块
+- [ ] 带参数的 `vars(obj)` 不再关闭整个模块的直接调用
+- [ ] §12 记录原生函数没有 Python 帧对 `logging`（`%(lineno)d`、`%(funcName)s`）和 `warnings` 的影响，`tests/apps` 加一个记录行号的用例
+
 ## M4 异常与上下文管理
 
 - [ ] `raise`、`raise ... from ...`
@@ -103,7 +118,7 @@
 - [ ] 进入 handler 时设置当前处理异常的 RAII guard，handler 内裸 `raise`
 - [ ] `except (A, B) as e`、裸 `except`
 - [ ] `with`（多个 item）
-- [ ] 异常经过时用 `add_note` 附加 Python 源位置
+- [ ] 原生函数在 traceback 里的合成帧（类似 Cython：出错路径上用 `PyFrame_New` + `PyTraceBack_Here`，文件名和行号取自生成器已知的源位置），替代原来计划的 `add_note`
 - [ ] e2e 测试比较预期异常的类型和消息
 - [ ] 改写约定补充：改写后的适配层抛出的异常类型必须与原来一致，加 e2e 用例在改写过的函数外面 `except` 原来的异常类型
 
@@ -125,6 +140,7 @@
 
 ## M7 分发
 
+- [ ] 部署后的二进制不能依赖源文件：`multiprocessing` 的子进程现在会用 venv 的 python 重新执行原来的 `.py`，源文件挪走就失败。需要让子进程使用二进制本身（`multiprocessing.set_executable`、`__spec__` 等），或者明确要求源文件随二进制一起部署
 - [ ] Spike：对比附带 python-build-standalone + site-packages、静态链接 libpython 等方案，结论写入 design.md §11
 - [ ] 运行时按相对于二进制的路径定位 Python 安装，不再写死构建时路径
 - [ ] `steelix build` 一条命令产出可分发的目录或压缩包
@@ -135,7 +151,6 @@
 - [ ] list/set/dict 推导式（降级为循环，注意推导式有自己的作用域）
 - [ ] 生成器表达式的有限支持（作为 `any`/`all`/`sum`/`list` 等的参数时物化成列表，注明语义差异），其余走混合模式
 - [ ] 海象运算符 `:=`
-- [ ] 热循环中插入 `PyErr_CheckSignals`
 
 ## M9 可读性与渐进式改写
 
