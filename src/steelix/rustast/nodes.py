@@ -67,6 +67,9 @@ class MethodCall(Expr):
     receiver: Expr
     method: str
     args: tuple[Expr, ...] = ()
+    concrete: bool = False
+    """Calls the method of the receiver's concrete type on purpose, such as
+    `PySet::add`, rather than the `PyAnyMethods` one (`rustast.pyo3`)."""
 
 
 @dataclass(frozen=True)

@@ -34,7 +34,12 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
 @pytest.mark.parametrize(
     ("source", "feature", "line", "col"),
     [
-        ("x = [i for i in y]\n", "list comprehension", 1, 5),
+        (
+            "x = (i for i in y for j in i)\n",
+            "generator expression with several for clauses",
+            1,
+            5,
+        ),
         ("x = [*a]\n", "unpacking in a display", 1, 6),
         ("x = {**a}\n", "unpacking in a display", 1, 8),
         ("x: int = 1\n", "annotated assignment at module level", 1, 1),
@@ -58,7 +63,6 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
             4,
             5,
         ),
-        ("if (y := 1):\n    pass\n", "assignment expression", 1, 5),
         ("x = t'{a}'\n", "t-string", 1, 5),
         ("x = 1j\n", "complex constant", 1, 5),
     ],
@@ -324,8 +328,8 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
         class A[T]:
             # inside the class
             pass
-        ys = [i for i in range(3)]  # squares
-        zs = {i: i for i in ys}
+        ys = 2j  # squares
+        zs = [*ys]
         def gen():
             yield 1
         print(x)
@@ -336,23 +340,23 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
     assert comments in out
     assert "// inside the class" not in out
     assert '"\nclass A[T]:\n    # inside the class\n    pass\n"' in out
-    simple = "ys = [i for i in range(3)]  # squares\nzs = {i: i for i in ys}\n"
+    simple = "ys = 2j  # squares\nzs = [*ys]\n"
     assert f'"\n{simple}"' in out
     assert (
-        "// m.py:7, kept as Python: list comprehension at 7:6, dict comprehension at 8:6\n" in out
+        "// m.py:7, kept as Python: complex constant at 7:6, unpacking in a display at 8:7\n" in out
     )
     assert "// m.py:9, kept as Python: yield at 10:5\n" in out
 
 
 def test_python_statement_after_semicolon() -> None:
-    out = lower("x = 1; y = [i for i in 'ab']; print(y)\n")
+    out = lower("x = 1; y = [*'ab']; print(y)\n")
     assert 'm.set_global("x", 1)?;' in out
-    assert "line = 1,\n            r#\"\ny = [i for i in 'ab']\n\"#" in out
+    assert "line = 1,\n            r#\"\ny = [*'ab']\n\"#" in out
     assert 'rt::builtins::print(m.py(), (m.global("y")?,))?;' in out
 
 
 def test_raw_string_delimiter_avoids_the_source() -> None:
-    out = lower("""x = [s for s in ('"#', '"##')]\n""")
+    out = lower("""x = [*('"#', '"##')]\n""")
     assert 'r###"\n' in out
 
 
@@ -394,9 +398,9 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
         if len(sys.argv) > 1:
             x = 1
             def f():
-                return x
+                yield x
         else:
-            ys = [i for i in range(3)]
+            ys = [*range(3)]
             print(ys)
         """
     )
@@ -404,16 +408,16 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
     assert 'm.set_global("x", 1)?;' in out
     assert 'rt::builtins::print(m.py(), (m.global("ys")?,))?;' in out
     # Indented as in the file.
-    assert 'r#"\n    def f():\n        return x\n"#' in out
-    assert 'r#"\n    ys = [i for i in range(3)]\n"#' in out
+    assert 'r#"\n    def f():\n        yield x\n"#' in out
+    assert 'r#"\n    ys = [*range(3)]\n"#' in out
 
 
 def test_unsupported_header_keeps_the_whole_statement() -> None:
     assert kept_lines(
         """
-        if [i for i in range(3)]:
+        if [*range(3)]:
             print(1)
-        for x in (i for i in range(3)):
+        for x in (i for i in range(3) for j in ()):
             print(x)
         """
     ) == [2, 4]
@@ -436,7 +440,7 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
         """
         for i in range(3):
             if i:
-                ys = [j for j in range(i)]
+                ys = [*range(i)]
                 break
             for j in range(i):
                 match j:

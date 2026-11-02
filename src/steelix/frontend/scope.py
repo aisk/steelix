@@ -2,8 +2,16 @@
 
 `symtable` runs CPython's own scope analysis, so local / global / free
 classification matches the interpreter exactly. On top of it this module links
-every function scope (`def` or `lambda`, at any depth) to its AST node, and
-works out which locals are cells, i.e. captured by a nested function.
+every function scope (`def`, `lambda` or generator expression, at any depth)
+to its AST node, and works out which locals are cells, i.e. captured by a
+nested function.
+
+List, set and dict comprehensions are inlined into the enclosing scope since
+Python 3.12 (PEP 709), and `symtable` reports their iteration variables as
+locals of the enclosing function. They are still separate variables, which
+the lowering declares inside the comprehension's loop (design §8). The
+analyses here look at function code through `walk_scope`, which leaves out
+every use of a comprehension's variables inside the comprehension.
 """
 
 from __future__ import annotations
@@ -15,7 +23,8 @@ from dataclasses import dataclass, field
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
 
-FunctionNode = ast.FunctionDef | ast.Lambda
+FunctionNode = ast.FunctionDef | ast.Lambda | ast.GeneratorExp
+Comprehension = ast.ListComp | ast.SetComp | ast.DictComp
 
 
 @dataclass(eq=False)
@@ -38,6 +47,10 @@ class FunctionScope:
     """The enclosing function, `None` at module level."""
     children: list[FunctionScope] = field(default_factory=list)
     qualname: str = ""
+    comprehension_frees: frozenset[str] = frozenset()
+    """Free variables that are variables of a comprehension the function is
+    defined in (`[lambda: x for x in xs]`): the comprehension's cell, not one
+    of the enclosing function."""
 
     def is_local(self, name: str) -> bool:
         return name in self.locals
@@ -53,7 +66,9 @@ class FunctionScope:
         `CLASS_SCOPE` for the `__class__` cell of a class body."""
         scope = self.parent
         while scope is not None:
-            if scope.is_local(name):
+            if scope.is_local(name) or name in scope.comprehension_frees:
+                # A comprehension variable captured by a lambda defined in a
+                # comprehension: `scope` receives its cell.
                 return scope
             scope = scope.parent
         if name == "__class__":
@@ -96,38 +111,97 @@ class ModuleScopes:
         return self.classes[node]
 
 
-def walk_scope(node: ast.AST, skip: Collection[ast.AST] = ()) -> Iterator[ast.AST]:
+def walk_scope(
+    node: ast.AST, skip: Collection[ast.AST] = (), hidden: frozenset[str] = frozenset()
+) -> Iterator[ast.AST]:
     """Like `ast.walk`, but only the nodes evaluated in the scope of `node`.
 
-    Nested `def`, `lambda` and `class` nodes are yielded themselves, together
-    with the parts evaluated where they are defined (defaults, decorators and
-    bases), but not their bodies. Annotations are evaluated lazily in their own scope (PEP
-    649) and are skipped too. The order follows `symtable`, which visits
-    defaults before decorators and both before the function itself. Nodes in
-    `skip` (statements kept as Python) are left out with everything in them.
+    Nested `def`, `lambda`, generator expression and `class` nodes are
+    yielded themselves, together with the parts evaluated where they are
+    defined (defaults, decorators, bases and the iterable of a generator
+    expression's first `for`), but not their bodies. Annotations are
+    evaluated lazily in their own scope (PEP 649) and are skipped too. The
+    order follows `symtable`, which visits defaults before decorators and
+    both before the function itself. Nodes in `skip` (statements kept as
+    Python) are left out with everything in them.
+
+    A list, set or dict comprehension is yielded with its parts, except the
+    `Name` nodes of its own variables (the `for` targets and their uses
+    inside it), which are not variables of this scope. `hidden` are the
+    variables of the comprehensions around `node`.
     """
     if node in skip:
         return
     match node:
         case ast.ClassDef(bases=bases, keywords=keywords, decorator_list=decorators):
             # The body is a scope of its own, evaluated when the class is created.
-            yield from _walk_all([*bases, *(k.value for k in keywords), *decorators])
+            yield from _walk_all([*bases, *(k.value for k in keywords), *decorators], hidden)
             yield node
         case ast.FunctionDef(args=args, decorator_list=decorators):
-            yield from _walk_all([*args.defaults, *_present(args.kw_defaults), *decorators])
+            parts = [*args.defaults, *_present(args.kw_defaults), *decorators]
+            yield from _walk_all(parts, hidden)
             yield node
         case ast.Lambda(args=args):
-            yield from _walk_all([*args.defaults, *_present(args.kw_defaults)])
+            yield from _walk_all([*args.defaults, *_present(args.kw_defaults)], hidden)
             yield node
+        case ast.GeneratorExp(generators=generators):
+            yield from walk_scope(generators[0].iter, skip, hidden)
+            yield node
+        case ast.ListComp() | ast.SetComp() | ast.DictComp():
+            yield node
+            inner = hidden | comprehension_variables(node)
+            yield from walk_scope(node.generators[0].iter, skip, hidden)
+            for part in comprehension_parts(node):
+                yield from walk_scope(part, skip, inner)
+        case ast.Name(id) if id in hidden:
+            return
         case _:
             yield node
             for child in ast.iter_child_nodes(node):
-                yield from walk_scope(child, skip)
+                yield from walk_scope(child, skip, hidden)
 
 
-def _walk_all(nodes: list[ast.expr]) -> Iterator[ast.AST]:
+def comprehension_variables(node: Comprehension | ast.GeneratorExp) -> frozenset[str]:
+    """The names bound by the `for` targets of a comprehension."""
+    return frozenset(
+        name.id
+        for generator in node.generators
+        for name in ast.walk(generator.target)
+        if isinstance(name, ast.Name)
+    )
+
+
+def comprehension_parts(node: Comprehension | ast.GeneratorExp) -> list[ast.AST]:
+    """The parts of a comprehension evaluated in its own scope, in the order
+    `symtable` visits them: everything but the iterable of the first `for`."""
+    first, *rest = node.generators
+    parts: list[ast.AST] = [first.target, *first.ifs]
+    for generator in rest:
+        parts += [generator.target, generator.iter, *generator.ifs]
+    if isinstance(node, ast.DictComp):
+        parts += [node.value, node.key]
+    else:
+        parts.append(node.elt)
+    return parts
+
+
+def walrus_targets(node: ast.AST) -> list[str]:
+    """Names bound by `:=` in `node` outside nested functions and classes,
+    in comprehensions and generator expressions too (PEP 572: they bind in
+    the enclosing scope)."""
+    names = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.Lambda | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        if isinstance(child, ast.NamedExpr) and isinstance(child.target, ast.Name):
+            names.append(child.target.id)
+        names += walrus_targets(child)
+    return names
+
+
+def _walk_all(nodes: list[ast.expr], hidden: frozenset[str]) -> Iterator[ast.AST]:
     for node in nodes:
-        yield from walk_scope(node)
+        yield from walk_scope(node, hidden=hidden)
 
 
 def nested_classes(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> list[ast.ClassDef]:
@@ -140,14 +214,21 @@ def _present(nodes: list[ast.expr | None]) -> list[ast.expr]:
 
 def scope_body(fn: FunctionNode) -> list[ast.AST]:
     """The nodes making up a function's own scope."""
-    return list(fn.body) if isinstance(fn, ast.FunctionDef) else [fn.body]
+    match fn:
+        case ast.FunctionDef():
+            return list(fn.body)
+        case ast.Lambda():
+            return [fn.body]
+    return comprehension_parts(fn)
 
 
 def nested_functions(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> list[FunctionNode]:
     return [n for node in nodes for n in walk_scope(node, skip) if isinstance(n, FunctionNode)]
 
 
-def params_of(args: ast.arguments) -> tuple[str, ...]:
+def params_of(args: ast.arguments | None) -> tuple[str, ...]:
+    if args is None:
+        return ()  # a generator expression
     names = [a.arg for a in args.posonlyargs + args.args]
     if args.vararg is not None:
         names.append(args.vararg.arg)
@@ -183,9 +264,13 @@ def analyze_scopes(
     classes: dict[ast.ClassDef, ClassScope] = {}
     linker = _Linker(functions, classes, python)
     top_level = linker.link(table, list(module.body), None, None)
+    for node, names in comprehension_captures(list(module.body), python).items():
+        if node in functions:
+            functions[node].comprehension_frees = names & frozenset(functions[node].frees)
     for scope in functions.values():
         for name in scope.frees:
-            scope.owner(name).cells.add(name)
+            if name not in scope.comprehension_frees:
+                scope.owner(name).cells.add(name)
     future_annotations = has_future_annotations(module)
     for scope in functions.values():
         if not future_annotations:
@@ -220,7 +305,13 @@ class _Linker:
                 tables.setdefault(key, []).append(child)
         scopes = []
         for node in nested_functions(body, self.skip):
-            name = node.name if isinstance(node, ast.FunctionDef) else "lambda"
+            match node:
+                case ast.FunctionDef(name=name):
+                    pass
+                case ast.Lambda():
+                    name = "lambda"
+                case ast.GeneratorExp():
+                    name = "genexpr"
             child = tables[(name, node.lineno, "function")].pop(0)
             assert isinstance(child, symtable.Function)
             scope = _function_scope(child, node, parent, owner)
@@ -243,6 +334,55 @@ class _Linker:
         return scopes
 
 
+def comprehension_captures(
+    nodes: list[ast.AST], skip: Collection[ast.AST] = ()
+) -> dict[FunctionNode, frozenset[str]]:
+    """For every function, lambda and generator expression defined in a
+    list, set or dict comprehension: the variables of the comprehensions
+    around it (in the same function), which it captures from them rather
+    than from the enclosing function."""
+    found: dict[FunctionNode, frozenset[str]] = {}
+
+    def visit(node: ast.AST, hidden: frozenset[str]) -> None:
+        if node in skip:
+            return
+        if isinstance(node, FunctionNode):
+            if hidden:
+                found[node] = hidden
+            # Defaults, decorators and the first iterable are evaluated here.
+            outer: list[ast.AST] = []
+            match node:
+                case ast.FunctionDef(args=args, decorator_list=decorators):
+                    outer = [*args.defaults, *_present(args.kw_defaults), *decorators]
+                case ast.Lambda(args=args):
+                    outer = [*args.defaults, *_present(args.kw_defaults)]
+                case ast.GeneratorExp(generators=generators):
+                    outer = [generators[0].iter]
+            for part in outer:
+                visit(part, hidden)
+            for part in scope_body(node):
+                visit(part, frozenset())
+            return
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp):
+            visit(node.generators[0].iter, hidden)
+            inner = hidden | comprehension_variables(node)
+            for part in comprehension_parts(node):
+                visit(part, inner)
+            return
+        if isinstance(node, ast.ClassDef):
+            for part in [*node.bases, *(k.value for k in node.keywords), *node.decorator_list]:
+                visit(part, hidden)
+            for part in node.body:
+                visit(part, frozenset())
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, hidden)
+
+    for node in nodes:
+        visit(node, frozenset())
+    return found
+
+
 def _function_scope(
     table: symtable.Function,
     node: FunctionNode,
@@ -254,7 +394,14 @@ def _function_scope(
         # Includes names declared with a `global` statement.
         if symbol.is_global():
             globals_.add(symbol.get_name())
-    name = node.name if isinstance(node, ast.FunctionDef) else "<lambda>"
+    match node:
+        case ast.FunctionDef(name=name):
+            args: ast.arguments | None = node.args
+        case ast.Lambda(args=args):
+            name = "<lambda>"
+        case ast.GeneratorExp():
+            name = "<genexpr>"
+            args = None
     if parent is not None:
         qualname = f"{parent.qualname}.<locals>.{name}"
     elif owner is not None:
@@ -263,8 +410,9 @@ def _function_scope(
         qualname = name
     return FunctionScope(
         name=name,
-        params=params_of(node.args),
-        locals=frozenset(table.get_locals()),
+        params=params_of(args),
+        # `.0`: the iterator a generator expression receives.
+        locals=frozenset(table.get_locals()) - {".0"},
         globals=frozenset(globals_),
         frees=tuple(table.get_frees()),
         nonlocals=frozenset(table.get_nonlocals()),

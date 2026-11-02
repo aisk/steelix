@@ -1,10 +1,3 @@
-//! Parts of `classes_inherit.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 30, `expr` statement: list comprehension
-//! - line 148, `assign` statement: list comprehension
-//! - line 153, `expr` statement: list comprehension
-
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
@@ -688,14 +681,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "D",
             rt::class!(m, "D"(m.global("B")?, m.global("C")?), d::body, line = 25)?,
         )?;
-        // classes_inherit.py:30, kept as Python: list comprehension at 30:18
-        rt::exec_python!(
-            m,
-            line = 30,
-            r#"
-print(D().who(), [k.__name__ for k in D.__mro__])
-"#
-        )?;
+        frame.line(30);
+        let value = m.global("D")?.call0()?.call_method0("who")?;
+        let list = PyList::empty(py);
+        for k in m.global("D")?.getattr("__mro__")?.try_iter()? {
+            let k = k?;
+            list.append(k.getattr("__name__")?)?;
+            py.check_signals()?;
+        }
+        rt::builtins::print(py, (&value, &list))?;
         frame.line(31);
         rt::builtins::print(
             py,
@@ -898,13 +892,27 @@ print(D().who(), [k.__name__ for k in D.__mro__])
                 attributes = ["n", "result"]
             )?,
         )?;
-        // classes_inherit.py:148, kept as Python: list comprehension at 148:11
-        rt::exec_python!(
-            m,
-            line = 148,
-            r#"
-workers = [Worker(n) for n in (10, 100)] if False else [Worker(10), Worker(100)]
-"#
+        frame.line(148);
+        m.set_global(
+            "workers",
+            if false {
+                let list2 = PyList::empty(py);
+                for n in PyTuple::new(py, [10, 100])?.try_iter()? {
+                    let n = n?;
+                    list2.append(m.global("Worker")?.call1((&n,))?)?;
+                    py.check_signals()?;
+                }
+                list2.into_any()
+            } else {
+                PyList::new(
+                    py,
+                    [
+                        &m.global("Worker")?.call1((10,))?,
+                        &m.global("Worker")?.call1((100,))?,
+                    ],
+                )?
+                .into_any()
+            },
         )?;
         frame.line(149);
         for item in m.global("workers")?.try_iter()? {
@@ -922,14 +930,20 @@ workers = [Worker(n) for n in (10, 100)] if False else [Worker(10), Worker(100)]
             py.check_signals()?;
             frame.line(151);
         }
-        // classes_inherit.py:153, kept as Python: list comprehension at 153:7
-        rt::exec_python!(
-            m,
-            line = 153,
-            r#"
-print([w.result for w in workers], [w.name for w in workers])
-"#
-        )?;
+        frame.line(153);
+        let list3 = PyList::empty(py);
+        for w in m.global("workers")?.try_iter()? {
+            let w = w?;
+            list3.append(w.getattr("result")?)?;
+            py.check_signals()?;
+        }
+        let list4 = PyList::empty(py);
+        for w in m.global("workers")?.try_iter()? {
+            let w = w?;
+            list4.append(w.getattr("name")?)?;
+            py.check_signals()?;
+        }
+        rt::builtins::print(py, (&list3, &list4))?;
         frame.line(156);
         m.set_global(
             "Upper",

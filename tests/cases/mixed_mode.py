@@ -45,7 +45,7 @@ def use_counter(start):
 
 
 log("native statement after the class")
-squares = [double(n) for n in range(4)]
+squares = [*map(double, range(4))]
 print(squares, use_counter(3))
 print(Counter.__module__, Counter.bump.__qualname__, evens.__qualname__, evens.__module__)
 print(os.path.basename(evens.__code__.co_filename), evens.__code__.co_firstlineno)
@@ -84,7 +84,7 @@ def set_mode(mode):
 
 
 set_mode("set by native code")
-MODES = {k: MODE for k in "ab"}
+MODES = {**{"a": MODE}, "b": MODE}
 print(MODES)
 
 

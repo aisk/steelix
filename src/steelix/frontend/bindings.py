@@ -29,6 +29,7 @@ from steelix.frontend.scope import (
     FunctionNode,
     FunctionScope,
     ModuleScopes,
+    comprehension_variables,
     scope_body,
     walk_scope,
 )
@@ -491,32 +492,32 @@ class _DefiniteAssignment:
             return state
         match stmt:
             case ast.Expr(value):
-                self.reads(value, state)
+                state = self.expr(value, state)
             case ast.Assign(targets, value):
-                self.reads(value, state)
+                state = self.expr(value, state)
                 for target in targets:
                     state = self.store(target, state)
             case ast.AugAssign(target, _, value):
                 if isinstance(target, ast.Name):
                     self.read_name(target.id, state)
                 else:
-                    self.reads(target, state)
-                self.reads(value, state)
+                    state = self.expr(target, state)
+                state = self.expr(value, state)
                 return self.store(target, state)
             case ast.Delete(targets):
                 for target in targets:
                     state = self.delete(target, state)
             case ast.Return(value):
                 if value is not None:
-                    self.reads(value, state)
+                    self.expr(value, state)
                 return None
             case ast.If(test, body, orelse):
-                self.reads(test, state)
+                state = self.expr(test, state)
                 return _merge(self.block(body, state), self.block(orelse, state))
             case ast.While(test, body, orelse):
                 return self.loop(stmt, state, test=test)
             case ast.For(target, iter_, body, orelse):
-                self.reads(iter_, state)
+                state = self.expr(iter_, state)
                 return self.loop(stmt, state, target=target)
             case ast.Break():
                 self.loops[-1].breaks.append(state)
@@ -529,29 +530,30 @@ class _DefiniteAssignment:
                     name = alias.asname or alias.name.split(".")[0]
                     state = self.assign_name(name, state)
             case ast.Assert(test, msg):
-                self.reads(test, state)
+                state = self.expr(test, state)
                 if msg is not None:
-                    self.reads(msg, state)
+                    # Only evaluated when the test fails, and then it raises.
+                    self.expr(msg, state)
             case ast.FunctionDef(name, args, decorator_list=decorators):
                 for expr in [*decorators, *args.defaults, *args.kw_defaults]:
                     if expr is not None:
-                        self.reads(expr, state)
+                        state = self.expr(expr, state)
                 return self.assign_name(binding_name(stmt), state)
             case ast.ClassDef(bases=bases, keywords=keywords, decorator_list=decorators):
                 for expr in [*decorators, *bases, *(k.value for k in keywords)]:
-                    self.reads(expr, state)
+                    state = self.expr(expr, state)
                 return self.assign_name(binding_name(stmt), state)
             case ast.AnnAssign(target, _, value):
                 # In a class body: the annotation is evaluated lazily.
                 if value is not None:
-                    self.reads(value, state)
+                    state = self.expr(value, state)
                     return self.store(target, state)
             case ast.Pass() | ast.Global() | ast.Nonlocal():
                 pass
             case ast.Raise(exc, cause):
                 for expr in (exc, cause):
                     if expr is not None:
-                        self.reads(expr, state)
+                        state = self.expr(expr, state)
                 return None
             case ast.Try():
                 return self.try_(stmt, state)
@@ -582,7 +584,7 @@ class _DefiniteAssignment:
         for handler in stmt.handlers:
             state = raised
             if handler.type is not None:
-                self.reads(handler.type, state)
+                state = self.expr(handler.type, state)
             if handler.name is not None:
                 state = self.assign_name(handler.name, state)
             end = self.block(handler.body, state)
@@ -605,7 +607,7 @@ class _DefiniteAssignment:
     def with_(self, stmt: ast.With, state: _Flow) -> State:
         entry = state
         for i, item in enumerate(stmt.items):
-            self.reads(item.context_expr, state)
+            state = self.expr(item.context_expr, state)
             state = self.enter(Region(stmt, i), state)
             if i == 0:
                 entry = state
@@ -666,10 +668,10 @@ class _DefiniteAssignment:
         """`while` and `for`: iterate to a fixed point at the loop head."""
         head = entry
         while True:
-            if test is not None:
-                self.reads(test, head)
+            # The test runs before every iteration and before the loop ends.
+            tested = head if test is None else self.expr(test, head)
             self.loops.append(_Loop())
-            start: State = head if target is None else self.store(target, head)
+            start: State = tested if target is None else self.store(target, tested)
             end = self.block(stmt.body, start)
             loop = self.loops.pop()
             new_head = _merge(entry, end, *loop.continues)
@@ -679,7 +681,7 @@ class _DefiniteAssignment:
             head = new_head
         # The loop ends normally when the iterator is exhausted or the test is
         # false; `while True` only ends through `break` (or `return`).
-        exhausted: State = None if test is not None and is_constant_true(test) else head
+        exhausted: State = None if test is not None and is_constant_true(test) else tested
         return _merge(self.block(stmt.orelse, exhausted), *loop.breaks)
 
     def store(self, target: ast.expr, state: _Flow) -> _Flow:
@@ -692,10 +694,10 @@ class _DefiniteAssignment:
             case ast.Starred(value):
                 return self.store(value, state)
             case ast.Attribute(value):
-                self.reads(value, state)
+                state = self.expr(value, state)
             case ast.Subscript(value, index):
-                self.reads(value, state)
-                self.reads(index, state)
+                state = self.expr(value, state)
+                state = self.expr(index, state)
         return state
 
     def assign_name(self, name: str, state: _Flow) -> _Flow:
@@ -717,16 +719,90 @@ class _DefiniteAssignment:
                 for elt in elts:
                     state = self.delete(elt, state)
             case ast.Attribute(value):
-                self.reads(value, state)
+                state = self.expr(value, state)
             case ast.Subscript(value, index):
-                self.reads(value, state)
-                self.reads(index, state)
+                state = self.expr(value, state)
+                state = self.expr(index, state)
         return state
 
-    def reads(self, expr: ast.expr, state: _Flow) -> None:
-        for node in walk_scope(expr):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                self.read_name(node.id, state)
+    def expr(self, expr: ast.expr, state: _Flow, hidden: frozenset[str] = frozenset()) -> _Flow:
+        """Evaluate `expr`: its reads, and the assignments of `:=` in it, in
+        evaluation order. Parts that may not run (the right side of `and`,
+        a branch of a conditional expression, the body of a comprehension)
+        may or may not assign. `hidden` are the variables of the
+        comprehensions around `expr`, which are not locals of this scope."""
+        match expr:
+            case ast.Name(name, ast.Load()):
+                if name not in hidden:
+                    self.read_name(name, state)
+                return state
+            case ast.NamedExpr(ast.Name(name), value):
+                state = self.expr(value, state, hidden)
+                return self.assign_name(name, state)
+            case ast.BoolOp(_, [first, *rest]):
+                state = self.expr(first, state, hidden)
+                ends = [state]
+                for value in rest:
+                    state = self.expr(value, state, hidden)
+                    ends.append(state)
+                return _merge(*ends)  # type: ignore[return-value]
+            case ast.IfExp(test, body, orelse):
+                state = self.expr(test, state, hidden)
+                then = self.expr(body, state, hidden)
+                return _merge(then, self.expr(orelse, state, hidden))  # type: ignore[return-value]
+            case ast.Compare(left, _, [first, *rest]):
+                state = self.expr(first, self.expr(left, state, hidden), hidden)
+                ends = [state]
+                for comparator in rest:
+                    state = self.expr(comparator, state, hidden)
+                    ends.append(state)
+                return _merge(*ends)  # type: ignore[return-value]
+            case ast.Lambda(args):
+                for default in [*args.defaults, *args.kw_defaults]:
+                    if default is not None:
+                        state = self.expr(default, state, hidden)
+                return state
+            case ast.GeneratorExp(generators=generators):
+                # The rest runs later, in the generator's own scope.
+                return self.expr(generators[0].iter, state, hidden)
+            case ast.ListComp() | ast.SetComp() | ast.DictComp():
+                entry = self.expr(expr.generators[0].iter, state, hidden)
+                inner = hidden | comprehension_variables(expr)
+                head = entry
+                while True:
+                    end = self._comprehension_body(expr, head, inner)
+                    new_head = _merge(entry, end)
+                    assert new_head is not None
+                    if new_head == head:
+                        return head
+                    head = new_head
+            case ast.Dict(keys, values):
+                for key, value in zip(keys, values, strict=True):
+                    if key is not None:
+                        state = self.expr(key, state, hidden)
+                    state = self.expr(value, state, hidden)
+                return state
+        for child in ast.iter_child_nodes(expr):
+            if isinstance(child, ast.expr):
+                state = self.expr(child, state, hidden)
+            elif isinstance(child, ast.keyword):
+                state = self.expr(child.value, state, hidden)
+        return state
+
+    def _comprehension_body(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp, state: _Flow, hidden: frozenset[str]
+    ) -> _Flow:
+        """One iteration of a comprehension's loops, as far as its value."""
+        for index, generator in enumerate(node.generators):
+            if index:
+                state = self.expr(generator.iter, state, hidden)
+            state = self.expr(generator.target, state, hidden)
+            for test in generator.ifs:
+                state = self.expr(test, state, hidden)
+        if isinstance(node, ast.DictComp):
+            # The key is evaluated first (since 3.8).
+            return self.expr(node.value, self.expr(node.key, state, hidden), hidden)
+        return self.expr(node.elt, state, hidden)
 
     def read_name(self, name: str, state: _Flow) -> None:
         if self.scope.is_local(name) and name not in state.definite and self.recording:
@@ -745,7 +821,7 @@ class _DefiniteAssignment:
             match node:
                 case ast.Name(name):
                     found.append((node.lineno, node.col_offset, name))
-                case ast.FunctionDef() | ast.Lambda():
+                case ast.FunctionDef() | ast.Lambda() | ast.GeneratorExp():
                     position = (node.lineno, node.col_offset)
                     if isinstance(node, ast.FunctionDef):
                         found.append((*position, node.name))
@@ -1010,7 +1086,12 @@ class _DefiniteAssignment:
             return set(names)
         # An `Option` local (one that is deleted later) can be declared here too,
         # as long as the value does not read it first.
-        read = {n.id for n in ast.walk(stmt.value) if isinstance(n, ast.Name)}
+        read = set()
+        for node in walk_scope(stmt.value):
+            if isinstance(node, ast.Name):
+                read.add(node.id)
+            elif isinstance(node, FunctionNode):
+                read.update(self._nested_frees(node))
         return {
             t.id
             for t in stmt.targets
@@ -1084,7 +1165,7 @@ def _names_bound_or_used(node: ast.AST, frees) -> list[str]:  # type: ignore[no-
             return [id]
         case ast.FunctionDef(name):
             return [name, *frees(node)]
-        case ast.Lambda():
+        case ast.Lambda() | ast.GeneratorExp():
             return list(frees(node))
         case ast.Import(aliases) | ast.ImportFrom(names=aliases):
             return [_import_name(alias) for alias in aliases]

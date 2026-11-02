@@ -12,9 +12,15 @@ from __future__ import annotations
 
 import ast
 
-from steelix.frontend.bindings import analyze_locals
+from steelix.frontend.bindings import LocalsInfo, analyze_locals
 from steelix.frontend.desugar import annotation_source
-from steelix.frontend.scope import FunctionNode, FunctionScope, annotations_of
+from steelix.frontend.scope import (
+    FunctionNode,
+    FunctionScope,
+    annotations_of,
+    comprehension_variables,
+    walrus_targets,
+)
 from steelix.lower.context import Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
 from steelix.lower.names import FUNCTION_RESERVED, Renamer, context_name, rust_ident
@@ -64,8 +70,8 @@ def lower_function(
         FUNCTION_RESERVED | renamed_fns,
     )
     module.names[scope] = names
-    by_value = {name for name in scope.frees if name in module.frozen.get(scope.owner(name), ())}
-    info = FunctionInfo(fn, scope, locals_info, names, by_value)
+    by_value = captured_by_value(module, scope)
+    info = FunctionInfo(fn, scope, locals_info, names, by_value, _walrus_targets(fn, scope))
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
     first_line = _first_line(fn)
     lowering = StmtLowering(ctx, line=first_line)
@@ -118,6 +124,7 @@ def lower_function(
             for stmt in stmts[:-1]:
                 body += lowering.stmt(stmt)
             body += lowering.comments(stmts[-1])
+            lowering.exprs.line = statement_line(stmts[-1])
             with lowering.exprs.fresh() as prelude:
                 tail = lowering.return_value(stmts[-1].value)
             body += lowering.flush_items()
@@ -211,7 +218,11 @@ def lower_nested(ctx: Context, node: FunctionNode) -> str:
 
 
 def signature_text(
-    ctx: Context, scope: FunctionScope, rust_name: str, defaults: list[rs.Expr]
+    ctx: Context,
+    scope: FunctionScope,
+    rust_name: str,
+    defaults: list[rs.Expr],
+    comprehension_names: dict[str, str],
 ) -> rs.Tokens:
     """`name[captures](params) -> "ret"` as written in `rt::function!`.
 
@@ -237,23 +248,7 @@ def signature_text(
         if index:
             out.append(", ")
 
-    parent = ctx.function
-    if scope.frees:
-        out.append("[")
-        for i, free in enumerate(scope.frees):
-            if parent is None:
-                # A method: the `__class__` cell of the class body.
-                assert free == "__class__", free
-                outer = free
-            else:
-                outer = parent.names[free]
-            separate(i)
-            if free in module.frozen.get(scope.owner(free), ()):
-                out.append(rs.Path(outer))
-            else:
-                out.append(rs.Ref(rs.Path(outer)))
-            out.append(_as(outer, free))
-        out.append("]")
+    out += captures_text(ctx, scope, comprehension_names)
 
     args = node.args
     defaults_iter = iter(defaults)
@@ -298,6 +293,152 @@ def signature_text(
         elif part != "":
             merged.append(part)
     return rs.Tokens(tuple(merged))
+
+
+def captured_by_value(module: ModuleContext, scope: FunctionScope) -> set[str]:
+    """The captured variables a function receives by value: cells of the
+    enclosing function that are never rebound once captured. Variables of
+    a comprehension are always cells."""
+    return {
+        name
+        for name in scope.frees
+        if name not in scope.comprehension_frees
+        and name in module.frozen.get(scope.owner(name), ())
+    }
+
+
+def captures_text(
+    ctx: Context, scope: FunctionScope, comprehension_names: dict[str, str]
+) -> list[str | rs.Expr]:
+    """`[a, &b]`: the captured variables of a nested function as written in
+    `rt::function!` and `rt::genexpr!`, by value or as `rt::Cell`.
+    `comprehension_names` are the Rust names of the variables of the
+    comprehensions around it."""
+    if not scope.frees:
+        return []
+    parent = ctx.function
+    by_value = captured_by_value(ctx.module, scope)
+    out: list[str | rs.Expr] = ["["]
+    for i, free in enumerate(scope.frees):
+        if free in scope.comprehension_frees:
+            outer = comprehension_names[free]
+        elif parent is None:
+            # A method: the `__class__` cell of the class body.
+            assert free == "__class__", free
+            outer = free
+        else:
+            outer = parent.names[free]
+        if i:
+            out.append(", ")
+        out.append(rs.Path(outer) if free in by_value else rs.Ref(rs.Path(outer)))
+        out.append(_as(outer, free))
+    out.append("]")
+    return out
+
+
+def _walrus_targets(fn: FunctionNode, scope: FunctionScope) -> frozenset[str]:
+    names = walrus_targets(fn) if not isinstance(fn, ast.GeneratorExp) else []
+    return frozenset(n for n in names if scope.is_local(n))
+
+
+def lower_genexpr(ctx: Context, node: ast.GeneratorExp, comprehension_names: dict[str, str]) -> str:
+    """Lower the step of a generator expression into an item of the current
+    Rust fn and return the item's name (design §8).
+
+    The step gets the iterator of the first iterable and returns the next
+    value, or `None` once the generator is exhausted. Each call runs in a
+    frame of its own, `<genexpr>` in tracebacks:
+
+        fn genexpr<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyIterator>) -> ... {
+            rt::frame!(m, "<genexpr>", 3, |frame| {
+                for x in xs {
+                    let x = x?;
+                    if x.gt(3)? {
+                        return Ok(Some(x));
+                    }
+                    py.check_signals()?;
+                }
+                Ok(None)
+            })
+        }
+
+    `return` leaves the loop in the middle, the next call goes on with the
+    next item of the same iterator. That is why only generator expressions
+    with a single `for` are lowered (`subset`).
+    """
+    from steelix.lower.comprehension import ComprehensionVariable
+    from steelix.lower.expr import ExprLowering
+
+    module = ctx.module
+    scope = module.scopes.of(node)
+    rust_name = ctx.item_name("genexpr")
+    renamed_fns = {rust for py, rust in module.fn_names.mapping.items() if rust != py}
+    names = Renamer([*scope.frees, *sorted(scope.locals)], FUNCTION_RESERVED | renamed_fns)
+    module.names[scope] = names
+    module.frozen[scope] = set()
+    taken = set(names.mapping.values()) | FUNCTION_RESERVED | renamed_fns
+    iterator = _iterator_name(node.generators[0].iter)
+    while iterator in taken:
+        iterator += "_"
+    taken.add(iterator)
+    info = FunctionInfo(node, scope, LocalsInfo(), names, captured_by_value(module, scope))
+    inner = Context(module, LocalsInfo(), info, context_name=context_name(taken))
+    inner.reserve(iterator)
+    exprs = ExprLowering(inner)
+    exprs.line = node.lineno
+    variables = {name: ComprehensionVariable(names[name]) for name in comprehension_variables(node)}
+    for var in variables.values():
+        inner.reserve(var.rust)
+    exprs.comprehensions.append(variables)
+    first = node.generators[0]
+    body = exprs.at_line(first.iter.lineno)
+
+    def innermost() -> list[rs.Stmt]:
+        with exprs.fresh() as prelude:
+            prelude += exprs.at_line(node.elt.lineno)
+            value = exprs.value(node.elt)
+        some = rs.Call(rs.Path("Some"), (value.owned(),))
+        return [*prelude, rs.Return(rs.Call(rs.Path("Ok"), (some,)))]
+
+    if first.ifs:
+        body += exprs.comprehension_loop(node, 0, rs.Path(iterator), innermost)
+    else:
+        # `if let Some(x) = rt::next(xs)? { return Ok(Some(..)); }`
+        pattern, head = exprs.bind_next(first.target)
+        then = rs.Block((*head, *innermost()))
+        next_item = rs.Try(rs.Call(rs.Path("rt::next"), (rs.Path(iterator),)))
+        body.append(rs.If(next_item, then, pattern=f"Some({pattern})"))
+    items = [rs.ItemStmt(item) for item in inner.items]
+    done = rs.Call(rs.Path("Ok"), (rs.Path("None"),))
+    block = in_frame(
+        inner.context_name, scope.qualname, node.lineno, rs.Block((*items, *body), done)
+    )
+    module.uses.add("pyo3::types::PyIterator")
+    params = [rs.Param(inner.context_name, MODULE)]
+    for name in scope.frees:
+        ty = f"&{BOUND}" if name in info.by_value else "&rt::Cell<'py>"
+        params.append(rs.Param(names[name], ty))
+    params.append(rs.Param(iterator, "&Bound<'py, PyIterator>"))
+    ctx.items.append(
+        rs.Fn(
+            name=rust_name,
+            params=tuple(params),
+            ret=f"PyResult<Option<{BOUND}>>",
+            body=bind_py(block, inner.context_name),
+            lifetimes=("'py",),
+            public=False,
+            comments=(f"{module.filename}:{node.lineno}",),
+        )
+    )
+    return rust_name
+
+
+def _iterator_name(iterable: ast.expr) -> str:
+    """The name of the step's iterator parameter: `xs` for `.. in xs`."""
+    match iterable:
+        case ast.Name(id) | ast.Attribute(attr=id) if rust_ident(id) == id:
+            return id
+    return "iter"
 
 
 def _as(rust: str, python: str) -> str:

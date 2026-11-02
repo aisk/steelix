@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from steelix.frontend.bindings import is_constant_true
 from steelix.frontend.desugar import annotation_source, binding_name
 from steelix.frontend.fallback import first_line, python_runs, python_source
+from steelix.lower.comprehension import line_marker, unpack_pattern
 from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
 from steelix.lower.function import cell_declared_at, lower_nested
@@ -56,6 +57,7 @@ class StmtLowering(HandlingLowering):
         """Number of labeled blocks open around the statement being lowered."""
         self.closures: list = []
         """The closure regions being lowered (`handling.Closure`), innermost last."""
+        self.exprs.line = line
         self.line = line
         """The traceback line of the frame at this point of the generated
         code, if known: `frame.line(n)` only goes where it changes."""
@@ -70,7 +72,7 @@ class StmtLowering(HandlingLowering):
             return []
         self.line = line
         self.markers += 1
-        return [_line_marker(line)]
+        return [line_marker(line)]
 
     def mark(self, line: int, rust: list[rs.Stmt]) -> list[rs.Stmt]:
         """`at_line` for code on `line` that may raise."""
@@ -119,6 +121,16 @@ class StmtLowering(HandlingLowering):
         return [s for s in stmts if s not in self.ctx.flow.unreachable]
 
     def stmt(self, stmt: ast.stmt) -> list[rs.Stmt]:
+        markers = self.exprs.markers
+        self.exprs.line = stmt.lineno if isinstance(stmt, _COMPOUND) else statement_line(stmt)
+        try:
+            return self._lower(stmt)
+        finally:
+            if self.exprs.markers != markers:
+                # A comprehension moved the line (and put it back).
+                self.markers += 1
+
+    def _lower(self, stmt: ast.stmt) -> list[rs.Stmt]:
         comments = self.comments(stmt)
         if stmt in self.ctx.flow.unreachable:
             return comments
@@ -257,7 +269,7 @@ class StmtLowering(HandlingLowering):
                 other = self.nested(lambda: self.expr_stmt(orelse))
                 return [rs.If(cond, then, other if other.stmts else None)]
         lowered = self.exprs.value(value)
-        if lowered.is_pure:
+        if lowered.is_pure or lowered.kind is Kind.PLACE:
             return []  # reading an assigned local has no effect
         if isinstance(lowered.expr, rs.Binary | rs.Unary | rs.IfExpr | rs.BlockExpr):
             return [rs.Let("_", init=lowered.expr)]
@@ -577,7 +589,7 @@ class StmtLowering(HandlingLowering):
             info = fn.locals
             if all(info.declared_at.get(n) is stmt for n in names):
                 # `let [a, b] = rt::unpack(&value)?;`
-                pattern = _pattern(
+                pattern = unpack_pattern(
                     [("mut " if n in info.mutable else "") + fn.names[n] for n in names], star
                 )
                 return [rs.Let(pattern, init=call)]
@@ -597,7 +609,7 @@ class StmtLowering(HandlingLowering):
                 temp = self.ctx.temp(_target_base(target))
                 parts.append(temp)
                 rest.append((target, temp))
-        out: list[rs.Stmt] = [rs.Let(_pattern(parts, star), init=call)]
+        out: list[rs.Stmt] = [rs.Let(unpack_pattern(parts, star), init=call)]
         for target, temp in rest:
             # Each temporary is used exactly once, so it can be moved.
             item = Value(rs.Path(temp), Kind.OWNED, pure=True)
@@ -705,10 +717,6 @@ def _without_def_macros(stmts: list[rs.Stmt]) -> list[rs.Stmt]:
     return [map_exprs(stmt, visit) for stmt in stmts]
 
 
-def _line_marker(line: int) -> rs.Stmt:
-    return rs.ExprStmt(rs.MethodCall(rs.Path("frame"), "line", (rs.IntLit(line),)))
-
-
 def _changes_line(body: list[ast.stmt], line: int | None) -> bool:
     """Whether running `body` may move the traceback line away from `line`."""
     return any(
@@ -722,15 +730,6 @@ def _diverges_branch(branch: rs.Block | rs.If) -> bool:
     if isinstance(branch, rs.If):
         return diverges((branch,))
     return diverges(branch.stmts)
-
-
-def _pattern(names: list[str], star: int | None) -> str:
-    """`[a, b]`, or `([a], rest, [b])` for `rt::unpack_star`."""
-    if star is None:
-        return f"[{', '.join(names)}]"
-    before = ", ".join(names[:star])
-    after = ", ".join(names[star + 1 :])
-    return f"([{before}], {names[star]}, [{after}])"
 
 
 def _pattern_expr(names: list[str], star: int | None) -> rs.Expr:

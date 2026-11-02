@@ -26,6 +26,8 @@ mod cell;
 pub mod class;
 #[doc(hidden)]
 pub mod function;
+#[doc(hidden)]
+pub mod generator;
 mod import;
 mod module;
 mod ops;
@@ -45,6 +47,7 @@ pub use frame::{Flow, Frame, Handling, IntoException, matches};
 pub use cell::Cell;
 pub use class::{Namespace, super_};
 pub use function::{Body, Function, FunctionDef, Signature};
+pub use generator::{Generator, next};
 pub use import::{import, import_from, import_module, import_names};
 pub use module::Module;
 pub use ops::{

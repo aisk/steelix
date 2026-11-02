@@ -1,8 +1,3 @@
-//! Parts of `classes_dataclass.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 36, `expr` statement: list comprehension
-
 use pyo3::exceptions::PyNameError;
 use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
@@ -314,14 +309,25 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        // classes_dataclass.py:36, kept as Python: list comprehension at 36:36
-        rt::exec_python!(
-            m,
-            line = 36,
-            r#"
-print(hash(v) == hash(Version(1)), [f.name for f in dataclasses.fields(Version)])
-"#
-        )?;
+        frame.line(36);
+        let value = rt::builtin(py, "hash")?
+            .call1((m.global("v")?,))?
+            .rich_compare(
+                rt::builtin(py, "hash")?.call1((m.global("Version")?.call1((1,))?,))?,
+                CompareOp::Eq,
+            )?;
+        let list = PyList::empty(py);
+        for f in m
+            .global("dataclasses")?
+            .getattr("fields")?
+            .call1((m.global("Version")?,))?
+            .try_iter()?
+        {
+            let f = f?;
+            list.append(f.getattr("name")?)?;
+            py.check_signals()?;
+        }
+        rt::builtins::print(py, (&value, &list))?;
         frame.line(37);
         rt::builtins::print(
             py,

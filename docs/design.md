@@ -252,6 +252,8 @@ greet(m, &rt::str(py, "Bob"), &rt::str(py, "Hello"), &m.default("greet", "punct"
 - lambda 的函数体是一个尾表达式
 - `if`、`elif`、`while`、`for` 头部表达式里的 lambda，其 fn item 放在整个语句之前，而不是第一个分支或循环体里，否则头部看不到它
 - 嵌套函数的 docstring 同样生成 `///` 和 `__doc__`
+- 模块级 `if`、`for`、`try` 等复合语句里的 `def`（M8 之前保留为 Python）同样是 fn item，写在 `exec_module` 里，执行到 `def` 时用 `m.set_global(..)` 绑定，调用经过 globals。名字和模块函数冲突时加 `_` 后缀（`fn helper_`），Python 名字用 `name = "helper"` 给出
+- 生成器表达式的 step（§8）也是这样的 fn item，叫 `genexpr`、`genexpr2`
 
 ### 闭包与 cell
 
@@ -420,6 +422,128 @@ CPython 先求值被调用的对象，再按源码顺序求值位置参数（包
 
   关键字是 Rust 标识符时直接写，否则写成字符串字面量。`*x` 与 `LIST_EXTEND` 一样迭代，不可迭代时抛 `Value after * must be an iterable, not int`；`**m` 与 `DICT_MERGE` 一样合并，重复的关键字抛 `got multiple values for keyword argument`，不是 mapping 时抛 `argument after ** must be a mapping`，文字都与 CPython 一致
 - 直接调用的参数见第 6 节
+
+### 推导式、生成器表达式与 `:=`（M8）
+
+实现在 `lower/comprehension.py`，生成器对象在 runtime 的 `generator.rs`。
+
+**list、set、dict 推导式**按 3.12 之后 CPython 的方式内联（PEP 709）：不创建函数，循环直接写在语句的 prelude 里，结果放在一个临时变量里。推导式的变量是循环体里的 `let`，不会泄漏到外面，也不遮蔽外面同名的变量；多个 `for` 是嵌套的循环，`if` 是嵌套的 `if`（后一个条件不需要 prelude 时合并成 `&&`）：
+
+```rust
+// return [x * x for x in xs]
+let list = PyList::empty(py);
+for x in xs.try_iter()? {
+    let x = x?;
+    list.append(x.mul(&x)?)?;
+    py.check_signals()?;
+}
+Ok(list.into_any())
+
+// return {k: v for k, v in d.items() if v % 2 == 0}
+let dict = PyDict::new(py);
+for item in d.call_method0("items")?.try_iter()? {
+    let [k, v] = rt::unpack(&item?)?;
+    if v.rem(2)?.eq(0)? {
+        dict.set_item(&k, &v)?;
+    }
+    py.check_signals()?;
+}
+Ok(dict.into_any())
+```
+
+- 作用域和 CPython 一样：第一个 `for` 的可迭代对象在外层求值，其余部分在推导式里。`symtable` 把推导式的变量算作外层函数的局部变量，分析（`frontend/scope.py` 的 `walk_scope`）把推导式里对它们的使用排除在外，所以 `[x for x in x]`、和全局变量同名的推导式变量都是对的。函数里推导式变量的 Rust 名字用函数的重命名表，模块级和类体里另取不冲突的名字，推导式结束后临时变量可以再用这个名字
+- 类体里的推导式看不到类的命名空间（第一个可迭代对象除外），名字直接查 globals 和 builtins，和 CPython 一样抛 `NameError`
+- dict 推导式先求值 key 再求值 value（3.8 起的顺序），重复的 key 后者覆盖前者。set 推导式的 `set.add(..)` 是 `PySet` 自己的方法，生成的方法调用带 `concrete` 标记，检查器（§2）不要求擦除类型
+- 每次迭代结尾 `py.check_signals()?`，和普通循环一样
+- 行号：错误报告在外层帧里，行号是出错的部分所在的行。推导式跨行时，第一个可迭代对象、条件、元素前面各写 `frame.line(N)`，迭代体改变了行号时在结尾设回 `for` 的行（取下一个元素时出错报这一行），推导式结束后设回语句的行。推导式写在一行里时没有额外的 marker
+- 推导式里定义的 lambda 或生成器表达式捕获推导式的变量时，这个变量是一个在循环之前创建的 `rt::Cell`，所有迭代共用（`[lambda: i for i in range(3)]` 的三个函数都返回 2），和 CPython 内联之后的行为一样
+- `locals()`、`vars()`、`dir()`（不带参数）和不带命名空间的 `exec`/`eval` 在推导式里会看到推导式的变量，所在的函数或语句保留为 Python
+- 变量在绑定它的 `for` 之前就被读到的推导式（`[y for x in xs for y in f(y)]`，CPython 抛 `UnboundLocalError`）保留为 Python
+
+**生成器表达式**是真正惰性的迭代器，不物化成列表。创建时只求值第一个可迭代对象并调用 `iter()`，其余部分在每次 `next()` 时执行，异常也在那时抛出，捕获的变量在执行时才读（late binding）。生成的代码是一个 fn item，叫 *step*，它从迭代器取下一个元素，返回下一个值，迭代器耗尽时返回 `None`；`rt::genexpr!` 用它和迭代器创建生成器对象：
+
+```rust
+// return any(x > 3 for x in xs)
+fn genexpr<'py>(
+    m: &rt::Module<'py>,
+    xs: &Bound<'py, PyIterator>,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    rt::frame!(m, "has_big.<locals>.<genexpr>", 10, |_| {
+        if let Some(x) = rt::next(xs)? {
+            return Ok(Some(x.rich_compare(3, CompareOp::Gt)?));
+        }
+        Ok(None)
+    })
+}
+frame.line(10);
+rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
+    m,
+    genexpr(xs.try_iter()?),
+    qualname = "has_big.<locals>.<genexpr>"
+)?,))
+```
+
+- 有 `if` 时 step 是一个 `for` 循环，`return` 从循环中间返回，下次调用继续迭代同一个迭代器（位置保存在 Python 的迭代器里），所以不需要状态机：
+
+  ```rust
+  for word in words {
+      let word = word?;
+      if word.is_truthy()? {
+          return Ok(Some(word.call_method0("upper")?));
+      }
+      py.check_signals()?;
+  }
+  Ok(None)
+  ```
+
+- 捕获的变量和嵌套函数一样写在 `genexpr[n, &count](..)` 里（第 6 节），step 的参数是 `&Bound` 或 `&rt::Cell`。迭代器参数按第一个可迭代对象命名（`xs`、`words`），不是名字或属性时叫 `iter`
+- step 在自己的帧里运行，traceback 里有 `<genexpr>` 帧，qualname 是 `f.<locals>.<genexpr>`、`C.<genexpr>` 或 `<genexpr>`，和 CPython 一样；迭代出错报第一个可迭代对象的行
+- 生成器对象（`rt::Generator`，`#[pyclass]`）实现了调用方能看出来的行为：迭代、`send`（未开始时只能 `send(None)`）、`throw`（包括三参数形式的 `DeprecationWarning`）、`close`、`gi_running`、`gi_suspended`，重入时抛 `ValueError: generator already executing`，step 里抛出的 `StopIteration` 换成 `RuntimeError: generator raised StopIteration`（PEP 479，`__cause__` 是原来的异常），`__name__`、`__qualname__` 可写，`repr` 是 `<generator object f.<locals>.<genexpr> at 0x..>`。它支持弱引用，参与循环垃圾回收（`__traverse__`/`__clear__`）。耗尽、出错或关闭之后释放迭代器，所以 `break` 之后 `close()` 或者 `del` 会让底层的 generator 立刻收到 `close()`
+- 状态放在 `Mutex` 里，锁只在取出、放回迭代器时短暂持有，执行 Python 代码（step、迭代器的析构）时从不持有
+- 只有一个 `for` 的生成器表达式是原生的。多个 `for` 的需要在两次调用之间保存外层循环的元素和内层迭代器（一个小状态机），标准库里只有 3 个，保留为 Python。生成器表达式的变量被它里面的 lambda 或生成器表达式捕获时（cell 要和生成器一样长寿）也保留为 Python
+- 常见的消费者（`sum`、`any`、`all`、`"".join`、`sorted`、`list`、`tuple`、`dict`、`max`/`min` 的 `key`、`next`、`itertools.islice`）不做特化，照常调用 builtin。`list(x for x in xs)` 改写成推导式之类的特化在语义上不等价：少了 `<genexpr>` 帧和 PEP 479 的转换，名字也可能被重新绑定（见下）
+
+**`:=`** 在 prelude 里赋值，然后读这个变量。推导式和生成器表达式里的 `:=` 绑定外层的函数或模块作用域（PEP 572），生成器表达式里是 step 捕获的 cell：
+
+```rust
+// ys = [y for x in xs if (y := x * 2) > 2]，y 可能没有赋值
+let list = PyList::empty(py);
+for x in xs.try_iter()? {
+    let x = x?;
+    let y2 = x.mul(2)?;
+    y = Some(y2.clone());
+    if y2.gt(2)? {
+        list.append(rt::local(&y, "y")?)?;
+    }
+    py.check_signals()?;
+}
+```
+
+- 函数里被 `:=` 赋值的局部变量，读取不再算"纯"的（§8 开头），同一个表达式里前面的读取先放进临时变量：`y + (y := 10) + y` 是 `let y2 = y.clone(); y = rt::int(py, 10); y2.add(&y)?.add(&y)?`
+- 定值分析（第 5 节）按求值顺序处理 `:=`：`if (n := len(xs)) > 1:` 之后 `n` 是确定赋值的，推导式条件里的 `:=` 之后不是（推导式可能一次也不迭代）
+
+否决的方案
+
+- 生成器表达式物化成列表（原计划）：`any()` 的短路、无限迭代器、late binding 和异常时机都会变，不能接受
+- runtime 用一个闭包逐个过滤、映射元素（`filter_map` 风格）：取元素时出错就没有 `<genexpr>` 帧，`if` 和元素也不在同一个函数里，不如一个 step fn 好读
+- 每层循环一个 `Box<dyn FnMut>` 闭包：生命周期和 `Send` 的约束带来很多噪音，可读性差
+- 把生成器对象做成 `unsendable` 的 pyclass：在别的线程上使用会 panic，而 CPython 的生成器可以跨线程传递；用 `Mutex` 就够了
+- `list(genexp)`、`"".join(genexp)` 等特化成推导式或直接循环：见上，语义不完全一样，收益只是少创建一个对象
+
+### generator 函数（M8 调研，未实现）
+
+含 `yield`、`yield from` 的函数仍然整个保留为 Python。M8 之后它们是剩下的主要障碍（`coverage.md`）：
+
+- 标准库 154 个模块里只因为 `yield`/`yield from` 保留的函数有 129 个（全部 6466 个函数的 2.0%），都支持的话原生函数从 96.4% 到 98.4%。6 个工具里剩下的 11 个保留函数全是 generator，支持后是 100%
+- 标准库这些模块里共有 134 个 generator 函数（含嵌套的）。没有一个用到 `yield` 表达式的值（`x = yield`，即 `send()` 驱动的协程写法）；24 个的 `yield` 在 `try` 里，4 个在 `with` 里，29 个用了 `yield from`。`yield` 不在 `try`/`with` 里、也没有 `yield from` 的有 86 个。6 个工具里分别是 11、0、2、0、2、7
+
+三种做法
+
+1. **状态机**：和生成器表达式的 step 一样，每次 `next()` 调用一个 Rust fn，但函数体要能从任意一个 `yield` 之后继续。局部变量要搬进生成器对象里（`st.total` 而不是 `total`），函数体按 `yield` 切成几段，循环里的 `yield` 要把循环改写成显式的状态转移（`match st.state { .. }`），`try`/`finally`、`with` 跨过 `yield` 时还要记住待执行的清理，`close()` 要在暂停的 `yield` 处抛 `GeneratorExit` 并执行 `finally`，`yield from` 要转发 `send`/`throw`/`close`。Rust 稳定版没有 generator（`gen` 块和 `Coroutine` 只在 nightly），状态机得自己生成。语义可以做到和 CPython 一致，可读性代价最大：生成的代码不再和 Python 逐句对应，也很难手工改写，而可读性是 steelix 的第一目标
+2. **另一个栈上运行**：函数体照常生成直线代码，`yield` 写成 `co.yield_(value)?`，`send`/`throw`/`close` 就是带值或带异常恢复执行，代码最好读。用 OS 线程实现时每次切换都要交出、取回 GIL（每个元素微秒级），生成器的代码在另一个线程上运行，线程局部的状态（`contextvars`、`decimal` 的上下文、`threading.local`）和 CPython 不同，traceback 也要跨线程拼起来；用有栈协程（`corosensei` 一类）在同一个线程里切换栈，则会让 CPython 按线程记录的 C 栈边界检查（3.12 起的栈保护）失效，greenlet 能做是因为它针对每个 CPython 版本处理解释器内部状态。两种都要引入 unsafe 的依赖，正确性风险大
+3. **保留为 Python**（现在的做法）：没有代价，`send`/`throw`/`close` 和帧都是 CPython 自己的，只是这 2% 的函数不能逐步改写成 Rust
+
+结论：暂时保留为 Python，不单独开里程碑。如果以后要做，建议只做状态机的一个子集，作为可选的里程碑排在 M9 之后：`yield` 是语句（值不用），不在 `try`/`with` 里，没有 `yield from`（标准库 134 个里的 86 个），局部变量放进一个状态结构，循环里的 `yield` 用 step 的 `return` 加恢复点实现。其余的仍然保留为 Python。做之前应该先用真实应用确认这些函数值得改写成原生代码，因为 generator 通常是薄的迭代逻辑，用户最终手写 Rust 时多半会改成 `Iterator`，生成的状态机不一定是好的起点
 
 ## 9. 异常（M4）
 
@@ -738,7 +862,8 @@ m.set_global(
 - 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；函数注解在 FORWARDREF 格式下创建的 `ForwardRef` 没有 `owner`（类注解的有）。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
 - 直接调用时省略的参数，不可变字面量的默认值直接写在调用处，所以别的模块给这个函数的 `__defaults__`/`__kwdefaults__` 赋值时直接调用看不到，这和直接调用看不到 monkeypatch 是同一类差异。本模块里的赋值会被识别，这时改为读函数对象（第 6 节）。字面量每次调用都创建新对象，见上面关于常量 identity 的一条
 - 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch，或者 `sys.modules[__name__].f = g`），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError: f() was replaced by <function g at 0x..>, but transpiled code calls the original directly and can not take the default of its parameter 'b' from the replacement`。CPython 会调用替换后的函数，要做到一样，直接调用就得在每次调用前检查 globals，失去了直接调用的意义，所以只保证报错清楚。M3c 之前这里会 panic默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
-- 模块级的条件定义（`if` 里的 `def`）和重复定义（第二个及以后的）保留为 Python（§13），条件定义所在的 `if` 本身是原生代码
+- 模块级的重复定义（同名的第二个及以后的顶层 `def`）保留为 Python（§13）。模块级复合语句里的 `def`（`if` 里的条件定义、循环和 `try` 里的定义，M8）是 `exec_module` 里的 fn item，执行到 `def` 时绑定到 globals，调用一律经过 globals
+- 生成器表达式的对象（§8）不是 `types.GeneratorType`，而是 runtime 的 `generator` 类：`collections.abc.Generator`、`Iterator` 的 `isinstance` 为 True，`inspect.isgenerator(g)` 和 `isinstance(g, types.GeneratorType)` 为 False。`gi_frame`、`gi_code`、`gi_yieldfrom` 是 `None`，所以 `inspect.getgeneratorstate` 对还没开始的生成器返回 `GEN_CLOSED`（CPython 是 `GEN_CREATED`），开始之后的状态一致。`throw()` 抛出的异常的 traceback 里没有 `<genexpr>` 那一帧
 - 模块级只有一个参数的 `exec(src)`、`eval(src)` 在原生代码里显式传入模块的 globals（`exec(src, globals())`），和 CPython 在模块级的行为一样。函数里的要读写局部变量，所在的函数保留为 Python
 - 模块级不带参数的 `globals()`、`locals()`、`vars()` 都是模块的 globals 字典，`dir()` 是排好序的名字列表（`m.dir()?`），和 CPython 一样。函数里不带参数的 `locals()`、`vars()`、`dir()` 要读局部变量，所在的函数保留为 Python
 - 混合模式（§13）的差异：跟在 `;` 后面的保留语句，第一行在 traceback 里的列位置会偏；ext 模式下文件名用模块的 `__file__`，也就是扩展模块的路径，traceback 显示不出源码行
@@ -760,7 +885,7 @@ m.set_global(
 目标是 CPython 能运行的应用都能转换，并且行为一致。steelix 还不能降级的部分保留为 Python 源码，在模块的 globals 里执行。整个程序先跑起来，再逐步扩大原生转换的范围，覆盖率报告（下面）告诉我们下一步该支持什么。
 
 - 默认就是混合模式。`steelix transpile --no-fallback` 恢复以前的行为：遇到不支持的语法就报错，诊断信息带 `文件:行:列` 和特性名
-- 粒度是模块作用域里的语句。模块的作用域就是 globals 字典，所以不支持的模块级语句（模块级的推导式、条件定义的函数、带注解的赋值、`import *` 等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（generator、推导式、函数里的类等）整个保留为 Python，嵌套函数一起保留
+- 粒度是模块作用域里的语句。模块的作用域就是 globals 字典，所以不支持的模块级语句（带注解的赋值、`import *`、容器字面量里的 `*` 展开等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（generator、多个 `for` 的生成器表达式、函数里的类等）整个保留为 Python，嵌套函数一起保留
 - 模块级的 `if`、`for`、`while`（包括 `if __name__ == "__main__":`）会拆开（M3d）：只有体里的某些语句不支持时，只保留这些语句，`if`/循环本身和其余语句仍是原生代码。拆分是递归的，体里的 `if`/`for`/`while` 同样处理。不拆的情况：不支持的构造在条件、循环变量或被迭代的表达式里，整个语句保留；保留的语句里有跳出原生循环的 `break`/`continue`（单独编译是 `SyntaxError`），整个循环保留，这是最简单而且正确的做法，保留的循环自己的 `break`/`continue` 不受影响。保留的语句之间不用同步任何东西，它们读写的都是 globals
 - 类按方法拆开（M5，方法级的混合模式）：类本身原生创建，只有含不支持语法的方法和类体语句保留为 Python，在类的命名空间里执行，见下面的"类体里保留的语句"。类体里的 `if`/`for`/`while` 同样拆开
 - 原生函数里的一部分语句保留为 Python（更细的粒度）暂不做：那需要在 Rust 局部变量和 Python 代码之间同步局部变量。记录保留哪些语句的数据结构（`frontend/fallback.py` 的 `FallbackPlan`）按语句节点索引，现在已经放进模块级复合语句里的语句，以后可以直接放进函数里的语句
@@ -798,20 +923,20 @@ def evens(limit):
         rt::def!(m, use_counter(start))?;
 ```
 
-拆开的 `if` 里保留的语句保持原来的缩进：
+拆开的 `if` 里保留的语句保持原来的缩进（节选自 `tests/golden/mixed_nested.rs`）：
 
 ```rust
-    if m.global("FLAG")?.is_truthy()? {
-        // mixed_mode.py:62, kept as Python: function definition outside module top level at 62:5
-        rt::exec_python!(
-            m,
-            line = 62,
-            r#"
-    def pick():
-        return "first"
+        if m.global("sys")?.getattr("argv")?.len()? > 5 {
+            frame.line(11);
+            m.set_global("mode", "many")?;
+            // mixed_nested.py:12, kept as Python: unpacking in a display at 12:15
+            rt::exec_python!(
+                m,
+                line = 12,
+                r#"
+    labels = [*"many"]  # kept as Python, the `if` is native
 "#
-        )?;
-    } else {
+            )?;
 ```
 
 - raw string 从 `r#"` 的下一行开始，`line = 17` 是第一行在 Python 文件里的行号。源码里出现 `"#` 时自动加更多的 `#`

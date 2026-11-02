@@ -1,11 +1,7 @@
-//! Parts of `classes_basic.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 92, `expr` statement: generator expression
-
 use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::PyDict;
+use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PySet;
 use pyo3::types::PyTuple;
@@ -622,13 +618,29 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Vector")?.getattr("__firstlineno__")?,
             ),
         )?;
-        // classes_basic.py:92, kept as Python: generator expression at 92:13
-        rt::exec_python!(
-            m,
-            line = 92,
-            r#"
-print(sorted(k for k in Vector.__dict__ if not k.startswith("__")))
-"#
+        // classes_basic.py:92
+        fn genexpr<'py>(
+            m: &rt::Module<'py>,
+            __dict__: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "<genexpr>", 92, |_| {
+                for k in __dict__ {
+                    let k = k?;
+                    if !k.call_method1("startswith", ("__",))?.is_truthy()? {
+                        return Ok(Some(k.clone()));
+                    }
+                    m.py().check_signals()?;
+                }
+                Ok(None)
+            })
+        }
+        frame.line(92);
+        rt::builtins::print(
+            py,
+            (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
+                m,
+                genexpr(m.global("Vector")?.getattr("__dict__")?.try_iter()?)
+            )?,))?,),
         )?;
         frame.line(93);
         rt::builtins::print(

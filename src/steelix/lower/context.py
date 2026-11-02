@@ -64,6 +64,10 @@ class FunctionInfo:
     """Rust names of parameters, captured variables and locals."""
     by_value: set[str] = field(default_factory=set)
     """Captured variables received by value rather than as `rt::Cell`."""
+    walrus_targets: frozenset[str] = frozenset()
+    """Locals that `:=` assigns somewhere in the function: reading one is
+    not pure, an assignment expression later in the same expression may
+    change it."""
 
     def is_cell(self, name: str) -> bool:
         """Whether `name` is a `rt::Cell` here: an owned cell that nested
@@ -74,11 +78,15 @@ class FunctionInfo:
 
     @property
     def varargs(self) -> str | None:
+        if isinstance(self.node, ast.GeneratorExp):
+            return None
         args = self.node.args
         return args.vararg.arg if args.vararg is not None else None
 
     @property
     def varkw(self) -> str | None:
+        if isinstance(self.node, ast.GeneratorExp):
+            return None
         args = self.node.args
         return args.kwarg.arg if args.kwarg is not None else None
 
@@ -163,6 +171,18 @@ class Context:
         self._temps.add(name)
         return name
 
+    def reserve(self, name: str) -> None:
+        """Keep temporaries from taking `name`, a variable of the generated
+        code such as a comprehension's."""
+        self._temps.add(name)
+
+    def release(self, name: str) -> None:
+        """Let temporaries take `name` again, once it is out of scope."""
+        self._temps.discard(name)
+
+    def taken_temps(self) -> set[str]:
+        return self._temps
+
     def binding(self, base: str) -> str:
         """A name for a short-lived binding of the generated code, such as
         the `err` of `Err(err) => ..`, that may not hide locals or
@@ -193,7 +213,8 @@ class Context:
         n = 1
         while name in taken:
             n += 1
-            name = f"{base}{n}" if base == "lambda" else name + "_"
+            numbered = base in ("lambda", "genexpr")
+            name = f"{base}{n}" if numbered else name + "_"
         self.item_names.add(name)
         return name
 

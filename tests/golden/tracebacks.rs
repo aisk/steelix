@@ -1,8 +1,7 @@
 //! Parts of `tracebacks.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 17, `def no_carets`: generator expression
-//! - line 31, `def kept_middle`: list comprehension
+//! - line 31, `def kept_middle`: unpacking in a display
 
 use pyo3::exceptions::PyException;
 use pyo3::exceptions::PyIndexError;
@@ -10,6 +9,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::exceptions::PyZeroDivisionError;
 use pyo3::prelude::*;
+use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
 
@@ -39,6 +39,47 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
             frame.line(13);
         }
         Ok(rt::none(py))
+    })
+}
+
+// tracebacks.py:17
+pub fn no_carets<'py>(
+    m: &rt::Module<'py>,
+    text: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "no_carets", 17, |frame| {
+        // Native frames have no column positions, so no `^^^` markers.
+        // tracebacks.py:19
+        fn genexpr<'py>(
+            m: &rt::Module<'py>,
+            iter: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "no_carets.<locals>.<genexpr>", 19, |frame| {
+                frame.line(20);
+                for line in iter {
+                    let line = line?;
+                    if line
+                        .call_method0("strip")?
+                        .call_method1("strip", ("^~",))?
+                        .ne("")?
+                    {
+                        return Ok(Some(line.clone()));
+                    }
+                    m.py().check_signals()?;
+                }
+                Ok(None)
+            })
+        }
+        frame.line(19);
+        let join = rt::str(m.py(), "\n").getattr("join")?;
+        frame.line(20);
+        let iter = text.call_method0("splitlines")?.try_iter()?;
+        frame.line(19);
+        join.call1((rt::genexpr!(
+            m,
+            genexpr(iter),
+            qualname = "no_carets.<locals>.<genexpr>"
+        )?,))
     })
 }
 
@@ -254,26 +295,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             format = "%(levelname)s %(message)s"
         )?;
         rt::def!(m, show(exc))?;
-        // tracebacks.py:17, kept as Python: generator expression at 19:21
-        rt::exec_python!(
-            m,
-            line = 17,
-            r#"
-def no_carets(text):
-    # Native frames have no column positions, so no `^^^` markers.
-    return "\n".join(
-        line for line in text.splitlines() if line.strip().strip("^~") != ""
-    )
-"#
-        )?;
+        rt::def!(m, no_carets(text))?;
         rt::def!(m, leaf(values, key))?;
-        // tracebacks.py:31, kept as Python: list comprehension at 32:13
+        // tracebacks.py:31, kept as Python: unpacking in a display at 32:14
         rt::exec_python!(
             m,
             line = 31,
             r#"
 def kept_middle(values, key):
-    pairs = [(k, v) for k, v in enumerate(values)]
+    pairs = [*enumerate(values)]
     return leaf(values, key) + len(pairs)
 "#
         )?;
@@ -307,8 +337,7 @@ def kept_middle(values, key):
                 frame.line(107);
                 rt::builtins::print(
                     py,
-                    (m.global("no_carets")?
-                        .call1((m.global("out")?.call_method0("getvalue")?,))?,),
+                    (no_carets(m, &m.global("out")?.call_method0("getvalue")?)?,),
                 )?;
                 frame.line(108);
                 m.global("logging")?
@@ -316,8 +345,10 @@ def kept_middle(values, key):
                 frame.line(109);
                 rt::builtins::print(
                     py,
-                    (m.global("no_carets")?
-                        .call1((m.global("log_output")?.call_method0("getvalue")?,))?,),
+                    (no_carets(
+                        m,
+                        &m.global("log_output")?.call_method0("getvalue")?,
+                    )?,),
                 )?;
                 m.unbind_global("e")?;
             }
@@ -377,8 +408,7 @@ def kept_middle(values, key):
                     frame.line(129);
                     rt::builtins::print(
                         py,
-                        (m.global("no_carets")?
-                            .call1((m.global("out")?.call_method0("getvalue")?,))?,),
+                        (no_carets(m, &m.global("out")?.call_method0("getvalue")?)?,),
                     )?;
                     m.unbind_global("e")?;
                 }

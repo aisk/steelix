@@ -80,12 +80,14 @@ def lower_class_def(lowering: StmtLowering, stmt: ast.ClassDef) -> list[rs.Stmt]
     out: list[rs.Stmt] = []
     decorators: list[tuple[int, Value]] = []
     for decorator in stmt.decorator_list:
+        exprs.line = decorator.lineno
         with exprs.fresh() as prelude:
             value = exprs.hoist(exprs.value(decorator), "decorator")
         out += lowering.flush_items()
         out += lowering.mark(decorator.lineno, prelude) + prelude
         decorators.append((decorator.lineno, value))
 
+    exprs.line = stmt.lineno
     with exprs.fresh() as prelude:
         items = [b.value if isinstance(b, ast.Starred) else b for b in stmt.bases]
         items += [k.value for k in stmt.keywords]
@@ -110,7 +112,7 @@ def lower_class_def(lowering: StmtLowering, stmt: ast.ClassDef) -> list[rs.Stmt]
         parts.append(")")
         args: list[rs.Expr] = [
             rs.Path(ctx.context()),
-            rs.Tokens(_merge_text(parts)),
+            rs.Tokens(merge_text(parts)),
             rs.Path(f"{name}::body"),
             rs.Tokens((f"line = {first_line(stmt)}",)),
         ]
@@ -132,7 +134,7 @@ def lower_class_def(lowering: StmtLowering, stmt: ast.ClassDef) -> list[rs.Stmt]
     return out + prelude + [store]
 
 
-def _merge_text(parts: list[str | rs.Expr]) -> tuple[str | rs.Expr, ...]:
+def merge_text(parts: list[str | rs.Expr]) -> tuple[str | rs.Expr, ...]:
     merged: list[str | rs.Expr] = []
     for part in parts:
         if isinstance(part, str) and merged and isinstance(merged[-1], str):

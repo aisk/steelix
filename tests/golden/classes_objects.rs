@@ -1,12 +1,8 @@
-//! Parts of `classes_objects.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 41, `def total`: generator expression
-
 use pyo3::exceptions::PyAttributeError;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
+use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
@@ -197,16 +193,10 @@ pub mod tree {
                     qualname = "Tree.__deepcopy__"
                 )?,
             )?;
-            // classes_objects.py:41, kept as Python: generator expression at 42:32
-            rt::exec_python!(
-                ns,
-                line = 41,
-                r#"
-    def total(self):
-        return self.value + sum(child.total() for child in self.children) if False else (
-            self.value + sum(map(Tree.total, self.children))
-        )
-"#
+            frame.line(41);
+            ns.set(
+                "total",
+                rt::function!(ns, total(slf as "self"), qualname = "Tree.total")?,
             )?;
             Ok(())
         })
@@ -246,6 +236,41 @@ pub mod tree {
                     .getattr("deepcopy")?
                     .call1((slf.getattr("children")?, memo))?
             )
+        })
+    }
+
+    // classes_objects.py:41
+    pub fn total<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Tree.total", 41, |frame| {
+            // classes_objects.py:42
+            fn genexpr<'py>(
+                m: &rt::Module<'py>,
+                children: &Bound<'py, PyIterator>,
+            ) -> PyResult<Option<Bound<'py, PyAny>>> {
+                rt::frame!(m, "Tree.total.<locals>.<genexpr>", 42, |_| {
+                    if let Some(child) = rt::next(children)? {
+                        return Ok(Some(child.call_method0("total")?));
+                    }
+                    Ok(None)
+                })
+            }
+            frame.line(42);
+            Ok(if false {
+                slf.getattr("value")?
+                    .add(rt::builtin(py, "sum")?.call1((rt::genexpr!(
+                        m,
+                        genexpr(slf.getattr("children")?.try_iter()?),
+                        qualname = "Tree.total.<locals>.<genexpr>"
+                    )?,))?)?
+            } else {
+                slf.getattr("value")?.add(rt::builtin(py, "sum")?.call1((
+                    rt::builtin(py, "map")?.call1((
+                        m.global("Tree")?.getattr("total")?,
+                        slf.getattr("children")?,
+                    ))?,
+                ))?)?
+            })
         })
     }
 }

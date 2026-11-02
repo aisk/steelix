@@ -1,12 +1,11 @@
 //! Parts of `mixed_nested.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 13, `def describe`: function definition outside module top level
-//! - line 18, `def describe`: function definition outside module top level
-//! - line 27, `assign` statement: list comprehension
-//! - line 32, `while` statement: match statement
-//! - line 41, `for` statement: match statement
-//! - line 62, `assign` statement: generator expression
+//! - line 12, `assign` statement: unpacking in a display
+//! - line 28, `assign` statement: unpacking in a display
+//! - line 33, `while` statement: match statement
+//! - line 42, `for` statement: match statement
+//! - line 63, `assign` statement: unpacking in a display
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -23,11 +22,11 @@ pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound
 pub mod point {
     use super::*;
 
-    // mixed_nested.py:50
+    // mixed_nested.py:51
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Point", 50, |frame| {
-            frame.line(51);
+        rt::frame!(ns, "Point", 51, |frame| {
+            frame.line(52);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -40,14 +39,14 @@ pub mod point {
         })
     }
 
-    // mixed_nested.py:51
+    // mixed_nested.py:52
     pub fn __init__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.__init__", 51, |frame| {
-            frame.line(52);
+        rt::frame!(m, "Point.__init__", 52, |frame| {
+            frame.line(53);
             slf.setattr("x", x)?;
             Ok(rt::none(m.py()))
         })
@@ -57,11 +56,11 @@ pub mod point {
 pub mod local {
     use super::*;
 
-    // mixed_nested.py:58
+    // mixed_nested.py:59
     /// The body of `class Local`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Local", 58, |frame| {
-            frame.line(59);
+        rt::frame!(ns, "Local", 59, |frame| {
+            frame.line(60);
             ns.set("label", "local class")?;
             Ok(())
         })
@@ -81,66 +80,90 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         if m.global("sys")?.getattr("argv")?.len()? > 5 {
             frame.line(11);
             m.set_global("mode", "many")?;
-            // A conditional definition is kept as Python, the `if` is native.
-            // mixed_nested.py:13, kept as Python: function definition outside module top level at 13:5
+            // mixed_nested.py:12, kept as Python: unpacking in a display at 12:15
             rt::exec_python!(
                 m,
-                line = 13,
+                line = 12,
                 r#"
-    def describe(n):
-        return f"{n} (many)"
+    labels = [*"many"]  # kept as Python, the `if` is native
 "#
             )?;
+            // mixed_nested.py:14
+            fn describe<'py>(
+                m: &rt::Module<'py>,
+                n: &Bound<'py, PyAny>,
+            ) -> PyResult<Bound<'py, PyAny>> {
+                rt::frame!(m, "describe", 14, |frame| {
+                    frame.line(15);
+                    rt::fstring(m.py(), (rt::format(n, "")?, " (many)"))
+                })
+            }
+            frame.line(14);
+            m.set_global("describe", rt::function!(m, describe(n))?)?;
         } else {
-            frame.line(16);
+            frame.line(17);
             m.set_global("mode", "few")?;
-            // mixed_nested.py:18, kept as Python: function definition outside module top level at 18:5
-            rt::exec_python!(
-                m,
-                line = 18,
-                r#"
-    def describe(n):
-        return f"{n} ({mode})"
-"#
+            // mixed_nested.py:19
+            fn describe_<'py>(
+                m: &rt::Module<'py>,
+                n: &Bound<'py, PyAny>,
+            ) -> PyResult<Bound<'py, PyAny>> {
+                rt::frame!(m, "describe", 19, |frame| {
+                    frame.line(20);
+                    rt::fstring(
+                        m.py(),
+                        (
+                            rt::format(n, "")?,
+                            " (",
+                            rt::format(&m.global("mode")?, "")?,
+                            ")",
+                        ),
+                    )
+                })
+            }
+            frame.line(19);
+            m.set_global(
+                "describe",
+                rt::function!(m, describe_(n), name = "describe")?,
             )?;
-            frame.line(21);
+            frame.line(22);
             rt::builtins::print(py, ("native branch", m.global("mode")?))?;
         }
-        frame.line(23);
+        frame.line(24);
         for item in rt::builtin(py, "range")?.call1((4,))?.try_iter()? {
             m.set_global("i", item?)?;
-            frame.line(24);
+            frame.line(25);
             if m.global("i")?.eq(1)? {
                 py.check_signals()?;
-                frame.line(23);
+                frame.line(24);
                 continue;
             }
-            frame.line(26);
+            frame.line(27);
             rt::builtins::print(
                 py,
                 (m.global("describe")?
                     .call1((double(m, &m.global("i")?)?,))?,),
             )?;
-            // mixed_nested.py:27, kept as Python: list comprehension at 27:15
+            // mixed_nested.py:28, kept as Python: unpacking in a display at 28:16
             rt::exec_python!(
                 m,
-                line = 27,
+                line = 28,
                 r#"
-    squares = [j * j for j in range(i)]  # kept as Python
+    squares = [*range(i)]  # kept as Python
 "#
             )?;
-            frame.line(28);
+            frame.line(29);
             rt::builtins::print(py, ("squares", m.global("squares")?))?;
             py.check_signals()?;
-            frame.line(23);
+            frame.line(24);
         }
         // `break` in a kept statement: the loop is kept whole.
-        frame.line(31);
+        frame.line(32);
         m.set_global("n", 0)?;
-        // mixed_nested.py:32, kept as Python: match statement at 34:5
+        // mixed_nested.py:33, kept as Python: match statement at 35:5
         rt::exec_python!(
             m,
-            line = 32,
+            line = 33,
             r#"
 while True:
     n += 1
@@ -151,13 +174,13 @@ while True:
 "#
         )?;
         // A kept loop inside a native one: its `break` is its own.
-        frame.line(40);
+        frame.line(41);
         for item2 in PyList::new(py, ["ab", "cde"])?.try_iter()? {
             m.set_global("word", item2?)?;
-            // mixed_nested.py:41, kept as Python: match statement at 42:9
+            // mixed_nested.py:42, kept as Python: match statement at 43:9
             rt::exec_python!(
                 m,
-                line = 41,
+                line = 42,
                 r#"
     for ch in word:
         match ch:
@@ -170,18 +193,18 @@ while True:
             )?;
             py.check_signals()?;
         }
-        frame.line(50);
+        frame.line(51);
         m.set_global(
             "Point",
-            rt::class!(m, "Point"(), point::body, line = 50, attributes = ["x"])?,
+            rt::class!(m, "Point"(), point::body, line = 51, attributes = ["x"])?,
         )?;
-        frame.line(55);
+        frame.line(56);
         if m.global("__name__")?.eq("__main__")? {
-            frame.line(56);
+            frame.line(57);
             rt::builtins::print(py, ("main", m.global("mode")?))?;
-            frame.line(58);
-            m.set_global("Local", rt::class!(m, "Local"(), local::body, line = 58)?)?;
-            frame.line(61);
+            frame.line(59);
+            m.set_global("Local", rt::class!(m, "Local"(), local::body, line = 59)?)?;
+            frame.line(62);
             rt::builtins::print(
                 py,
                 (
@@ -191,15 +214,15 @@ while True:
                         .getattr("x")?,
                 ),
             )?;
-            // mixed_nested.py:62, kept as Python: generator expression at 62:16
+            // mixed_nested.py:63, kept as Python: unpacking in a display at 63:18
             rt::exec_python!(
                 m,
-                line = 62,
+                line = 63,
                 r#"
-    total = sum(i for i in range(5))
+    total = sum([*range(5)])
 "#
             )?;
-            frame.line(63);
+            frame.line(64);
             rt::builtins::print(py, ("total", m.global("total")?))?;
         }
         Ok(())

@@ -1,9 +1,5 @@
-//! Parts of `classes_future.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 11, `def __new__`: list comprehension
-
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use steelix_runtime as rt;
 
 pub mod meta {
@@ -12,19 +8,44 @@ pub mod meta {
     // classes_future.py:10
     /// The body of `class Meta`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Meta", 10, |_| {
-            // classes_future.py:11, kept as Python: list comprehension at 12:21
-            rt::exec_python!(
-                ns,
-                line = 11,
-                future_annotations,
-                r#"
-    def __new__(mcls, name, bases, ns):
-        print(name, [k for k in ns if k != "__module__"])
-        return super().__new__(mcls, name, bases, ns)
-"#
+        rt::frame!(ns, "Meta", 10, |frame| {
+            let __class__ = ns.class_cell();
+            frame.line(11);
+            ns.set(
+                "__new__",
+                rt::function!(
+                    m,
+                    __new__[&__class__](mcls, name, bases, ns),
+                    qualname = "Meta.__new__"
+                )?,
             )?;
             Ok(())
+        })
+    }
+
+    // classes_future.py:11
+    pub fn __new__<'py>(
+        m: &rt::Module<'py>,
+        __class__: &rt::Cell<'py>,
+        mcls: &Bound<'py, PyAny>,
+        name: &Bound<'py, PyAny>,
+        bases: &Bound<'py, PyAny>,
+        ns: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Meta.__new__", 11, |frame| {
+            frame.line(12);
+            let list = PyList::empty(py);
+            for k in ns.try_iter()? {
+                let k = k?;
+                if k.ne("__module__")? {
+                    list.append(&k)?;
+                }
+                py.check_signals()?;
+            }
+            rt::builtins::print(py, (name, &list))?;
+            frame.line(13);
+            rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, ns))
         })
     }
 }

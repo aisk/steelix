@@ -1,8 +1,3 @@
-//! Parts of `classes_exceptions.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 43, `def describe`: list comprehension
-
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -125,17 +120,31 @@ pub mod kept {
     // classes_exceptions.py:42
     /// The body of `class Kept`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Kept", 42, |_| {
-            // classes_exceptions.py:43, kept as Python: list comprehension at 44:16
-            rt::exec_python!(
-                ns,
-                line = 43,
-                r#"
-    def describe(self):
-        return [len(a) for a in [self.args]]
-"#
+        rt::frame!(ns, "Kept", 42, |frame| {
+            frame.line(43);
+            ns.set(
+                "describe",
+                rt::function!(ns, describe(slf as "self"), qualname = "Kept.describe")?,
             )?;
             Ok(())
+        })
+    }
+
+    // classes_exceptions.py:43
+    pub fn describe<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Kept.describe", 43, |frame| {
+            frame.line(44);
+            let list = PyList::empty(py);
+            for a in PyList::new(py, [&slf.getattr("args")?])?.try_iter()? {
+                let a = a?;
+                list.append(a.len()?)?;
+                py.check_signals()?;
+            }
+            Ok(list.into_any())
         })
     }
 }

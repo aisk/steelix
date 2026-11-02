@@ -1,11 +1,7 @@
 //! Parts of `classes_body.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 7, `def show_tb`: list comprehension
-//! - line 45, `assign` statement: list comprehension
 //! - line 88, `def failing_body`: class definition in a function
-//! - line 102, `try` statement: list comprehension
-//! - line 117, `def kept`: list comprehension
 
 use pyo3::exceptions::PyAssertionError;
 use pyo3::exceptions::PyKeyError;
@@ -18,6 +14,29 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+
+// classes_body.py:7
+pub fn show_tb<'py>(m: &rt::Module<'py>, err: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "show_tb", 7, |frame| {
+        frame.line(8);
+        let list = PyList::empty(py);
+        for f in m
+            .global("traceback")?
+            .getattr("extract_tb")?
+            .call1((err.getattr("__traceback__")?,))?
+            .try_iter()?
+        {
+            let f = f?;
+            list.append(PyTuple::new(
+                py,
+                [&f.getattr("name")?, &f.getattr("lineno")?],
+            )?)?;
+            py.check_signals()?;
+        }
+        Ok(list.into_any())
+    })
+}
 
 pub mod body_ {
     use super::*;
@@ -125,14 +144,13 @@ pub mod body_ {
             }
             frame.line(45);
             ns.set("x", 1)?;
-            // classes_body.py:45, kept as Python: list comprehension at 45:22
-            rt::exec_python!(
-                ns,
-                line = 45,
-                r#"
-           squares = [x * x for x in range(3)]
-"#
-            )?;
+            let list = PyList::empty(py);
+            for x in ns.get("range")?.call1((3,))?.try_iter()? {
+                let x = x?;
+                list.append(x.mul(&x)?)?;
+                py.check_signals()?;
+            }
+            ns.set("squares", &list)?;
             ns.set("y", 2)?;
             // classes_body.py:46
             fn lambda<'py>(
@@ -331,6 +349,27 @@ pub mod failing {
     }
 }
 
+pub mod failing_kept {
+    use super::*;
+
+    // classes_body.py:104
+    /// The body of `class FailingKept`, run in its namespace `ns`.
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        let py = m.py();
+        rt::frame!(ns, "FailingKept", 104, |frame| {
+            frame.line(105);
+            let list = PyList::empty(py);
+            for underscore in rt::str(py, "x").try_iter()? {
+                let underscore = underscore?;
+                list.append(rt::int(py, 1).div(0)?)?;
+                py.check_signals()?;
+            }
+            ns.set("values", &list)?;
+            Ok(())
+        })
+    }
+}
+
 pub mod annotated {
     use super::*;
 
@@ -349,14 +388,14 @@ pub mod annotated {
                     qualname = "Annotated.method"
                 )?,
             )?;
-            // classes_body.py:117, kept as Python: list comprehension at 118:16
-            rt::exec_python!(
-                ns,
-                line = 117,
-                r#"
-    def kept(self, x: alias) -> list[alias]:
-        return [x for _ in "x"]
-"#
+            frame.line(117);
+            ns.set(
+                "kept",
+                rt::function!(
+                    ns,
+                    kept(slf as "self", x: "alias") -> "list[alias]",
+                    qualname = "Annotated.kept"
+                )?,
             )?;
             Ok(())
         })
@@ -369,6 +408,25 @@ pub mod annotated {
         x: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         Ok(x.clone())
+    }
+
+    // classes_body.py:117
+    pub fn kept<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        x: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Annotated.kept", 117, |frame| {
+            frame.line(118);
+            let list = PyList::empty(py);
+            for underscore in rt::str(py, "x").try_iter()? {
+                let underscore = underscore?;
+                list.append(x)?;
+                py.check_signals()?;
+            }
+            Ok(list.into_any())
+        })
     }
 }
 
@@ -523,15 +581,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("sys", rt::import(m, "sys")?)?;
         frame.line(4);
         m.set_global("traceback", rt::import(m, "traceback")?)?;
-        // classes_body.py:7, kept as Python: list comprehension at 8:12
-        rt::exec_python!(
-            m,
-            line = 7,
-            r#"
-def show_tb(err):
-    return [(f.name, f.lineno) for f in traceback.extract_tb(err.__traceback__)]
-"#
-        )?;
+        rt::def!(m, show_tb(err))?;
         frame.line(11);
         m.set_global("Body", rt::class!(m, "Body"(), body_::body, line = 11)?)?;
         frame.line(54);
@@ -649,31 +699,30 @@ def failing_body():
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
                 frame.line(100);
-                rt::builtins::print(
-                    py,
-                    (
-                        "ZeroDivisionError",
-                        m.global("show_tb")?.call1((m.global("err")?,))?,
-                    ),
-                )?;
+                rt::builtins::print(py, ("ZeroDivisionError", show_tb(m, &m.global("err")?)?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        // classes_body.py:102, kept as Python: list comprehension at 105:18
-        rt::exec_python!(
-            m,
-            line = 102,
-            r#"
-try:
-
-    class FailingKept:
-        values = [1 / 0 for _ in "x"]
-
-except ZeroDivisionError as err:
-    print("ZeroDivisionError", show_tb(err))
-"#
-        )?;
+        match (|| -> PyResult<()> {
+            frame.line(104);
+            m.set_global(
+                "FailingKept",
+                rt::class!(m, "FailingKept"(), failing_kept::body, line = 104)?,
+            )?;
+            Ok(())
+        })() {
+            Ok(()) => {}
+            Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
+                let exception = frame.catch(err);
+                m.set_global("err", &exception)?;
+                let _handling = rt::Handling::new(&exception);
+                frame.line(108);
+                rt::builtins::print(py, ("ZeroDivisionError", show_tb(m, &m.global("err")?)?))?;
+                m.unbind_global("err")?;
+            }
+            Err(err) => return Err(err),
+        }
         frame.line(111);
         m.set_global(
             "Annotated",

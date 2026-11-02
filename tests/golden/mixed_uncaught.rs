@@ -1,7 +1,7 @@
 //! Parts of `mixed_uncaught.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 8, `def python_kept`: list comprehension
+//! - line 8, `def python_kept`: unpacking in a display
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -21,13 +21,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
         rt::def!(m, native(values))?;
-        // mixed_uncaught.py:8, kept as Python: list comprehension at 9:12
+        // mixed_uncaught.py:8, kept as Python: unpacking in a display at 9:13
         rt::exec_python!(
             m,
             line = 8,
             r#"
 def python_kept(values):
-    return [10 // v for v in values]
+    return [*values, 10 // values[-1]]
 "#
         )?;
         frame.line(12);

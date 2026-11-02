@@ -572,3 +572,72 @@ def test_class_is_split_by_method() -> None:
     assert kept(5, 9) == [4, 9]
     # In the header: the whole class.
     assert kept(2) == [2]
+
+
+# --- comprehensions --------------------------------------------------------------
+
+
+def test_comprehension_variables_are_not_function_variables() -> None:
+    tree, source = parse(
+        """
+        def f(xs):
+            ys = [x * 2 for x in xs if x]
+            g = (y for y in ys)
+            return [lambda: x for x in ys], g
+        """
+    )
+    scopes = analyze_scopes(tree, source, "m.py")
+    outer = scopes.of(function(tree, "f"))
+    genexpr, lam = outer.children
+    assert genexpr.name == "<genexpr>"
+    assert genexpr.qualname == "f.<locals>.<genexpr>"
+    assert genexpr.params == ()
+    assert genexpr.locals == {"y"}
+    # The lambda captures the comprehension's `x`, not a cell of `f`.
+    assert lam.frees == ("x",)
+    assert lam.comprehension_frees == {"x"}
+    assert outer.cells == set()
+    info = analyze_locals(outer, scopes)
+    assert set(info.declared_at) == {"ys", "g"}
+
+
+def test_walrus_in_a_comprehension_assigns_the_function_local() -> None:
+    info, fn = locals_of(
+        """
+        def f(xs):
+            ys = [y for x in xs if (y := x)]
+            return y
+        """
+    )
+    # The comprehension may not run its condition at all.
+    assert info.optional == {"y"}
+
+
+def test_walrus_in_a_condition_is_definite_after_it() -> None:
+    info, _ = locals_of(
+        """
+        def f(xs):
+            if (n := len(xs)) > 1:
+                pass
+            return n
+        """
+    )
+    assert info.optional == set()
+
+
+@pytest.mark.parametrize(
+    ("source", "feature"),
+    [
+        ("g = (x for x in a for y in x)", "generator expression with several for clauses"),
+        (
+            "g = (lambda: x for x in a)",
+            "generator expression variable captured by a nested function",
+        ),
+        ("ys = [y for x in a for y in y]", "comprehension variable used before it is bound"),
+    ],
+)
+def test_unsupported_comprehensions(source: str, feature: str) -> None:
+    from steelix.frontend.subset import find_unsupported
+
+    issues = [i for found in find_unsupported(ast.parse(source), "m.py").values() for i in found]
+    assert [i.feature for i in issues] == [feature]

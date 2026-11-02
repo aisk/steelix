@@ -180,3 +180,38 @@ JSON 报告列出了每个保留的函数和挡住它的特性，可以算出支
 2. **M5 类，并把方法级的混合模式列为必做项**：类原生创建，不支持的方法保留为 Python 源码，编译后放进类的命名空间（`__qualname__`、`__module__`、`super()` 的 `__class__` cell 都要对）。M4 加上 M5 到 71%（标准库 88%）
 3. **M8 推导式等**。放在最后，做完 M4、M5 之后它把剩下的大部分补上（92%，标准库 94%）。其中 list/dict/set 推导式和容器字面量里的 `*`/`**` 实现成本低，可以在 M5 进行中穿插；生成器表达式只做作为 `any`/`all`/`sum`/`join` 等参数的情况，其余走混合模式
 4. 顺带：模块级的条件定义（`if` 里的 `def`，标准库里 74 个函数）。M3d 之后 `if` 本身已经是原生代码，只有 `def` 保留为 Python。以后可以把条件里的每个 `def` 原生转换成不同名字的 Rust 函数，代价不大，可以放进 M5 或 M8
+
+## M8 的变化
+
+M8 支持了 list/set/dict 推导式、生成器表达式（只有一个 `for` 的，真正惰性）和 `:=`（design.md §8），顺带把模块级复合语句里的 `def` 也转换成原生代码。
+
+| | 函数 | 顶层语句 | 行数 |
+|---|---|---|---|
+| 6 个工具，M5 | 120/164（73.2%） | 167/169（98.8%） | 2202/2992（73.6%） |
+| 6 个工具，M8 | 153/164（93.3%） | 167/169（98.8%） | 2858/2992（95.5%） |
+| 标准库，M5 | 5816/6466（89.9%） | 3447/3517（98.0%） | 102419/122951（83.3%） |
+| 标准库，M8 | 6231/6466（96.4%） | 3487/3517（99.1%） | 114724/122951（93.3%） |
+
+M8 之后各个工具的函数：`stdlib_calendar` 66/72，`stdlib_base64` 28/28，`stdlib_tabnanny` 17/17，`stdlib_tokenize` 20/22，`stdlib_ast` 20/23，`stdlib_json_tool` 2/2。6 个工具里剩下的 11 个保留函数全是 generator，两条保留的顶层语句是 `import *`。33 组命令行的输出仍然全部与 CPython 一致，标准库 154 个模块转换后 `cargo check` 仍然没有错误和警告。另外 31 个不带参数就能当脚本运行、输出确定的标准库模块（`argparse`、`ast`、`dis`、`doctest`、`heapq`、`inspect`、`pickle`、`tarfile`、`tokenize`、`typing` 等）转换后的输出和 CPython 完全一样。
+
+现在挡住函数的特性：
+
+| 特性 | 6 个工具 functions | only | 标准库 functions | only |
+|---|---|---|---|---|
+| yield | 10 | 9 | 121 | 102 |
+| async function | 0 | 0 | 29 | 10 |
+| yield from | 2 | 1 | 28 | 12 |
+| unpacking in a display | 0 | 0 | 26 | 25 |
+| match statement | 0 | 0 | 17 | 15 |
+| await | 0 | 0 | 12 | 0 |
+| class definition in a function | 0 | 0 | 9 | 9 |
+| star import | 0 | 0 | 8 | 2 |
+| except-as name used outside its handler | 0 | 0 | 6 | 6 |
+| type parameters | 0 | 0 | 5 | 5 |
+| eval() without a namespace in a function | 0 | 0 | 4 | 4 |
+| generator expression with several for clauses | 0 | 0 | 3 | 3 |
+| locals() in a function | 0 | 0 | 3 | 3 |
+| call with more than 12 arguments | 0 | 0 | 2 | 2 |
+| exec() without a namespace in a function | 0 | 0 | 1 | 1 |
+
+只被 `yield` 或 `yield from` 挡住的函数，标准库里 129 个，6 个工具里 11 个，可行性分析见 design.md §8 的"generator 函数"，结论是暂时保留为 Python。剩下的最便宜的是容器字面量里的 `*`/`**` 展开（只被它挡住的 25 个函数，M5 之后是 16 个，多出来的函数原来同时被推导式挡住）。`except-as name used outside its handler`、`eval()`/`locals()` 这几项是 lowering 时才发现的（design.md §13），以前所在的函数先被推导式挡住，到不了 lowering，所以数字比 M5 时多。

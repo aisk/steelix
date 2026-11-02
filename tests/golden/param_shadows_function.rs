@@ -1,9 +1,5 @@
-//! Parts of `param_shadows_function.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 16, `expr` statement: list comprehension
-
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use steelix_runtime as rt;
 
 // A parameter named like its own function, as in `timeit.repeat(repeat=...)`.
@@ -54,14 +50,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 outer(m, &rt::int(py, 0))?,
             ),
         )?;
-        // param_shadows_function.py:16, kept as Python: list comprehension at 16:7
-        rt::exec_python!(
-            m,
-            line = 16,
-            r#"
-print([repeat("x", n) for n in range(3)])
-"#
-        )?;
+        frame.line(16);
+        let list = PyList::empty(py);
+        for n in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+            let n = n?;
+            list.append(repeat(m, &rt::str(py, "x"), &n)?)?;
+            py.check_signals()?;
+        }
+        rt::builtins::print(py, (&list,))?;
         Ok(())
     })
 }

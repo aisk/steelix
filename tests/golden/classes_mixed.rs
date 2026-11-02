@@ -1,25 +1,26 @@
 //! Parts of `classes_mixed.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 16, `assign` statement: list comprehension
-//! - line 22, `def kept_greet`: list comprehension
-//! - line 26, `def kept_static`: generator expression
-//! - line 30, `def __private`: list comprehension
+//! - line 16, `assign` statement: unpacking in a display
+//! - line 22, `def kept_greet`: unpacking in a display
+//! - line 26, `def kept_static`: unpacking in a display
+//! - line 30, `def __private`: unpacking in a display
 //! - line 36, `def kept_async`: async function
-//! - line 42, `assign` statement: dict comprehension
-//! - line 44, `def failing`: list comprehension
-//! - line 54, `expr` statement: generator expression
-//! - line 63, `def greet`: list comprehension
-//! - line 77, `def kept`: list comprehension
-//! - line 83, `def kept_hidden`: list comprehension
+//! - line 42, `assign` statement: unpacking in a display
+//! - line 44, `def failing`: unpacking in a display
+//! - line 63, `def greet`: unpacking in a display
+//! - line 77, `def kept`: unpacking in a display
+//! - line 83, `def kept_hidden`: unpacking in a display
 //! - line 90, `def decorate`: class definition in a function
-//! - line 100, `def kept`: list comprehension
+//! - line 100, `def kept`: unpacking in a display
 //! - line 107, `class WholeKept`: annotation in a compound statement of a class body
-//! - line 114, `try` statement: list comprehension
 
 use pyo3::exceptions::PyStopIteration;
+use pyo3::exceptions::PyZeroDivisionError;
 use pyo3::prelude::*;
+use pyo3::types::PyIterator;
 use pyo3::types::PyList;
+use pyo3::types::PyTuple;
 use steelix_runtime as rt;
 
 pub mod base {
@@ -67,12 +68,12 @@ pub mod mixed {
             let __class__ = ns.class_cell();
             frame.line(15);
             ns.set("native_before", 1)?;
-            // classes_mixed.py:16, kept as Python: list comprehension at 16:15
+            // classes_mixed.py:16, kept as Python: unpacking in a display at 16:16
             rt::exec_python!(
                 ns,
                 line = 16,
                 r#"
-    squares = [i * i for i in range(4)]
+    squares = [*(i * i for i in range(4))]
 "#
             )?;
             frame.line(17);
@@ -86,33 +87,33 @@ pub mod mixed {
                     qualname = "Mixed.greet"
                 )?,
             )?;
-            // classes_mixed.py:22, kept as Python: list comprehension at 23:18
+            // classes_mixed.py:22, kept as Python: unpacking in a display at 23:19
             rt::exec_python!(
                 ns,
                 line = 22,
                 r#"
     def kept_greet(self):
-        values = [x for x in super().items()]
+        values = [*super().items()]
         return f"kept:{super().greet()}:{values}:{__class__.__name__}"
 "#
             )?;
-            // classes_mixed.py:26, kept as Python: generator expression at 28:19
+            // classes_mixed.py:26, kept as Python: unpacking in a display at 28:21
             rt::exec_python!(
                 ns,
                 line = 26,
                 r#"
     @staticmethod
     def kept_static(n):
-        return sum(i for i in range(n))
+        return sum([*range(n)])
 "#
             )?;
-            // classes_mixed.py:30, kept as Python: list comprehension at 31:16
+            // classes_mixed.py:30, kept as Python: unpacking in a display at 31:17
             rt::exec_python!(
                 ns,
                 line = 30,
                 r#"
     def __private(self):
-        return [p for p in ("private",)][0]
+        return [*("private",)][0]
 "#
             )?;
             frame.line(33);
@@ -142,21 +143,21 @@ pub mod mixed {
                     qualname = "Mixed.uses_kept"
                 )?,
             )?;
-            // classes_mixed.py:42, kept as Python: dict comprehension at 42:14
+            // classes_mixed.py:42, kept as Python: unpacking in a display at 42:17
             rt::exec_python!(
                 ns,
                 line = 42,
                 r#"
-    lookup = {k: v for k, v in [("a", 1)]}
+    lookup = {**dict([("a", 1)])}
 "#
             )?;
-            // classes_mixed.py:44, kept as Python: list comprehension at 45:16
+            // classes_mixed.py:44, kept as Python: unpacking in a display at 45:17
             rt::exec_python!(
                 ns,
                 line = 44,
                 r#"
     def failing(self):
-        return [1 / 0 for _ in range(1)]
+        return [*(1 / 0 for _ in range(1))]
 "#
             )?;
             Ok(())
@@ -207,13 +208,13 @@ pub mod kept_sub {
     /// The body of `class KeptSub`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "KeptSub", 62, |_| {
-            // classes_mixed.py:63, kept as Python: list comprehension at 64:16
+            // classes_mixed.py:63, kept as Python: unpacking in a display at 64:17
             rt::exec_python!(
                 ns,
                 line = 63,
                 r#"
     def greet(self):
-        return [g for g in ["sub:" + super().greet()]][0]
+        return [*["sub:" + super().greet()]][0]
 "#
             )?;
             Ok(())
@@ -284,13 +285,13 @@ pub mod outer {
         /// The body of `class Outer.Inner`, run in its namespace `ns`.
         pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
             rt::frame!(ns, "Outer.Inner", 76, |frame| {
-                // classes_mixed.py:77, kept as Python: list comprehension at 78:20
+                // classes_mixed.py:77, kept as Python: unpacking in a display at 78:21
                 rt::exec_python!(
                     ns,
                     line = 77,
                     r#"
         def kept(self):
-            return [type(self).__qualname__ for _ in "x"][0] + ":" + __class__.__qualname__
+            return [*[type(self).__qualname__]][0] + ":" + __class__.__qualname__
 "#
                 )?;
                 frame.line(80);
@@ -302,13 +303,13 @@ pub mod outer {
                         qualname = "Outer.Inner.__hidden"
                     )?,
                 )?;
-                // classes_mixed.py:83, kept as Python: list comprehension at 84:20
+                // classes_mixed.py:83, kept as Python: unpacking in a display at 84:21
                 rt::exec_python!(
                     ns,
                     line = 83,
                     r#"
         def kept_hidden(self):
-            return [self.__hidden() for _ in "x"][0]
+            return [*[self.__hidden()]][0]
 "#
                 )?;
                 Ok(())
@@ -332,13 +333,13 @@ pub mod decorated {
     /// The body of `class Decorated`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Decorated", 98, |_| {
-            // classes_mixed.py:100, kept as Python: list comprehension at 101:16
+            // classes_mixed.py:100, kept as Python: unpacking in a display at 101:17
             rt::exec_python!(
                 ns,
                 line = 100,
                 r#"
     def kept(self):
-        return [super().__repr__()[:9] for _ in "x"][0] + ":" + __class__.__name__
+        return [*[super().__repr__()[:9]]][0] + ":" + __class__.__name__
 "#
             )?;
             Ok(())
@@ -414,13 +415,29 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Mixed")?.getattr("__module__")?,
             ),
         )?;
-        // classes_mixed.py:54, kept as Python: generator expression at 54:13
-        rt::exec_python!(
-            m,
-            line = 54,
-            r#"
-print(sorted(k for k in Mixed.__dict__ if not k.startswith("__")))
-"#
+        // classes_mixed.py:54
+        fn genexpr<'py>(
+            m: &rt::Module<'py>,
+            __dict__: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "<genexpr>", 54, |_| {
+                for k in __dict__ {
+                    let k = k?;
+                    if !k.call_method1("startswith", ("__",))?.is_truthy()? {
+                        return Ok(Some(k.clone()));
+                    }
+                    m.py().check_signals()?;
+                }
+                Ok(None)
+            })
+        }
+        frame.line(54);
+        rt::builtins::print(
+            py,
+            (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
+                m,
+                genexpr(m.global("Mixed")?.getattr("__dict__")?.try_iter()?)
+            )?,))?,),
         )?;
         frame.line(55);
         m.set_global("coro", m.global("m")?.call_method0("kept_async")?)?;
@@ -531,20 +548,41 @@ class WholeKept:
                 m.global("WholeKept")?.getattr("__annotations__")?,
             ),
         )?;
-        // classes_mixed.py:114, kept as Python: list comprehension at 120:11
-        rt::exec_python!(
-            m,
-            line = 114,
-            r#"
-try:
-    m.failing()
-except ZeroDivisionError as err:
-    import traceback
-
-    tb = traceback.extract_tb(err.__traceback__)
-    print([(f.name, f.lineno, f.line) for f in tb])
-"#
-        )?;
+        frame.line(115);
+        match (|| m.global("m")?.call_method0("failing"))() {
+            Ok(_) => {}
+            Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
+                let exception = frame.catch(err);
+                m.set_global("err", &exception)?;
+                let _handling = rt::Handling::new(&exception);
+                frame.line(117);
+                m.set_global("traceback", rt::import(m, "traceback")?)?;
+                frame.line(119);
+                m.set_global(
+                    "tb",
+                    m.global("traceback")?
+                        .getattr("extract_tb")?
+                        .call1((m.global("err")?.getattr("__traceback__")?,))?,
+                )?;
+                frame.line(120);
+                let list = PyList::empty(py);
+                for f in m.global("tb")?.try_iter()? {
+                    let f = f?;
+                    list.append(PyTuple::new(
+                        py,
+                        [
+                            &f.getattr("name")?,
+                            &f.getattr("lineno")?,
+                            &f.getattr("line")?,
+                        ],
+                    )?)?;
+                    py.check_signals()?;
+                }
+                rt::builtins::print(py, (&list,))?;
+                m.unbind_global("err")?;
+            }
+            Err(err) => return Err(err),
+        }
         Ok(())
     })
 }

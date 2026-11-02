@@ -31,6 +31,7 @@ from enum import Enum
 from steelix.frontend.bindings import is_immutable_constant
 from steelix.frontend.resolve import Direct, Lookup, resolve_call, resolve_global
 from steelix.frontend.scope import FunctionNode, default_of, params_of
+from steelix.lower.comprehension import ComprehensionLowering, ComprehensionVariable
 from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.names import rust_ident
 from steelix.rustast import nodes as rs
@@ -252,11 +253,18 @@ def negate(cond: rs.Expr) -> rs.Expr:
 Operand = ast.expr | Callable[[], Value]
 
 
-class ExprLowering:
+class ExprLowering(ComprehensionLowering):
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
         self.prelude: list[rs.Stmt] = []
         """Statements that must run before the expression being lowered."""
+        self.line: int | None = None
+        """The traceback line of the frame where the expression is evaluated,
+        if known (`ComprehensionLowering.at_line`)."""
+        self.markers = 0
+        """Number of `frame.line(n)` emitted so far."""
+        self.comprehensions: list[dict[str, ComprehensionVariable]] = []
+        """The variables of the comprehensions being lowered, innermost last."""
 
     def py(self) -> rs.Path:
         return rs.Path(self.ctx.py())
@@ -298,7 +306,11 @@ class ExprLowering:
         if value.is_pure:
             return value
         name = self.ctx.temp(value.base or role)
-        stmt = rs.Let(name, init=value.expr)
+        init = value.expr
+        if value.kind is Kind.PLACE:
+            # A local that `:=` may assign before the value is used.
+            init = rs.MethodCall(init, "clone")
+        stmt = rs.Let(name, init=init)
         if at is None:
             self.prelude.append(stmt)
         else:
@@ -415,6 +427,12 @@ class ExprLowering:
                 return self.dict(keys, values)  # type: ignore[arg-type]
             case ast.JoinedStr(values):
                 return self.fstring(values)
+            case ast.ListComp() | ast.SetComp() | ast.DictComp():
+                return self.comprehension(expr)
+            case ast.GeneratorExp():
+                return self.generator_expression(expr)
+            case ast.NamedExpr():
+                return self.named_expr(expr)
         raise self.ctx.unsupported(type(expr).__name__, expr)
 
     def bool_value(self, expr: rs.Expr, pure: bool | None = None) -> Value:
@@ -498,8 +516,17 @@ class ExprLowering:
     # --- names ---
 
     def name(self, name: str, node: ast.expr) -> Value:
+        var = self.comprehension_variable(name)
+        if var is not None:
+            if var.cell:
+                return Value(_try(rs.MethodCall(rs.Path(var.rust), "get")), Kind.OWNED)
+            return Value(rs.Path(var.rust), Kind.PLACE)
         fn = self.ctx.function
         if fn is None and self.ctx.class_body is not None:
+            if self.comprehensions:
+                # A comprehension in a class body does not see the class
+                # namespace (only its first iterable does, evaluated outside).
+                return self.global_name(name)
             # `LOAD_NAME`: the class namespace, then globals and builtins.
             get = rs.MethodCall(rs.Path(NAMESPACE), "get", (rs.StrLit(name),))
             return Value(_try(get), Kind.OWNED)
@@ -517,7 +544,9 @@ class ExprLowering:
             if name in fn.scope.params and name not in fn.locals.assigned_params:
                 typed = {fn.varargs: "PyTuple", fn.varkw: "PyDict"}.get(name)
                 return Value(rs.Path(rust), Kind.REF, typed=typed)
-            return Value(rs.Path(rust), Kind.PLACE)
+            # A later `:=` in the same expression may assign it.
+            pure = False if name in fn.walrus_targets else None
+            return Value(rs.Path(rust), Kind.PLACE, pure=pure)
         return self.global_name(name)
 
     def global_name(self, name: str) -> Value:
@@ -852,9 +881,11 @@ class ExprLowering:
 
     def is_global(self, name: str) -> bool:
         """Whether `name` is looked up in the module globals (and builtins)."""
+        if self.comprehension_variable(name) is not None:
+            return False
         fn = self.ctx.function
         if fn is None:
-            return self.ctx.class_body is None
+            return self.ctx.class_body is None or bool(self.comprehensions)
         return fn.scope.is_global(name)
 
     def global_call(self, name: str, node: ast.Call, plain: bool) -> Value | None:
@@ -864,6 +895,10 @@ class ExprLowering:
         if name == "super" and not args and not node.keywords:
             if not bindings.is_module_bound(name):
                 return self.zero_arg_super(node)
+        if self.comprehensions and _reads_frame(name, node, bindings.is_module_bound(name)):
+            # In a comprehension the calling frame has the comprehension's
+            # variables as locals too.
+            raise self.ctx.unsupported(f"{name}() in a comprehension", node)
         if not bindings.is_module_bound(name) and not args and not node.keywords:
             # At module level the local namespace is the globals dict.
             namespace_name = name == "globals" or (
@@ -1046,7 +1081,8 @@ class ExprLowering:
         args = node.args
         defaults = [*args.defaults, *(d for d in args.kw_defaults if d is not None)]
         default_exprs = [v.arg() for v in self.operands(list(defaults))]
-        signature = signature_text(self.ctx, scope, rust, default_exprs)
+        names = self.comprehension_names()
+        signature = signature_text(self.ctx, scope, rust, default_exprs, names)
         options = function_options(self.ctx, scope, rust)
         definer = self.module()
         if (
@@ -1072,6 +1108,17 @@ class ExprLowering:
 
 _FRAME_BUILTINS = frozenset({"locals", "vars", "dir", "exec", "eval", "globals", "super"})
 """Builtins that use the namespace of the calling frame when called without one."""
+
+
+def _reads_frame(name: str, node: ast.Call, shadowed: bool) -> bool:
+    """`locals()`, `vars()`, `dir()`, or `exec` and `eval` without a namespace."""
+    if shadowed:
+        return False
+    if name in ("locals", "vars", "dir"):
+        return not node.args and not node.keywords
+    if name in ("exec", "eval"):
+        return len(node.args) + len(node.keywords) < 2
+    return False
 
 
 def keyword_arg(name: str) -> str:

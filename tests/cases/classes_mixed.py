@@ -13,22 +13,22 @@ class Base:
 
 class Mixed(Base):
     native_before = 1
-    squares = [i * i for i in range(4)]
+    squares = [*(i * i for i in range(4))]
     native_after = squares[-1]
 
     def greet(self):
         return "native:" + super().greet()
 
     def kept_greet(self):
-        values = [x for x in super().items()]
+        values = [*super().items()]
         return f"kept:{super().greet()}:{values}:{__class__.__name__}"
 
     @staticmethod
     def kept_static(n):
-        return sum(i for i in range(n))
+        return sum([*range(n)])
 
     def __private(self):
-        return [p for p in ("private",)][0]
+        return [*("private",)][0]
 
     def call_private(self):
         return self.__private()
@@ -39,10 +39,10 @@ class Mixed(Base):
     def uses_kept(self):
         return self.kept_greet() + "|" + str(self.kept_static(4))
 
-    lookup = {k: v for k, v in [("a", 1)]}
+    lookup = {**dict([("a", 1)])}
 
     def failing(self):
-        return [1 / 0 for _ in range(1)]
+        return [*(1 / 0 for _ in range(1))]
 
 
 m = Mixed()
@@ -61,7 +61,7 @@ except StopIteration as stop:
 
 class KeptSub(Mixed):
     def greet(self):
-        return [g for g in ["sub:" + super().greet()]][0]
+        return [*["sub:" + super().greet()]][0]
 
 
 class NativeSub(KeptSub):
@@ -75,13 +75,13 @@ print(NativeSub().greet(), isinstance(NativeSub(), Mixed), issubclass(KeptSub, B
 class Outer:
     class Inner:
         def kept(self):
-            return [type(self).__qualname__ for _ in "x"][0] + ":" + __class__.__qualname__
+            return [*[type(self).__qualname__]][0] + ":" + __class__.__qualname__
 
         def __hidden(self):
             return "hidden"
 
         def kept_hidden(self):
-            return [self.__hidden() for _ in "x"][0]
+            return [*[self.__hidden()]][0]
 
 
 print(Outer.Inner().kept(), Outer.Inner().kept_hidden(), Outer.Inner.kept.__qualname__)
@@ -98,7 +98,7 @@ def decorate(cls):
 @decorate
 class Decorated:
     def kept(self):
-        return [super().__repr__()[:9] for _ in "x"][0] + ":" + __class__.__name__
+        return [*[super().__repr__()[:9]]][0] + ":" + __class__.__name__
 
 
 print(Decorated().kept(), Decorated.__mro__[1]().kept())

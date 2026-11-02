@@ -1,10 +1,7 @@
 //! Parts of `classes_build.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 44, `def __prepare__`: list comprehension
 //! - line 137, `def errors`: class definition in a function
-//! - line 240, `def __new__`: dict comprehension
-//! - line 264, `def fake_meta`: generator expression
 //! - line 310, `def replaced`: class definition in a function
 
 use pyo3::exceptions::PyRuntimeError;
@@ -13,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::IntoPyDict;
 use pyo3::types::PyDict;
+use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
@@ -57,6 +55,51 @@ pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bou
         }
         let apply = rt::function!(m, apply[label](cls), qualname = "deco.<locals>.apply")?;
         Ok(apply)
+    })
+}
+
+// classes_build.py:264
+pub fn fake_meta<'py>(
+    m: &rt::Module<'py>,
+    name: &Bound<'py, PyAny>,
+    bases: &Bound<'py, PyAny>,
+    ns: &Bound<'py, PyAny>,
+    kwargs: &Bound<'py, PyDict>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "fake_meta", 264, |frame| {
+        // classes_build.py:265
+        fn genexpr<'py>(
+            m: &rt::Module<'py>,
+            ns: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "fake_meta.<locals>.<genexpr>", 265, |_| {
+                for k in ns {
+                    let k = k?;
+                    if !k.call_method1("startswith", ("__",))?.is_truthy()? {
+                        return Ok(Some(k.clone()));
+                    }
+                    m.py().check_signals()?;
+                }
+                Ok(None)
+            })
+        }
+        frame.line(265);
+        rt::builtins::print(
+            py,
+            (
+                "fake_meta",
+                name,
+                bases,
+                rt::builtin(py, "sorted")?.call1((rt::genexpr!(
+                    m,
+                    genexpr(ns.try_iter()?),
+                    qualname = "fake_meta.<locals>.<genexpr>"
+                )?,))?,
+                kwargs,
+            ),
+        )?;
+        Ok(rt::int(py, 42))
     })
 }
 
@@ -144,17 +187,14 @@ pub mod meta {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Meta", 43, |frame| {
             let __class__ = ns.class_cell();
-            // classes_build.py:44, kept as Python: list comprehension at 46:32
-            rt::exec_python!(
+            frame.line(45);
+            let decorator = ns.get("classmethod")?;
+            let function = rt::function!(
                 ns,
-                line = 44,
-                r#"
-    @classmethod
-    def __prepare__(mcls, name, bases, **kwargs):
-        print("prepare", name, [b.__name__ for b in bases], kwargs)
-        return Logged()
-"#
+                __prepare__(mcls, name, bases, **kwargs),
+                qualname = "Meta.__prepare__"
             )?;
+            ns.set("__prepare__", decorator.call1((&function,))?)?;
             frame.line(49);
             ns.set(
                 "__new__",
@@ -174,6 +214,29 @@ pub mod meta {
                 )?,
             )?;
             Ok(())
+        })
+    }
+
+    // classes_build.py:45
+    pub fn __prepare__<'py>(
+        m: &rt::Module<'py>,
+        mcls: &Bound<'py, PyAny>,
+        name: &Bound<'py, PyAny>,
+        bases: &Bound<'py, PyAny>,
+        kwargs: &Bound<'py, PyDict>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Meta.__prepare__", 44, |frame| {
+            frame.line(46);
+            let list = PyList::empty(py);
+            for b in bases.try_iter()? {
+                let b = b?;
+                list.append(b.getattr("__name__")?)?;
+                py.check_signals()?;
+            }
+            rt::builtins::print(py, ("prepare", name, &list, kwargs))?;
+            frame.line(47);
+            m.global("Logged")?.call0()
         })
     }
 
@@ -741,18 +804,45 @@ pub mod drop_cell {
     // classes_build.py:239
     /// The body of `class DropCell`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "DropCell", 239, |_| {
-            // classes_build.py:240, kept as Python: dict comprehension at 241:14
-            rt::exec_python!(
-                ns,
-                line = 240,
-                r#"
-    def __new__(mcls, name, bases, ns):
-        ns = {k: v for k, v in ns.items() if k != "__classcell__"}
-        return super().__new__(mcls, name, bases, ns)
-"#
+        rt::frame!(ns, "DropCell", 239, |frame| {
+            let __class__ = ns.class_cell();
+            frame.line(240);
+            ns.set(
+                "__new__",
+                rt::function!(
+                    ns,
+                    __new__[&__class__](mcls, name, bases, ns),
+                    qualname = "DropCell.__new__"
+                )?,
             )?;
             Ok(())
+        })
+    }
+
+    // classes_build.py:240
+    pub fn __new__<'py>(
+        m: &rt::Module<'py>,
+        __class__: &rt::Cell<'py>,
+        mcls: &Bound<'py, PyAny>,
+        name: &Bound<'py, PyAny>,
+        bases: &Bound<'py, PyAny>,
+        ns: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "DropCell.__new__", 240, |frame| {
+            let mut ns = ns.clone();
+            frame.line(241);
+            let dict = PyDict::new(py);
+            for item in ns.call_method0("items")?.try_iter()? {
+                let [k, v] = rt::unpack(&item?)?;
+                if k.ne("__classcell__")? {
+                    dict.set_item(&k, &v)?;
+                }
+                py.check_signals()?;
+            }
+            ns = dict.into_any();
+            frame.line(242);
+            rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, &ns))
         })
     }
 }
@@ -1376,16 +1466,7 @@ def errors():
             }
             Err(err) => return Err(err),
         }
-        // classes_build.py:264, kept as Python: generator expression at 265:43
-        rt::exec_python!(
-            m,
-            line = 264,
-            r#"
-def fake_meta(name, bases, ns, **kwargs):
-    print("fake_meta", name, bases, sorted(k for k in ns if not k.startswith("__")), kwargs)
-    return 42
-"#
-        )?;
+        rt::def!(m, fake_meta(name, bases, ns, **kwargs))?;
         frame.line(269);
         m.set_global(
             "NotAClass",

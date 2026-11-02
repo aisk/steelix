@@ -9,7 +9,8 @@ def double(x):
 
 if len(sys.argv) > 5:
     mode = "many"
-    # A conditional definition is kept as Python, the `if` is native.
+    labels = [*"many"]  # kept as Python, the `if` is native
+
     def describe(n):
         return f"{n} (many)"
 else:
@@ -24,7 +25,7 @@ for i in range(4):
     if i == 1:
         continue
     print(describe(double(i)))
-    squares = [j * j for j in range(i)]  # kept as Python
+    squares = [*range(i)]  # kept as Python
     print("squares", squares)
 
 # `break` in a kept statement: the loop is kept whole.
@@ -59,5 +60,5 @@ if __name__ == "__main__":
         label = "local class"
 
     print(Local.label, Point(double(3)).x)
-    total = sum(i for i in range(5))
+    total = sum([*range(5)])
     print("total", total)

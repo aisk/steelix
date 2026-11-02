@@ -516,6 +516,7 @@ class HandlingLowering:
         `index`, the call, and the line it is called on."""
         item = stmt.items[index]
         line = item.context_expr.lineno
+        self.exprs.line = line
         with self.exprs.fresh() as prelude:
             manager = self.exprs.value(item.context_expr)
             manager_ref = manager.ref()

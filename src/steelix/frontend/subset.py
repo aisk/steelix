@@ -13,6 +13,7 @@ import ast
 from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
+from steelix.frontend.scope import comprehension_variables
 
 # Human readable names for the error message, by AST node type.
 _FEATURES: dict[type[ast.AST], str] = {
@@ -24,13 +25,8 @@ _FEATURES: dict[type[ast.AST], str] = {
     ast.AsyncFunctionDef: "async function",
     ast.Match: "match statement",
     ast.TypeAlias: "type alias",
-    ast.NamedExpr: "assignment expression",
     ast.Slice: "slice outside a subscript",
     ast.Starred: "starred expression",
-    ast.ListComp: "list comprehension",
-    ast.SetComp: "set comprehension",
-    ast.DictComp: "dict comprehension",
-    ast.GeneratorExp: "generator expression",
     ast.Await: "await",
     ast.Yield: "yield",
     ast.YieldFrom: "yield from",
@@ -231,10 +227,7 @@ class SubsetChecker:
             case ast.AnnAssign() if self.depth == 0:
                 self.fail("annotated assignment at module level", stmt)
                 self.descend(stmt)
-            case ast.FunctionDef() if self.depth > 0:
-                self.check_def(stmt)
             case ast.FunctionDef():
-                self.fail("function definition outside module top level", stmt)
                 self.check_def(stmt)
             case ast.AsyncFunctionDef():
                 self.fail("async function", stmt)
@@ -351,8 +344,82 @@ class SubsetChecker:
                         self.check_expr(value.value)
                         if value.format_spec is not None:
                             self.check_expr(value.format_spec)
+            case ast.NamedExpr(_, value):
+                self.check_expr(value)
+            case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
+                self.check_comprehension(expr)
             case _:
                 self.unsupported(expr)
+
+    def check_comprehension(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+    ) -> None:
+        """Comprehensions and generator expressions (design §8). A generator
+        expression is lowered as a single `for` loop resumed by each
+        `next()`, so it has one `for` clause, and nothing may capture its
+        variables (they would have to be cells living as long as the
+        generator)."""
+        generator_exp = isinstance(node, ast.GeneratorExp)
+        if any(g.is_async for g in node.generators):
+            self.fail("asynchronous comprehension", node)
+        if generator_exp and len(node.generators) > 1:
+            self.fail("generator expression with several for clauses", node)
+        variables = comprehension_variables(node)
+        if generator_exp and _captured(node, variables):
+            self.fail("generator expression variable captured by a nested function", node)
+        if _used_before_bound(node):
+            self.fail("comprehension variable used before it is bound", node)
+        for generator in node.generators:
+            self.check_target(generator.target)
+            self.check_expr(generator.iter)
+            for test in generator.ifs:
+                self.check_expr(test)
+        if isinstance(node, ast.DictComp):
+            self.check_expr(node.key)
+            self.check_expr(node.value)
+        else:
+            self.check_expr(node.elt)
+
+
+def _captured(node: ast.GeneratorExp, variables: frozenset[str]) -> bool:
+    """Whether a function, lambda or generator expression nested in `node`
+    refers to one of its `variables` (in its body: defaults and the first
+    iterable of a generator expression are evaluated in `node`)."""
+    for child in ast.walk(node):
+        match child:
+            case ast.FunctionDef(body=body) | ast.Lambda(body=body):
+                inner = body if isinstance(body, list) else [body]
+            case ast.GeneratorExp(generators=generators) if child is not node:
+                first, *rest = generators
+                inner = [first.target, *first.ifs, *rest, child.elt]
+            case _:
+                continue
+        for part in inner:
+            for name in ast.walk(part):
+                if isinstance(name, ast.Name) and name.id in variables:
+                    return True
+    return False
+
+
+def _used_before_bound(node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp) -> bool:
+    """Whether a variable of the comprehension is read before the `for`
+    clause binding it (`[y for x in xs for y in f(y)]`), which raises
+    `UnboundLocalError` in CPython. The lowering binds each variable at its
+    `for` clause and would read an outer variable instead."""
+    variables = comprehension_variables(node)
+    bound: set[str] = set()
+    for index, generator in enumerate(node.generators):
+        if index:
+            if _reads(generator.iter, variables - bound):
+                return True
+        bound |= {n.id for n in ast.walk(generator.target) if isinstance(n, ast.Name)}
+        if any(_reads(test, variables - bound) for test in generator.ifs):
+            return True
+    return False
+
+
+def _reads(node: ast.expr, names: set[str] | frozenset[str]) -> bool:
+    return any(isinstance(n, ast.Name) and n.id in names for n in ast.walk(node))
 
 
 def find_unsupported(module: ast.Module, filename: str) -> dict[ast.stmt, list[Issue]]:

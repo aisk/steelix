@@ -1,11 +1,7 @@
-//! Parts of `classes_mangling.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 41, `def names`: list comprehension
-//! - line 67, `expr` statement: generator expression
-
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
+use pyo3::types::PyIterator;
+use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
 
@@ -84,15 +80,10 @@ pub mod account {
                     qualname = "Account.handler"
                 )?,
             )?;
-            // classes_mangling.py:41, kept as Python: list comprehension at 43:16
-            rt::exec_python!(
-                ns,
-                line = 41,
-                r#"
-    def names(self):
-        __local = 1
-        return [n for n in dir(self) if "secret" in n or "owner" in n] + [__local]
-"#
+            frame.line(41);
+            ns.set(
+                "names",
+                rt::function!(ns, names(slf as "self"), qualname = "Account.names")?,
             )?;
             Ok(())
         })
@@ -223,6 +214,24 @@ pub mod account {
                 }
                 Err(err) => return Err(err),
             }
+        })
+    }
+
+    // classes_mangling.py:41
+    pub fn names<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let py = m.py();
+        rt::frame!(m, "Account.names", 41, |frame| {
+            let _Account__local = rt::int(py, 1);
+            frame.line(43);
+            let list = PyList::empty(py);
+            for n in rt::builtin(py, "dir")?.call1((slf,))?.try_iter()? {
+                let n = n?;
+                if n.contains("secret")? || n.contains("owner")? {
+                    list.append(&n)?;
+                }
+                py.check_signals()?;
+            }
+            list.add(PyList::new(py, [&_Account__local])?)
         })
     }
 }
@@ -358,13 +367,33 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Account")?.getattr("__static_attributes__")?,
             ),
         )?;
-        // classes_mangling.py:67, kept as Python: generator expression at 67:44
-        rt::exec_python!(
-            m,
-            line = 67,
-            r#"
-print(_Under().call(), ___().call(), sorted(k for k in ___.__dict__ if "y" in k))
-"#
+        // classes_mangling.py:67
+        fn genexpr<'py>(
+            m: &rt::Module<'py>,
+            __dict__: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "<genexpr>", 67, |_| {
+                for k in __dict__ {
+                    let k = k?;
+                    if k.contains("y")? {
+                        return Ok(Some(k.clone()));
+                    }
+                    m.py().check_signals()?;
+                }
+                Ok(None)
+            })
+        }
+        frame.line(67);
+        rt::builtins::print(
+            py,
+            (
+                m.global("_Under")?.call0()?.call_method0("call")?,
+                m.global("___")?.call0()?.call_method0("call")?,
+                rt::builtin(py, "sorted")?.call1((rt::genexpr!(
+                    m,
+                    genexpr(m.global("___")?.getattr("__dict__")?.try_iter()?)
+                )?,))?,
+            ),
         )?;
         frame.line(68);
         rt::builtins::print(py, (m.global("Account")?.getattr("_Account__slots_like")?,))?;

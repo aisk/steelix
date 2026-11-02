@@ -2,18 +2,16 @@
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 35, `def evens`: yield
-//! - line 48, `assign` statement: list comprehension
-//! - line 62, `def pick`: function definition outside module top level
-//! - line 65, `def pick`: function definition outside module top level
+//! - line 48, `assign` statement: unpacking in a display
 //! - line 74, `def twice`: function redefinition
-//! - line 87, `assign` statement: dict comprehension
+//! - line 87, `assign` statement: unpacking in a display
 //! - line 96, `def chunks`: yield from
-//! - line 105, `expr` statement: list comprehension, assignment expression
 
 use pyo3::exceptions::PyImportError;
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
+use pyo3::types::PyTuple;
 use steelix_runtime as rt;
 
 // mixed_mode.py:9
@@ -182,12 +180,12 @@ def evens(limit):
         rt::def!(m, use_counter(start))?;
         frame.line(47);
         log(m, &rt::str(py, "native statement after the class"))?;
-        // mixed_mode.py:48, kept as Python: list comprehension at 48:11
+        // mixed_mode.py:48, kept as Python: unpacking in a display at 48:12
         rt::exec_python!(
             m,
             line = 48,
             r#"
-squares = [double(n) for n in range(4)]
+squares = [*map(double, range(4))]
 "#
         )?;
         frame.line(49);
@@ -253,25 +251,19 @@ squares = [double(n) for n in range(4)]
         m.set_global("FLAG", true)?;
         frame.line(61);
         if m.global("FLAG")?.is_truthy()? {
-            // mixed_mode.py:62, kept as Python: function definition outside module top level at 62:5
-            rt::exec_python!(
-                m,
-                line = 62,
-                r#"
-    def pick():
-        return "first"
-"#
-            )?;
+            // mixed_mode.py:62
+            fn pick<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+                Ok(rt::str(m.py(), "first"))
+            }
+            frame.line(62);
+            m.set_global("pick", rt::function!(m, pick())?)?;
         } else {
-            // mixed_mode.py:65, kept as Python: function definition outside module top level at 65:5
-            rt::exec_python!(
-                m,
-                line = 65,
-                r#"
-    def pick():
-        return "second"
-"#
-            )?;
+            // mixed_mode.py:65
+            fn pick_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+                Ok(rt::str(m.py(), "second"))
+            }
+            frame.line(65);
+            m.set_global("pick", rt::function!(m, pick_(), name = "pick")?)?;
         }
         frame.line(67);
         rt::builtins::print(py, (m.global("pick")?.call0()?,))?;
@@ -290,12 +282,12 @@ def twice():
         rt::def!(m, set_mode(mode))?;
         frame.line(86);
         set_mode(m, &rt::str(py, "set by native code"))?;
-        // mixed_mode.py:87, kept as Python: dict comprehension at 87:9
+        // mixed_mode.py:87, kept as Python: unpacking in a display at 87:12
         rt::exec_python!(
             m,
             line = 87,
             r#"
-MODES = {k: MODE for k in "ab"}
+MODES = {**{"a": MODE}, "b": MODE}
 "#
         )?;
         frame.line(88);
@@ -320,14 +312,14 @@ def chunks(items):
         frame.line(102);
         rt::builtins::print(py, (m.global("events")?,))?;
         // `:=` in a comprehension binds a global, here shadowing a builtin.
-        // mixed_mode.py:105, kept as Python: list comprehension at 105:1, assignment expression at 105:3
-        rt::exec_python!(
-            m,
-            line = 105,
-            r#"
-[(min := v) for v in (3, 7)]
-"#
-        )?;
+        frame.line(105);
+        let list = PyList::empty(py);
+        for v in PyTuple::new(py, [3, 7])?.try_iter()? {
+            let v = v?;
+            m.set_global("min", &v)?;
+            list.append(&v)?;
+            py.check_signals()?;
+        }
         frame.line(106);
         rt::builtins::print(py, (m.global("min")?,))?;
         Ok(())

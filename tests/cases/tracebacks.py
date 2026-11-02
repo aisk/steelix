@@ -29,7 +29,7 @@ def leaf(values, key):
 
 
 def kept_middle(values, key):
-    pairs = [(k, v) for k, v in enumerate(values)]
+    pairs = [*enumerate(values)]
     return leaf(values, key) + len(pairs)
 
 

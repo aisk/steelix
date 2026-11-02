@@ -65,11 +65,11 @@ def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, 
         "\n"
         "class A:\n"
         "    def m(self):\n"
-        "        return [i for i in self]\n"
+        "        yield self\n"
         "\n"
         "\n"
         "def g(xs):\n"
-        "    return (x for x in xs)\n"
+        "    return (x for x in xs for y in x)\n"
         "\n"
         "\n"
         "print(f(1))\n"
@@ -83,15 +83,15 @@ def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, 
     data = json.loads(report.read_text())
     assert data["functions"] == {"native": 1, "total": 3}
     features = {f["feature"]: f for f in data["features"]}
-    assert features["list comprehension"] == {
-        "feature": "list comprehension",
+    assert features["yield"] == {
+        "feature": "yield",
         "occurrences": 1,
         "functions": 1,
         "only": 1,
         "statements": 0,
-        "locations": ["app.py:7:16"],
+        "locations": ["app.py:7:9"],
     }
-    assert features["generator expression"]["only"] == 1
+    assert features["generator expression with several for clauses"]["only"] == 1
     assert [(p["kind"], p["name"]) for p in data["python"]] == [
         ("function", "A.m"),
         ("function", "g"),

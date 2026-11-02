@@ -262,11 +262,11 @@ class _Verifier:
             case rs.Call(func, args):
                 self.expr(func, scope)
                 self.exprs(args, scope)
-            case rs.MethodCall(receiver, method, args):
+            case rs.MethodCall(receiver, method, args, concrete):
                 self.expr(receiver, scope)
                 self.exprs(args, scope)
                 ty = self.type_of(receiver, scope)
-                if must_erase(ty, method):
+                if must_erase(ty, method) and not concrete:
                     self.problem(
                         f"`.{method}()` on a `{ty}` calls `{ty}`'s own method,"
                         " not the `PyAnyMethods` one; erase it with `.as_any()`"
