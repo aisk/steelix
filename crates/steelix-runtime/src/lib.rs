@@ -3,7 +3,192 @@
 //! Keep this crate small. Generated code should prefer plain PyO3 APIs so that
 //! it stays readable and easy to rewrite by hand; helpers belong here only when
 //! the equivalent PyO3 code would be noticeably noisier.
+//!
+//! Generated code refers to everything here by path (`rt::int`, `rt::def!`),
+//! never through a glob import, so Python names such as `int` or `print` can
+//! not shadow runtime helpers.
 
-pub mod prelude {
-    pub use pyo3::prelude::*;
+use pyo3::exceptions::{PyNameError, PyUnboundLocalError};
+use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
+use pyo3::type_object::PyTypeInfo;
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyString};
+
+mod function;
+
+#[cfg(unix)]
+pub mod embed;
+
+pub mod builtins;
+
+pub use function::{Body, Function};
+
+/// Re-exported so that macros can name PyO3 items through `$crate`.
+pub use pyo3;
+
+/// Builds a Python `int` from a Rust integer literal.
+pub fn int<'py, T>(py: Python<'py>, value: T) -> Bound<'py, PyAny>
+where
+    T: IntoPyObject<
+            'py,
+            Target = PyInt,
+            Output = Bound<'py, PyInt>,
+            Error = std::convert::Infallible,
+        >,
+{
+    let Ok(obj) = value.into_pyobject(py);
+    obj.into_any()
+}
+
+/// Builds a Python `int` that does not fit in `i128`, from its decimal digits.
+pub fn bigint<'py>(py: Python<'py>, digits: &str) -> PyResult<Bound<'py, PyAny>> {
+    py.get_type::<PyInt>().call1((digits,))
+}
+
+/// Builds a Python `float`.
+pub fn float(py: Python<'_>, value: f64) -> Bound<'_, PyAny> {
+    PyFloat::new(py, value).into_any()
+}
+
+/// Builds a Python `str`.
+pub fn str<'py>(py: Python<'py>, value: &str) -> Bound<'py, PyAny> {
+    PyString::new(py, value).into_any()
+}
+
+/// Builds a Python `str` containing lone surrogates, which a Rust `&str` can
+/// not hold. `encoded` is the UTF-8 encoding produced with `surrogatepass`.
+pub fn str_surrogatepass<'py>(py: Python<'py>, encoded: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+    PyBytes::new(py, encoded).call_method1("decode", ("utf-8", "surrogatepass"))
+}
+
+/// Builds a Python `bytes`.
+pub fn bytes<'py>(py: Python<'py>, value: &[u8]) -> Bound<'py, PyAny> {
+    PyBytes::new(py, value).into_any()
+}
+
+/// Returns `True` or `False`.
+pub fn bool(py: Python<'_>, value: bool) -> Bound<'_, PyAny> {
+    PyBool::new(py, value).to_owned().into_any()
+}
+
+/// Returns `None`.
+pub fn none(py: Python<'_>) -> Bound<'_, PyAny> {
+    py.None().into_bound(py)
+}
+
+/// Reads a module global the way `LOAD_GLOBAL` does: the module's globals
+/// first, then builtins, raising `NameError` if neither has it.
+pub fn global<'py>(globals: &Bound<'py, PyDict>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+    if let Some(value) = globals.get_item(name)? {
+        return Ok(value);
+    }
+    builtin(globals.py(), name)
+}
+
+/// Reads a builtin such as `len`, raising `NameError` if it does not exist.
+pub fn builtin<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+    match builtins_module(py)?.getattr_opt(name)? {
+        Some(value) => Ok(value),
+        None => Err(PyNameError::new_err(format!(
+            "name '{name}' is not defined"
+        ))),
+    }
+}
+
+pub(crate) fn builtins_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+    static BUILTINS: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
+    BUILTINS
+        .get_or_try_init(py, || py.import("builtins").map(Bound::unbind))
+        .map(|module| module.bind(py))
+}
+
+/// Reads a local variable that might not be assigned yet, raising
+/// `UnboundLocalError` like Python does.
+pub fn local<'a, 'py>(
+    value: &'a Option<Bound<'py, PyAny>>,
+    name: &str,
+) -> PyResult<&'a Bound<'py, PyAny>> {
+    value.as_ref().ok_or_else(|| {
+        PyUnboundLocalError::new_err(format!(
+            "cannot access local variable '{name}' where it is not associated with a value"
+        ))
+    })
+}
+
+/// Guards against unbounded recursion in functions that call each other
+/// directly, turning a would-be stack overflow into `RecursionError`.
+///
+/// Calls that go through Python (`PyObject_Call`) already get this check, so
+/// only functions in a cycle of direct Rust calls need it.
+pub struct RecursionGuard<'py> {
+    _py: Python<'py>,
+}
+
+impl<'py> RecursionGuard<'py> {
+    pub fn enter(py: Python<'py>) -> PyResult<Self> {
+        // `PyErr::fetch` compares every fetched exception with PyO3's
+        // `PanicException`, creating that type on first use. Creating it with
+        // the stack already exhausted fails and deadlocks PyO3's lazy type
+        // initialisation, so make sure it exists while there is still room.
+        pyo3::panic::PanicException::type_object_raw(py);
+        // SAFETY: we are attached to the interpreter; a successful enter is
+        // always balanced by the leave in `Drop`.
+        let failed =
+            unsafe { pyo3::ffi::Py_EnterRecursiveCall(c" while calling a Python object".as_ptr()) };
+        if failed != 0 {
+            return Err(PyErr::fetch(py));
+        }
+        Ok(Self { _py: py })
+    }
+}
+
+impl Drop for RecursionGuard<'_> {
+    fn drop(&mut self) {
+        // SAFETY: paired with the successful `Py_EnterRecursiveCall` above.
+        unsafe { pyo3::ffi::Py_LeaveRecursiveCall() }
+    }
+}
+
+/// Defines a Python function backed by a Rust function and binds it in
+/// `globals`, like executing a `def` statement.
+///
+/// ```ignore
+/// rt::def!(globals, fib(n))?;                  // fn fib(py, n)
+/// rt::def!(globals, scale(globals, x))?;       // fn scale(py, globals, x)
+/// rt::def!(globals, slf(x), name = "self")?;   // Python name differs from the Rust one
+/// rt::def!(globals, area(r), doc = "Area of a circle.")?;
+/// ```
+#[macro_export]
+macro_rules! def {
+    ($globals:expr, $f:ident(globals $(, $p:ident)* $(,)?) $(, name = $name:literal)? $(, doc = $doc:literal)? $(,)?) => {
+        $crate::def!(@define [globals] $globals, $f, [$($p),*], [$($name)?], [$($doc)?])
+    };
+    ($globals:expr, $f:ident($($p:ident),* $(,)?) $(, name = $name:literal)? $(, doc = $doc:literal)? $(,)?) => {
+        $crate::def!(@define [] $globals, $f, [$($p),*], [$($name)?], [$($doc)?])
+    };
+    (@define [$($g:tt)?] $globals:expr, $f:ident, [$($p:ident),*], [$($name:literal)?], [$($doc:literal)?]) => {{
+        let body: $crate::Body = |py, globals, args| {
+            let [$($p),*] = args else {
+                unreachable!("argument count is checked by Function::__call__")
+            };
+            $crate::def!(@call [$($g)?] $f(py, globals $(, $p)*))
+        };
+        let name = $crate::def!(@or [$($name)?] stringify!($f));
+        let doc: Option<&str> = $crate::def!(@or [$(Some($doc))?] None);
+        $crate::Function::define($globals, name, &[$(stringify!($p)),*], doc, body)
+    }};
+    // `py` and `globals` are passed in as tokens so that they keep the hygiene
+    // context of the closure parameters above.
+    (@call [] $f:ident($py:ident, $globals:ident $(, $p:ident)*)) => {
+        $f($py $(, $p)*)
+    };
+    (@call [$g:tt] $f:ident($py:ident, $globals:ident $(, $p:ident)*)) => {
+        $f($py, $globals $(, $p)*)
+    };
+    (@or [] $default:expr) => {
+        $default
+    };
+    (@or [$value:expr] $default:expr) => {
+        $value
+    };
 }

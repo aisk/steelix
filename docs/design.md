@@ -82,7 +82,7 @@ def fib(n):
 print(fib(10))
 ```
 
-期望输出（示意，`rt::def!` 等 runtime 接口在 M1 实现时确定）
+生成的输出（`tests/golden/fib.rs`）
 
 ```rust
 use pyo3::prelude::*;
@@ -90,16 +90,18 @@ use steelix_runtime as rt;
 
 // fib.py:1
 pub fn fib<'py>(py: Python<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let _depth = rt::RecursionGuard::enter(py)?;
+    let _guard = rt::RecursionGuard::enter(py)?;
     if n.lt(2)? {
         return Ok(n.clone());
     }
     fib(py, &n.sub(1)?)?.add(fib(py, &n.sub(2)?)?)
 }
 
+/// Executes the body of `fib.py` in the module `m`.
 pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
-    rt::def!(m, fib(n))?;
+    let globals = &m.dict();
+    rt::def!(globals, fib(n))?;
     rt::builtins::print(py, (fib(py, &rt::int(py, 10))?,))?;
     Ok(())
 }
@@ -108,10 +110,16 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 要点
 
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`getattr`、`call` 等方法
-- 函数体是普通的 Rust fn，显式接收 `py: Python<'py>`，参数用 `&Bound`
-- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行
+- 函数体是普通的 Rust fn，显式接收 `py: Python<'py>`，参数用 `&Bound`。需要动态查找全局变量的函数（以及直接调用了这类函数的函数）额外接收 `globals: &Bound<'py, PyDict>`，放在 `py` 之后
+- 模块体生成 `exec_module(m)`，只依赖传入的模块对象，与输出模式无关
+- 模块级变量的读写走 globals 字典：`rt::global(globals, "LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `globals.set_item("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，其余用 `rt::builtin(py, "len")?`
+- 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
+- 函数末尾的 `return` 写成尾表达式，返回值本身是 `PyResult` 时不再包一层 `Ok(..?)`
+- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(globals, fib(n))?`。需要 globals 的写成 `rt::def!(globals, scale(globals, x))`，Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
 - 模块级函数若只绑定一次，调用时直接调用 Rust 函数（见第 7 节）
-- 会递归的函数（调用图里有环）开头加 `RecursionGuard`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`
+- 会递归的函数（直接调用构成的调用图里有环）开头加 `let _guard = rt::RecursionGuard::enter(py)?;`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用（`PyObject_Call`）CPython 自己会检查，不需要 guard
+  - 3.14 的 `Py_EnterRecursiveCall` 按 C 栈剩余空间判断，不看 `sys.getrecursionlimit()`，报错信息是 `Stack overflow (used N kB)`（见第 12 节）
+  - 已验证的坑：栈快耗尽时 `PyErr::fetch` 第一次创建 PyO3 的 `PanicException` 类型会失败并在 PyO3 的懒初始化锁上死锁。`RecursionGuard::enter` 每次先确保这个类型已经创建
 - runtime 一律通过 `rt::` 路径引用，不用 glob import，避免被 Python 里叫 `int`、`print` 的局部变量遮蔽
 - 字面量规则：作为 `IntoPyObject` 参数时直接写字面量（`n.lt(2)`），超出 i32 范围的加 `i64` 后缀或走 `rt::int`，需要独立的 Python 对象时用 `rt::int(py, 10)`
 - 尽量保留 Python 的名字、注释、docstring（转成 `///`），并在函数前标注源位置注释
@@ -120,8 +128,13 @@ pub fn exec_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域，不能逐句对应。
 
-- 每个局部变量在函数开头（或支配所有使用点的位置）声明一次，循环变量、`if`/`try` 内的赋值都是对它的赋值，不再重新 `let`
-- 自行做定值分析，规则与 rustc 一致或更保守。能确定已赋值的变量用 `Bound`，不能确定的用 `Option<Bound>`，读取时经过 runtime 辅助函数，未赋值时抛 `UnboundLocalError`
+- 每个局部变量只声明一次，循环变量、`if`/`try` 内的赋值都是对它的赋值，不再重新 `let`
+  - 第一次出现是函数体顶层的赋值语句时，直接在那里写 `let x = ...;`（顶层语句按顺序执行，它支配之后所有使用点），这样直线代码最可读
+  - 否则在函数开头声明 `let x: Bound<'py, PyAny>;`，由后面的分支赋值
+  - 可能重复赋值（另做一遍"可能已赋值"分析，循环取不动点）时才加 `mut`，与 rustc 的判断一致，不产生 `unused_mut`
+  - 被重新赋值的参数在开头遮蔽成 `let mut n = n.clone();`
+- 自行做定值分析，规则与 rustc 一致或更保守（条件一律视为不透明，`while True` 没有 `break` 时之后不可达）。能确定已赋值的变量用 `Bound`，不能确定的用 `Option<Bound>`：声明为 `let mut x: Option<Bound<'py, PyAny>> = None;`，赋值写 `x = Some(..)`，读取写 `rt::local(&x, "x")?`，未赋值时抛和 CPython 一样的 `UnboundLocalError`
+- 不可达的语句（`return` 之后等）直接丢弃，函数末尾可达时补 `Ok(rt::none(py))`
 - `del x` 让变量变成未赋值状态，所以该变量必须是 `Option`
 - 被内层函数捕获的变量（cell）单独处理，见第 6 节
 
@@ -131,9 +144,12 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 
 因此 runtime 提供 `#[pyclass(dict)] Function`
 
-- 实现 `__call__`（按存储的签名描述绑定参数）和 `__get__`（像 Python 函数一样绑定方法）
+- 实现 `__call__`（按存储的签名描述绑定参数）和 `__get__`（像 Python 函数一样绑定方法，返回 `types.MethodType`）
 - `__name__`、`__qualname__`、`__doc__`、`__module__`、`__defaults__`、`__kwdefaults__`、`__dict__` 可写
-- 持有指向生成的 Rust fn 的指针、所属模块的 globals、捕获的 cell
+  - M1 的实现：`#[pyclass(frozen, dict)]`，元信息直接放在实例 `__dict__` 里，天然可写，`__call__` 也不需要 borrow，函数体里修改自身属性不会冲突
+  - `__module__` 取自 globals 的 `__name__`，与 CPython 一致；提供只读的 `__globals__`
+- 持有指向生成的 Rust fn 的指针（统一签名的适配闭包，由 `rt::def!` 生成）、所属模块的 globals、捕获的 cell。通过 `__traverse__` 让 GC 看到 globals，模块 dict 和函数之间的循环引用可以回收
+- 参数个数不对时抛和 CPython 文字一致的 `TypeError`。M1 只支持位置参数，收到关键字参数时抛 `TypeError` 说明暂不支持
 - **默认参数在 `def` 执行时求值一次**，存在 `__defaults__` 里。不用 `#[pyo3(signature)]`，因为它每次调用都会重新求值，也不能引用模块全局变量
 - 嵌套函数和 lambda 提升为具名 Rust fn，捕获的变量以 cell（`PyCell_New` 创建的 Python cell 对象）作为参数传入
 - 装饰器按 Python 语义执行：先创建 `Function`，再调用装饰器并重新绑定名字
@@ -199,8 +215,11 @@ pub mod point {
 
 - Rust 关键字用 `r#`（`type`、`match`、`loop`、`ref`、`move`、edition 2024 保留的 `gen` 等），PyO3 会去掉参数名的 `r#`
 - `self`、`super`、`crate` 不能做 raw identifier，`self` 改名为 `slf`
-- 生成代码自己使用的名字（`py`、`m`、`Ok`、`Err`、`Some`）和 Python 名字冲突时，改名 Python 名字
-- 含孤立代理（lone surrogate）的字符串不能写成 Rust `&str` 字面量，需要走转义构造
+- 生成代码自己使用的名字和 Python 名字冲突时，改名 Python 名字，加 `_` 后缀直到不冲突。函数体内保留 `py`、`globals`、`_guard`、`Ok`、`Err`、`Some`、`None`；模块级函数名保留 `exec_module` 等。不需要改名的名字优先保留原拼写，改名不会抢占它们
+- Python 可见的函数名由 `rt::def!` 去掉 `r#` 得到，改过名的用 `name = "..."` 显式给出。参数名只用于报错信息，改过名的参数（如 `globals` → `globals_`）报错时显示 Rust 名字，M3 做完整签名时再处理
+- 含孤立代理（lone surrogate）的字符串不能写成 Rust `&str` 字面量，用 `rt::str_surrogatepass(py, b"...")?` 从 `surrogatepass` 编码的字节构造
+- 字面量的具体写法：i32 范围内的整数直接写，超出的加 `i64`/`i128` 后缀，更大的用 `rt::bigint(py, "...")?`；浮点数用 `repr` 的最短往返表示，`inf` 写 `f64::INFINITY`；`None` 作参数时写 `py.None()`；`bytes` 一律用 `rt::bytes(py, b"...")`，不依赖 PyO3 对字节数组的隐式转换
+- docstring 按 3.13+ 编译器的规则去缩进（与 `inspect.cleandoc` 不同，保留首尾空行），同时生成 `///` 和 `__doc__`
 
 已知且有意保留的语义差异
 
@@ -208,6 +227,9 @@ pub mod point {
 - traceback 里没有 Python 行号（缓解措施见第 14 节）
 - 只有 C API 调用的热循环不经过解释器的检查点，Ctrl-C 需要 `PyErr_CheckSignals` 才能打断，PoC 阶段在循环里插入检查，或者先作为已知问题记录
 - 同理，这类循环里 GIL 不会自动切换
+- 直接调用的递归受 C 栈大小限制而不是 `sys.getrecursionlimit()`，`RecursionError` 的信息是 `Stack overflow (used N kB) ...` 而不是 `maximum recursion depth exceeded`
+- 模块级代码里，`def` 执行之前的调用走 globals 查找（会得到 `NameError`）；但函数体里的直接调用不检查被调函数的 `def` 是否已经执行过
+- `builtins.print` 等在参数求值之后才查找（Python 是先查找名字再求值参数），只有参数求值过程中替换了这个 builtin 才看得出区别
 
 ## 13. 不支持特性的处理
 
@@ -218,7 +240,9 @@ pub mod point {
 
 - **单元测试**：rustast 打印、作用域与绑定分析等纯 Python 逻辑
 - **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动
-- **`cargo check` 层**：只检查 golden 能编译，比端到端快
+- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables` 两个 allow），把可读性问题挡在快照阶段
+- 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
+- rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：ext 模式下比较 `python case.py` 与 `python -c "import case"`（以及 bin 模式就绪后的可执行程序）的 stdout、退出码，以及预期异常的类型和消息（不比较 traceback）。多个用例打包成同一个测试 crate 的多个模块，共用 `CARGO_TARGET_DIR`，减少编译和链接次数。用 pytest marker `e2e` 区分
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本

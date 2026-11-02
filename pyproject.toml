@@ -24,7 +24,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["e2e: end-to-end tests that build generated crates with cargo (slow)"]
+markers = [
+    "e2e: end-to-end tests that build generated crates with cargo (slow)",
+    "cargo: tests that run cargo check on golden snapshots",
+]
 
 [tool.ruff]
 line-length = 100

@@ -14,16 +14,16 @@
 
 目标是 `tests/cases/fib.py` 能转换、编译成扩展模块，`python -c "import fib"` 的输出与 `python fib.py` 一致。
 
-- [ ] `rustast`：最小节点集合（fn、let、赋值、if、while、return、表达式语句、调用、方法调用、字面量、`?`）和打印器，rustfmt 必须可用，带单元测试
-- [ ] `frontend`：`parse.py`、`scope.py`（symtable），`bindings.py` 统计模块级名字绑定次数、检测 `import *`/`globals()`
-- [ ] 变量模型的最小版本：局部变量在函数开头声明，定值分析，不能确定时用 `Option`（§5）
-- [ ] 名字卫生：重命名表、关键字 `r#`、字面量规则（§4、§12）
-- [ ] runtime：`Function` 的最小版本（仅位置参数、`__call__`、`__get__`、可写的元信息）、`rt::def!`、`RecursionGuard`、`rt::int` 等字面量辅助（§6）
-- [ ] `lower`：常量、名字、赋值、二元运算、比较、`if`、`while`、`def`（仅位置参数）、`return`、函数调用、`print`
-- [ ] 调用图分析，递归函数加 `RecursionGuard`
-- [ ] `emit`：生成 crate（Cargo.toml、lib.rs），runtime 用 path 依赖
-- [ ] CLI `steelix transpile foo.py -o out/` 串起来
-- [ ] 测试框架：golden 快照与 `--update-golden`、`cargo check` 层、e2e 差分测试（显式设置 `PYO3_PYTHON`，共享 target 目录，pytest marker `e2e`）
+- [x] `rustast`：最小节点集合（fn、let、赋值、if、while、return、表达式语句、调用、方法调用、字面量、`?`）和打印器，rustfmt 必须可用，带单元测试
+- [x] `frontend`：`parse.py`、`scope.py`（symtable），`bindings.py` 统计模块级名字绑定次数、检测 `import *`/`globals()`
+- [x] 变量模型的最小版本：局部变量在函数开头声明，定值分析，不能确定时用 `Option`（§5）
+- [x] 名字卫生：重命名表、关键字 `r#`、字面量规则（§4、§12）
+- [x] runtime：`Function` 的最小版本（仅位置参数、`__call__`、`__get__`、可写的元信息）、`rt::def!`、`RecursionGuard`、`rt::int` 等字面量辅助（§6）
+- [x] `lower`：常量、名字、赋值、二元运算、比较、`if`、`while`、`def`（仅位置参数）、`return`、函数调用、`print`
+- [x] 调用图分析，递归函数加 `RecursionGuard`
+- [x] `emit`：生成 crate（Cargo.toml、lib.rs），runtime 用 path 依赖
+- [x] CLI `steelix transpile foo.py -o out/` 串起来
+- [x] 测试框架：golden 快照与 `--update-golden`、`cargo check` 层、e2e 差分测试（显式设置 `PYO3_PYTHON`，共享 target 目录，pytest marker `e2e`）
 
 ## M2 核心语句与表达式
 
