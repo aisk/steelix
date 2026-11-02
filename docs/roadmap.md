@@ -141,6 +141,19 @@
 
 覆盖率的变化见 `coverage.md`：6 个工具的原生函数从 37% 到 73%，标准库从 22% 到 90%，和 M3c 时按方法级混合模式的预测一致（71%、88%）。标准库里只有 3 个带类型参数的类整个保留为 Python。顺带修了 `rt::call!` 在被调用的是引用（`rt::local(..)?` 返回的 `&Bound`）时编译失败的问题（`tests/cases/call_ref_callee.py`）。
 
+## M8a M5/M8 之后的修复
+
+来自 M5 之后的 Fable review（前两条已复现）和 M8 的遗留。
+
+- [ ] body 不会失败的 `try`（如 `try: x = 1`）生成的 `match Ok(..)` 编译失败（E0282），给 scrutinee 标类型或在 body 不会失败时不生成 match
+- [ ] 为求值顺序提前计算的临时变量会一直活到所在 Rust 块结束（模块级就是整个程序），`__del__`、weakref、`finalize` 的时机与 CPython 不同。只用一次的临时变量直接 move，或者给语句的 prelude 加块作用域
+- [ ] `except <非异常类>` 抛出的 TypeError 缺少 `__context__`，行号是 `try` 行而不是 `except` 行
+- [ ] 给 M4 的分析补单元测试：`frontend/regions.py`、`lower/rustflow.py`、`_DefiniteAssignment` 里 handler/with/region 相关部分
+- [ ] `bindings.py` 中六处"节点绑定了哪些名字"的实现合并成一个
+- [ ] 容器字面量里的展开（`[*a]`、`{**d}`），现在是剩下最便宜的阻碍（标准库 25 个函数只被它挡住）
+- [ ] walrus 局部变量第一次在顶层 `if` 条件里绑定时 clippy 报 `needless_late_init`
+- [ ] §15 类改写补充：类属性用 `#[classattr]`，没有可变状态的类用 `frozen`，`native.rs` 放在 `src/<module>/` 下，元组之类的属性要明确 Python 侧的形状
+
 ## M6 多模块应用
 
 - [ ] 输入为应用目录（入口脚本加项目内模块和包）时生成一个 crate，每个 Python 模块一个 Rust mod
@@ -168,7 +181,7 @@
 
 ## M9 可读性与渐进式改写
 
-- [ ] 生成选项：不生成 `rt::frame!` 和 `frame.line(N)` 行号跟踪（M4 引入后 golden 增加约三分之一行数），给只关心改写起点、不需要精确 traceback 的场景用；或者找更轻的写法
+- [ ] 生成选项：去掉 `frame.line(N)` 行号标记（约占生成代码的 12% 到 14%），保留 `rt::frame!`（它同时承担异常协议），traceback 行号退化为函数定义行。做成 Rust AST 上的后处理，单独一套 golden
 - [ ] 基于类型注解的可选 typed lowering（`int` → `i64` 等），只在用户显式开启时启用
 - [ ] 符合条件的类可选升级为 `#[pyclass]`（§10）
 - [ ] 生成代码的清理 pass：去掉多余 clone、合并临时变量
