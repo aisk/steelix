@@ -234,6 +234,19 @@ impl NativeImporter {
         Ok(Some(spec))
     }
 
+    /// The names of the transpiled modules, for tools that check whether
+    /// an imported module is native (`steelix test`).
+    #[getter]
+    fn modules(&self) -> Vec<&'static str> {
+        self.modules.iter().map(|module| module.name).collect()
+    }
+
+    /// The project directory.
+    #[getter]
+    fn root(&self) -> &str {
+        &self.root
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "<steelix_runtime.NativeImporter of {} modules in '{}'>",
@@ -456,8 +469,17 @@ pub fn init_extension(m: &Bound<'_, PyModule>, modules: &'static [NativeModule])
         Some(file) if file.is_instance_of::<PyString>() => file.extract::<String>()?,
         _ => return Err(PyImportError::new_err("extension module without __file__")),
     };
-    let root = file.rsplit_once('/').map_or(".", |(dir, _)| dir).to_owned();
     let name: String = m.name()?.extract()?;
+    let mut root = file.rsplit_once('/').map_or(".", |(dir, _)| dir).to_owned();
+    // Installed as the package's `__init__` (`pkg/__init__.so`), the
+    // extension module is a package from the start, which `python -m pkg`
+    // needs: the project directory is above the package's directory.
+    let (_, file_name) = file.rsplit_once('/').unwrap_or(("", &file));
+    if file_name.starts_with("__init__.") {
+        for _ in name.split('.') {
+            root = root.rsplit_once('/').map_or(".", |(dir, _)| dir).to_owned();
+        }
+    }
     let importer = install_importer(py, &root, modules)?;
     if let Some(module) = importer.get().get(&name)
         && module.package

@@ -1,13 +1,49 @@
 import json
 from pathlib import Path
 
-from steelix.cli import build_parser, main
+from steelix.cli import build_parser, main, pytest_command
 
 
 def test_parser_defaults_to_bin_mode() -> None:
     args = build_parser().parse_args(["transpile", "foo.py", "-o", "out"])
     assert args.command == "transpile"
     assert args.mode == "bin"
+
+
+def test_test_parser_passes_pytest_arguments_through() -> None:
+    args = build_parser().parse_args(["test", "out", "tests/", "-x", "-k", "vm"])
+    assert args.crate == Path("out")
+    assert args.pytest_args == ["tests/", "-x", "-k", "vm"]
+    args = build_parser().parse_args(["test", "--release", "out", "--", "--release"])
+    assert args.release
+    # argparse drops the `--`.
+    assert args.pytest_args == ["--release"]
+
+
+def test_test_command_runs_the_program_as_python(tmp_path: Path, monkeypatch) -> None:
+    program = tmp_path / "debug" / "app"
+    program.parent.mkdir()
+    program.write_text("")
+    monkeypatch.setenv("PYTHONPATH", "/elsewhere")
+    command, env = pytest_command(program, ["tests", "-x"])
+    link = tmp_path / "debug" / "steelix-test" / "bin" / "python"
+    plugins = tmp_path / "debug" / "steelix-test" / "plugins"
+    assert command == [str(link), "-m", "pytest", "-p", "steelix_native", "tests", "-x"]
+    assert link.resolve() == program.resolve()
+    assert (plugins / "steelix_native.py").is_file()
+    assert env["STEELIX_NATIVE_IMPORTS"] == "1"
+    assert env["PYTHONPATH"] == f"{plugins}:/elsewhere"
+    # Again, over the link of the first time.
+    assert pytest_command(program, [])[0][-1] == "steelix_native"
+
+
+def test_test_refuses_an_extension_crate(tmp_path: Path, capsys) -> None:
+    source = tmp_path / "app.py"
+    source.write_text("print(1)\n")
+    out = tmp_path / "out"
+    assert main(["transpile", "--mode", "ext", str(source), "-o", str(out), "-q"]) == 0
+    assert main(["test", str(out)]) == 2
+    assert "has no executable" in capsys.readouterr().err
 
 
 def test_transpile_writes_bin_crate(tmp_path: Path) -> None:

@@ -60,6 +60,24 @@ assert type(skime.vm.VM.run) is not types.FunctionType
 
 `test_repl.py` 用 `monkeypatch.setattr(builtins, "input", ..)` 替换 `input`，原生的 `main()` 照样看到替换（`input` 是普通的 builtin 查找），这类测试不受影响。skime 的开发依赖 pyyaml 只有 `iset_gen.py` 用，测试都不需要它，没有跳过任何测试。
 
+M12 起不再需要 ext 模式和复制：skime 0.3.1 的测试目录放进了 `tests/projects/skime/tests`（原样副本），`steelix test` 用 bin 的程序以解释器角色运行它们（design §15）
+
+```
+uv run steelix transpile -m skime --root tests/projects/skime -o out
+cp -r tests/projects/skime/tests /tmp/run/ && cd /tmp/run   # 和项目无关的目录
+uv run --project ~/steelix steelix test ~/steelix/out -- -q
+```
+
+项目目录不在 `sys.path` 上（skime 没有安装到 steelix 的 venv 里），`import skime` 仍然得到原生代码，插件报告 `24 of 24 transpiled modules imported natively`。`tests/test_projects.py` 的 `test_skime_tests_run_natively` 用 `app.py` 构建的程序做同样的事（模块表一样是 24 个模块）。
+
+| M12，`steelix test` | 结果 | pytest 报告的时间（3 次） |
+| --- | --- | --- |
+| CPython（`PYTHONPATH` 指向项目目录） | 108 passed | 0.14 s |
+| 原生，debug（opt-level 1，PyO3 和 runtime 是 3） | 108 passed | 0.25 s |
+| 原生，release（LTO） | 108 passed | 0.23 s |
+
+干净构建（含 PyO3）debug 47 s，之后的 `steelix test` 只有 cargo 的检查和 pytest 本身。
+
 检查原生时发现一个小差异：`type(f).__module__` 不是字符串而是 getset descriptor（PyO3 的类型是 heap type，实例的 `__module__` getter 占了类型 `__dict__` 里的位置），已记入 §12。
 
 ## 4. 部署
@@ -213,7 +231,7 @@ pop(&ctx)
 
 按遇到的顺序
 
-1. **ext 和 bin 是两个 crate。** 要用 skime 自己的 pytest 测改写后的代码，只能把改过的模块文件手工复制进另外生成的 ext crate（写了一个脚本按 `git diff` 复制）。两个 crate 的模块文件完全相同，只差入口
+1. **ext 和 bin 是两个 crate。** 要用 skime 自己的 pytest 测改写后的代码，只能把改过的模块文件手工复制进另外生成的 ext crate（写了一个脚本按 `git diff` 复制）。两个 crate 的模块文件完全相同，只差入口。M12 的 `steelix test` 直接用 bin 跑测试，解决了这个问题
 2. **逻辑在类里，入口是函数。** `parse` 只有一行，真正的逻辑在 `Parser` 的方法里。§15 讲了函数怎么改、类的方法怎么改，没有讲"用一个原生函数取代整个类的用途"。这里选择改写 `parse`、保留类，`Parser` 的生成代码于是不再被 skime 自己使用
 3. **适配层要构造别的模块的类的实例。** 用 `m.global("pair")`，名字是这个模块 import 时的别名（`from ..types.pair import Pair as pair`），要读 `exec_module` 才知道。§15 没有说，但照着生成代码写就对了
 4. **抛项目自己的异常类没有现成的写法。** 生成代码用 `frame.raise(m.global("ParseError")?.call1((..,))?)`，适配层在 `map_err` 里没有 `frame`，要自己 `PyErr::from_value`，查找失败时还要处理第二个错误。一个 `rt` 的小工具（按全局名字构造异常）会更干净
@@ -286,7 +304,7 @@ fib 22 分步看：只换 runtime（vectorcall、method descriptor、快速路�
 
 - `type(f).__module__` 是 getset descriptor（§12）
 - 分发复制了包里只在开发时用的文件（`iset_gen.py`、`iset.yml`）
-- ext 模式下 `python -m skime` 仍然不行（M6 遗留）
+- ext 模式下 `python -m skime` 仍然不行（M6 遗留）。M12 起安装成 `skime/__init__.so` 时可以
 
 ### skime 自身（CPython 下同样出现，不是 steelix 的问题，供参考）
 
@@ -306,7 +324,7 @@ fib 22 分步看：只换 runtime（vectorcall、method descriptor、快速路�
 ## 10. 建议（按优先级）
 
 1. **降低调用原生函数的开销（性能里程碑，M11 已做，见第 7 节）。** `Function` 实现 vectorcall（PEP 590），加 `Py_TPFLAGS_METHOD_DESCRIPTOR` 让 `obj.method()` 不创建 bound method，参数绑定在只有位置参数时走快速路径；生成代码里的字面量属性名用 intern 的字符串（`pyo3::intern!` 或 runtime 的缓存，要兼顾可读性，例如 `rt` 提供带缓存的 `attr`/`set_attr`/`call_method`）。目标是像 skime 这样的程序不再比 CPython 慢几倍，单是 intern 就有 1.8 倍
-2. **一个 crate 同时出 bin 和 ext。** 生成的 crate 同时有 `[lib]`（cdylib）和 `[[bin]]`，或者 `steelix` 提供把一个 crate 的模块文件用于另一种模式的命令，让项目自己的测试套件能直接测改写后的代码。顺带写一份"用项目自己的 pytest 测原生代码"的做法（这次最有用的验证手段），并修好 ext 模式的 `python -m pkg`
+2. **一个 crate 同时出 bin 和 ext（M12 换了做法，用 bin 的解释器角色跑测试，见第 3 节）。** 生成的 crate 同时有 `[lib]`（cdylib）和 `[[bin]]`，或者 `steelix` 提供把一个 crate 的模块文件用于另一种模式的命令，让项目自己的测试套件能直接测改写后的代码。顺带写一份"用项目自己的 pytest 测原生代码"的做法（这次最有用的验证手段），并修好 ext 模式的 `python -m pkg`
 3. **补充 §15。** 加上这次遇到的几种情况：用原生函数取代一个类的用途（保留还是删除类）、适配层构造别的模块的类的实例（按 import 的别名取 globals）、抛项目自己的异常类（并在 runtime 里加一个小工具）、内联别的类的方法时的语义变化、Python 源码本身是生成的时候怎么保持单一来源
 4. **为第二步提供"属性读写索引"。** 静态列出项目里每个类的每个实例属性被哪些函数读写（`ctx.ip` 这类），作为 `steelix coverage` 或单独命令的输出。改写 `Context` 这样被五个模块共享的类之前，没有这张表只能靠 grep
 5. **generator。** skime 里剩下的唯一一个保留函数，和 `coverage.md` 的结论一致

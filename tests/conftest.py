@@ -25,6 +25,10 @@ E2E_DIR = ROOT / "target" / "e2e"
 
 CASES = sorted(p.stem for p in CASES_DIR.glob("*.py"))
 
+# The test suites of the projects under `tests/projects/` run against the
+# transpiled programs (`steelix test`, `test_projects.py`), not as steelix's.
+collect_ignore = ["projects/skime/tests"]
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(

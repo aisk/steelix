@@ -101,6 +101,33 @@ def build_parser() -> argparse.ArgumentParser:
         "-q", "--quiet", action="store_true", help="only print errors and the result"
     )
 
+    test = sub.add_parser(
+        "test",
+        help="build a transpiled program and run the project's pytest suite with it as the "
+        "Python interpreter, so that the tests import the native modules",
+        description="Build the crate (`cargo build`, with PYO3_PYTHON set) and run `python -m "
+        "pytest ARGS` in the current directory, with the program as `python`: every import "
+        "of a transpiled module gets its native code. The run fails if one of them was "
+        "imported from its Python source. Pytest must be installed in the interpreter's "
+        "environment.",
+    )
+    test.add_argument("crate", type=Path, help="the crate `steelix transpile` wrote")
+    test.add_argument(
+        "--python",
+        type=Path,
+        default=None,
+        help="the interpreter (or virtual environment's) to build with; it provides "
+        "pytest and the project's dependencies (default: $PYO3_PYTHON, or the one "
+        "running steelix)",
+    )
+    test.add_argument("--release", action="store_true", help="build and test the release profile")
+    test.add_argument(
+        "pytest_args",
+        nargs=argparse.REMAINDER,
+        metavar="...",
+        help="arguments for pytest (after `--` if they could be taken for steelix's)",
+    )
+
     coverage = sub.add_parser(
         "coverage",
         help="report what is native and what stays Python, without writing crates",
@@ -179,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         return transpile(args)
     if args.command == "build":
         return build(args)
+    if args.command == "test":
+        return test(args)
     if args.command == "coverage":
         return coverage(args)
     return 0
@@ -345,6 +374,69 @@ def build(args: argparse.Namespace) -> int:
     return 0
 
 
+def test(args: argparse.Namespace) -> int:
+    """`steelix test`: run the project's tests with the program in the
+    interpreter role (design §15)."""
+    try:
+        python = args.python or Path(os.environ.get("PYO3_PYTHON") or sys.executable)
+        program = cargo_build_program(args.crate, Path(os.path.abspath(python)), args.release)
+    except CommandError as err:
+        print(f"steelix: {err}", file=sys.stderr)
+        return err.code
+    command, env = pytest_command(program, args.pytest_args)
+    return subprocess.run(command, env=env, check=False).returncode
+
+
+def pytest_command(program: Path, pytest_args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """The command line and environment that run pytest with `program` as
+    the Python interpreter: it is started through a link named `python`,
+    with `steelix_native` (`pytest_native.py`) as a plugin."""
+    home = program.parent / "steelix-test"
+    bin_dir = home / "bin"
+    plugins = home / "plugins"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    plugins.mkdir(exist_ok=True)
+    link = bin_dir / "python"
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(program)
+    shutil.copyfile(Path(__file__).with_name("pytest_native.py"), plugins / "steelix_native.py")
+    env = dict(os.environ)
+    env["STEELIX_NATIVE_IMPORTS"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join([str(plugins), *filter(None, [env.get("PYTHONPATH")])])
+    return [str(link), "-m", "pytest", "-p", "steelix_native", *pytest_args], env
+
+
+def cargo_build_program(crate: Path, python: Path, release: bool) -> Path:
+    """Builds the executable of a crate that `steelix transpile` wrote (a
+    development build, with `python`) and returns it."""
+    import tomllib
+
+    try:
+        manifest = tomllib.loads((crate / "Cargo.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        raise CommandError(
+            f"{crate} is not a crate written by `steelix transpile`: {err}", 2
+        ) from err
+    bins = manifest.get("bin") or []
+    if not bins:
+        raise CommandError(
+            f"{crate} has no executable: transpile in bin mode (the default), not --mode ext",
+            2,
+        )
+    runtime = manifest.get("dependencies", {}).get("steelix-runtime")
+    if isinstance(runtime, dict) and "path" in runtime:
+        pin_dependencies(crate, Path(runtime["path"]))
+    env = dict(os.environ)
+    env["PYO3_PYTHON"] = str(python)
+    env.pop("PYO3_BUILD_EXTENSION_MODULE", None)
+    env.pop("STEELIX_DIST", None)
+    command = ["cargo", "build", "--message-format=json-render-diagnostics"]
+    if release:
+        command.append("--release")
+    return cargo_executable(command, crate, env, bins[0]["name"], quiet=False)
+
+
 def dist_rustflags(env: dict[str, str], runtime: Path | None) -> tuple[dict[str, str], list[str]]:
     """Remappings so that the source locations in panic messages do not show
     the build machine's directories, added to the user's rustflags: the
@@ -371,18 +463,23 @@ def dist_rustflags(env: dict[str, str], runtime: Path | None) -> tuple[dict[str,
     return {"CARGO_ENCODED_RUSTFLAGS": "\x1f".join(user + flags)}, []
 
 
+def pin_dependencies(crate: Path, runtime: Path | None) -> None:
+    """Pins the dependencies of a new crate to the versions the runtime is
+    tested with (and resolves them offline), for a runtime in a source
+    checkout of steelix."""
+    lock = crate / "Cargo.lock"
+    if runtime is not None and not lock.exists():
+        checkout_lock = runtime.parents[1] / "Cargo.lock"
+        if checkout_lock.is_file():
+            shutil.copyfile(checkout_lock, lock)
+
+
 def cargo_build_dist(
     crate: Path, package: str, python: Path, runtime: Path | None, *, quiet: bool
 ) -> Path:
     """Builds the crate in release mode for distribution (`STEELIX_DIST`)
     with `python`, and returns the executable."""
-    lock = crate / "Cargo.lock"
-    if runtime is not None and not lock.exists():
-        # Pin the dependencies to the versions the runtime is tested with
-        # (and resolve them offline).
-        checkout_lock = runtime.parents[1] / "Cargo.lock"
-        if checkout_lock.is_file():
-            shutil.copyfile(checkout_lock, lock)
+    pin_dependencies(crate, runtime)
     env = dict(os.environ)
     env["PYO3_PYTHON"] = str(python)
     env["STEELIX_DIST"] = "1"
@@ -391,6 +488,14 @@ def cargo_build_dist(
     env.update(rustflags_env)
     command = ["cargo", "build", "--release", "--message-format=json-render-diagnostics"]
     command += rustflags_args
+    return cargo_executable(command, crate, env, package, quiet=quiet)
+
+
+def cargo_executable(
+    command: list[str], crate: Path, env: dict[str, str], package: str, *, quiet: bool
+) -> Path:
+    """Runs the cargo `command` (with `--message-format=json..`) in the crate
+    and returns the executable it built for `package`."""
     proc = subprocess.run(
         command,
         cwd=crate,

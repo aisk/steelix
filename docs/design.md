@@ -1042,10 +1042,10 @@ m.set_global(
   - 已知差异：`__main__` 的 `__loader__` 不是 `SourceFileLoader`
   - 有项目模块时（M6，§7 的"项目"）`main.rs` 多一张模块表，调用 `rt::embed::run_project`，它在执行 `__main__` 之前安装 finder。只有一个模块时生成的代码和以前完全一样，仍然调用 `run_main`
   - `-m pkg`（M6）调用 `rt::embed::run_module(.., "pkg.__main__")`，照 `runpy._run_module_as_main` 的做法：`sys.path[0]` 是项目目录，先 import 父包，`sys.argv[0]` 和 `__file__` 是 `__main__.py` 的绝对路径，`__main__` 的 `__spec__`、`__package__`、`__loader__`、`__cached__` 来自 `pkg.__main__` 的 spec，然后在 `__main__` 模块里执行生成的代码。`argparse` 由此得到和 CPython 一样的程序名 `python -m pkg`。`-m pkg.mod` 运行普通模块也可以
-- **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块
+- **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块。M12 起只用于把转换过的库作为扩展模块发布，改写时用项目自己的测试检查原生代码不再需要它，用的是 bin 的解释器角色（§15 "用项目自己的测试检查"）
   - 有项目模块时（M6），`PyInit_*` 先调用 `rt::init_extension(m, MODULES)` 安装 finder，项目目录是扩展模块所在的目录，其余模块照样惰性执行
-  - `--mode ext -m pkg` 生成包形式的扩展模块：`pkg.so` 只导出 `PyInit_pkg`，`init_extension` 给它设置 `__path__`、`__package__` 和 spec 的 `submodule_search_locations`，于是它成了包，相对 import 和 `import pkg.sub` 都能用。包里所有的模块都转换（库的任何子模块都可能被 import），不只是静态 import 到的。扩展模块不能和包的源码目录放在一起，否则 `PathFinder` 先找到源码目录
-  - 没有做：ext 模式下的 `python -m pkg`（`NativeLoader` 没有 `get_code`，`runpy` 拿不到代码对象）
+  - `--mode ext -m pkg` 生成包形式的扩展模块：`pkg.so` 只导出 `PyInit_pkg`，`init_extension` 给它设置 `__path__`、`__package__` 和 spec 的 `submodule_search_locations`，于是它成了包，相对 import 和 `import pkg.sub` 都能用。包里所有的模块都转换（库的任何子模块都可能被 import），不只是静态 import 到的。这样安装时扩展模块不能和包的源码目录放在一起，否则 `PathFinder` 先找到源码目录
+  - 也可以把它安装成包目录里的 `pkg/__init__.so`（M12）。`FileFinder` 认 `__init__` 加上扩展模块后缀的文件，所以 import 之前 spec 就是包，`python -m pkg` 能找到 `pkg.__main__`（M6 遗留的问题：`pkg.so` 的 spec 不是包，`runpy` 在执行它之前就按普通模块处理，于是只有 `python -m pkg.__main__` 可以）。扩展模块后缀排在 `.py` 前面，`pkg/__init__.so` 和源码放在一起时也是它先被找到，包目录里也可以只有它。`init_extension` 看到文件名是 `__init__.*` 时把项目目录往上提到包目录的外面。`PyInit_pkg` 的名字不用变，`ExtensionFileLoader` 按模块名而不是文件名找它
 
 ### 分发（M7）
 
@@ -1079,7 +1079,7 @@ dist/app/src/                         项目目录，sys.path[0]
 
 **标准库**。默认不复制 `idlelib`、`tkinter`、`turtle.py`、`turtledemo`、`ensurepip`、`test`（python-build-standalone 的 install_only 本来就没有）、`config-3.14-*`（构建扩展模块用的 Makefile 和 `python.o`）、`lib-dynload/_tkinter*`（Tcl/Tk 没有带上），以及基础安装的 site-packages（pip）。`--full-stdlib` 复制全部。复制之后用构建解释器的 `compileall` 把标准库和 site-packages 编译成 `.pyc`：分发的目录多半不可写，没有 `.pyc` 时每次启动都要重新编译用到的模块。M7a 起用 `--invalidation-mode unchecked-hash`（PEP 552），`.pyc` 不再和源文件的修改时间比较。原来的时间戳校验在 `cp -r`、`scp`、部分解压工具丢掉修改时间之后全部失效，只读目录里每次启动都要重新编译（启动时间从 35 ms 回到 120 ms 左右）。标准库和 site-packages 在分发里不应该被修改，不检查源文件是安全的；真要改的话删掉对应的 `__pycache__`。`src/` 里从源码 import 的文件（上面复制的包里的 `.py`、`left_out`）也编译，用 `checked-hash`：比较源文件的哈希，不依赖修改时间，用户改了也会重新编译。转换过的模块的 `.py` 不编译。`compileall` 并行编译（`-j 0`）需要 POSIX 信号量（`/dev/shm`），失败时改为单进程再试一次；单个文件编译不过（一些包里故意放的测试数据）只给出警告，和从源码 import 时一样到 import 时才报错；`compileall` 本身失败时构建失败。
 
-**`sys.executable` 和 multiprocessing**。`sys.executable` 保持是一个 Python 解释器：开发构建是构建用的 venv 的 python，分发里是 `python/bin/python`，它是指向程序本身的符号链接，程序发现自己以 `python`、`python3`、`python3.N` 的名字运行时，用 `parse_argv = 1` 初始化，然后交给 `Py_RunMain`，行为就是 python 解释器（`-c`、`-m`、脚本、交互模式）。这样应用里常见的 `subprocess.run([sys.executable, "-m", ...])`、`[sys.executable, "-c", ...]` 都能用。解释器也安装项目模块的 finder（§7，只在 CPython 能找到源文件时回答），`--no-sources` 的分发里 `subprocess.run([sys.executable, "-m", "pkg.cli"], cwd=os.path.dirname(__file__))` 照常执行原生代码。
+**`sys.executable` 和 multiprocessing**。`sys.executable` 保持是一个 Python 解释器：开发构建是构建用的 venv 的 python，分发里是 `python/bin/python`，它是指向程序本身的符号链接，程序发现自己以 `python`、`python3`、`python3.N` 的名字运行时，用 `parse_argv = 1` 初始化，然后交给 `Py_RunMain`，行为就是 python 解释器（`-c`、`-m`、脚本、交互模式）。这样应用里常见的 `subprocess.run([sys.executable, "-m", ...])`、`[sys.executable, "-c", ...]` 都能用。解释器也安装项目模块的 finder（§7，只在 CPython 能找到源文件时回答），`--no-sources` 的分发里 `subprocess.run([sys.executable, "-m", "pkg.cli"], cwd=os.path.dirname(__file__))` 照常执行原生代码。环境变量 `STEELIX_NATIVE_IMPORTS=1` 让解释器像程序一样回答所有项目模块的 import，不管项目目录在不在 `sys.path` 上，`steelix test` 用它让测试拿到原生代码（M12，§15）。开发构建同样有这个角色，只是要通过名为 `python` 的链接启动。
 
 - 另一个选择是让 `sys.executable` 就是程序（PyInstaller 的做法），再让程序像 python 一样接受 `-c`、`-m`。但程序自己的参数也可能是 `-c`、`-m`，没法区分，所以只在可执行文件的名字上区分。代价是名为 `python`、`python3` 或 `python3.N` 的程序（脚本叫 `python.py`）不能正常运行
 - multiprocessing 的 spawn 和 forkserver（3.14 在 Linux 上默认是 forkserver）启动的子进程用 `multiprocessing.spawn.get_executable()`，默认是 `sys.executable`，命令行是 `python [解释器选项] -c "from multiprocessing.spawn import spawn_main; ..."`（还有 forkserver 和 resource tracker 的 `-c` 命令），子进程会用 python 重新执行原来的 `.py`
@@ -1356,7 +1356,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
   - 默认模式（没有 marker）另外用一个小 workspace 构建几个有 traceback 的用例（`uncaught`、`tracebacks`、`exceptions_uncaught`、`with_stmt`），要求 stdout、退出码、最后一行相同，traceback 的帧（文件名和函数名）顺序和 CPython 一样，原生帧的行号是 `def` 行
   - 混合模式：保留为 Python 的代码的 traceback 帧必须和 CPython 的最后几帧完全相同（文件名、行号、源码行）。bin 模式下的 panic 必须以退出码 1 结束（用手写的模块文件替换生成的文件来触发）
 - **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式和 `--traceback-lines` 转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
-- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。`skime`（M10）是一个 Scheme 实现（MIT 许可，约 4800 行）的原样副本加驱动脚本 `app.py`，把 `programs/` 下的 Scheme 程序喂给它的 REPL 或用嵌入 API 加载，覆盖尾递归、call/cc、宏、向量和字符串，以及从 VM 深处抛出的未捕获异常。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，M7 起 `main.rs` 里没有绝对路径，不用替换；skime 的有 1.5 万行，不做 golden），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
+- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。`skime`（M10）是一个 Scheme 实现（MIT 许可，约 4800 行）的原样副本（M12 起加上它的测试目录 `tests/`，steelix 自己的 pytest 不收集它）加驱动脚本 `app.py`，把 `programs/` 下的 Scheme 程序喂给它的 REPL 或用嵌入 API 加载，覆盖尾递归、call/cc、宏、向量和字符串，以及从 VM 深处抛出的未捕获异常。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，M7 起 `main.rs` 里没有绝对路径，不用替换；skime 的有 1.5 万行，不做 golden），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试（M12 起也以 `pkg/__init__.so` 运行 `python -m store`），`steelix test` 的测试（`inventory` 的 `store` 和 skime 自己的 108 个测试，§15），以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
 - **分发**（M7，`tests/test_dist.py`）：`tests/dist_apps/hello` 用到 json、`subprocess.run([sys.executable, "-c", ..])` 和一个第三方包，`tests/dist_apps/mp` 用 spawn 和 forkserver 的 `Pool.map`（模块级的原生函数、`__main__` 里定义的类的实例、在 worker 里抛异常）和 `ProcessPoolExecutor`。构建用的 venv 是 `target/e2e/dist-venv`，用 `python -m venv --without-pip` 创建，`site-packages` 里直接写入一个本地包 `greeting`（加上 dist-info），不需要网络，路径固定，cargo 缓存的依赖在两次测试之间仍然有效。`steelix build` 的结果在 `bwrap` 里运行：只挂载 `/usr`（和 `/lib`、`/bin` 等指向它的链接）、`/etc/ld.so.cache`、`/proc`、`/dev`、空的 `/tmp`，分发目录只读地挂在无关的 `/opt/program`，环境变量只有 `PATH`，看不到 `$HOME`、uv 的 Python、仓库和 venv（测试本身检查这一点）。在里面运行 hello（有源文件和 `--no-sources` 两种，比较输出和 traceback 的帧，有源文件时才有源码行）、json 项目的脚本和 `-m json`（`--no-sources`，和 CPython 比较 stdout、退出码和最后一行 stderr）、mp（`--no-sources`，和 CPython 的输出完全相同，worker 里也调用项目的包 `mptools` 的函数；另外以 `-m mptools.cli` 构建，`src/` 里没有 `mptools` 目录，spawn 和 forkserver 的子进程仍然能 import 转换过的子模块）、`tests/dist_apps/pkgapp`（`--no-sources`，包里的数据文件经过 `importlib.resources` 和 `pkgutil.get_data`，附带的解释器在项目目录里运行 `-m pkg.cli`，在别的目录里 import 不到项目模块，构建时对没有复制的顶层模块 `dyn.py` 给出警告）。M7a 加了几个回归测试：程序收到 multiprocessing 子进程的命令行时和 CPython 一样把它当作参数（分发和开发构建都测），分发在 bwrap 外面用假的 `HOME`（里面有 `usercustomize.py`）和 `PYTHONPATH` 等变量运行，输出不变，`STEELIX_PYTHON_ENV=1` 时生效，标准库和 site-packages 的 `.pyc` 头部是 unchecked-hash。另外检查程序里没有构建机器的路径、`--archive` 解压后的布局和链接，以及开发构建的 mp 在源文件删掉之后仍然正确。没有 `bwrap` 时这些测试跳过。dist 的组装、`project_files`（包里的数据文件）、没有复制的顶层模块的警告、`compile_tree`（`.pyc` 的校验方式、编译不过的文件、`compileall` 失败）、`inspect_python`（包括没有 `METADATA` 的 `.dist-info` 和 `include-system-site-packages = true` 的 venv）、rustflags 有单元测试，runtime 识别 multiprocessing 命令行和开发构建子进程标记的 Rust 单元测试也由 pytest 运行。ext 模式的测试另外用 `python -m store.__main__` 检查 `NativeLoader.get_code`
 - **协程和生成器的 PoC**（M13，`tests/test_poc_async.py`）：`tests/poc_async/coroutines.py` 里的协程和生成器函数在 `src/coroutines.rs` 里按以后生成的样子手写成原生代码（`rt::def!(m, async ..)`、`rt::def!(m, gen ..)`），驱动它们的代码保留为 Python（`rt::exec_python!`）。crate 由 `emit_crate` 生成后换上这个文件，要求 clippy 干净，输出、stderr（没被 await 的协程的警告）和退出码和 CPython 运行同一份源码相同，文档化的差异（§12）在测试里逐行列出
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
@@ -1423,9 +1423,31 @@ pub fn percentile<'py>(
 1. 选一个函数，读它的 Python 源码和调用方，确定参数和返回值的原生类型。可能是 `None` 的值用 `Option`，固定键的 dict 可以变成 struct。按调用图从叶子往上改写最省事
 2. 在原生模块里写新函数，顺手写单元测试
 3. 把生成的函数体换成转换加调用。原来返回 dict 或 tuple 的，在适配层里按原来的键和顺序构造，Python 一侧看到的结构不变
-4. 跑端到端测试，确认输出仍与 CPython 一致
+4. 跑端到端测试和项目自己的测试（下一节），确认输出仍与 CPython 一致
 
 转换要与原来的 Python 语义对齐，对不齐的地方要有意识地决定。例如 `extract::<u64>()` 对负数抛 `OverflowError`、对 float 抛 `TypeError`，原来的 Python 代码也许接受它们；Rust 的 `split_whitespace`、`parse` 和 Python 的 `str.split`、`int()` 在非 ASCII 空白、负号、带下划线的数字、非 ASCII 数字等边界上不同（例子里的 `parse_line` 有意把这些行当成格式错误，README 和测试里写明了）；`HashMap` 没有插入顺序，转回 Python 的 dict 顺序会变，如果下游依赖 dict 的顺序（直接遍历输出，或者排序时只比较部分键），就要用 `Vec` 或保持顺序的 map。
+
+### 用项目自己的测试检查（M12）
+
+改写时最有用的检查是项目本来就有的测试套件。M10 改写 skime 时只能另外生成一个 ext 模式的 crate，把改过的模块文件复制过去再跑 pytest。M12 起直接用 bin：
+
+```
+steelix transpile -m pkg --root . -o out/
+steelix test out/ -- tests/ -x
+```
+
+`steelix test CRATE [pytest 的参数]` 用 `cargo build` 构建 crate（`PYO3_PYTHON` 是 `--python`，默认 `$PYO3_PYTHON`，再没有就是运行 steelix 的解释器，和 `steelix build` 一样；`--release` 用 release profile），然后在当前目录运行 `python -m pytest 参数`，这里的 `python` 是可执行文件旁边 `steelix-test/bin/python` 这个指向程序的链接，程序于是处在解释器角色（§11），是完整的 python。它只构建、不转换，改写过的模块文件不会被覆盖。
+
+- **原生的 import**。解释器角色平时只在 CPython 能找到源文件时回答项目模块的 import（§7、§11），`steelix test` 设置 `STEELIX_NATIVE_IMPORTS=1`，让它和程序一样回答所有转换过的模块。测试在哪个目录运行、项目目录在不在 `sys.path` 上（项目通过 editable 安装找到、src 布局、`--import-mode=importlib`）都不影响，测试里 `import pkg` 得到的总是原生代码，`__file__`、`__spec__` 和从源码 import 一样指向项目目录里的文件。没有转换的项目模块照常从源码 import
+- **检查**。`steelix test` 加载一个 pytest 插件 `steelix_native`（`src/steelix/pytest_native.py`，复制到 `steelix-test/plugins/`，经过 `PYTHONPATH` 加载，只用标准库和 pytest，目标环境里不需要装 steelix）。结束时它报告导入了多少个转换过的模块（`steelix: 24 of 24 transpiled modules imported natively from ..`），以及项目目录里从源码 import 的其它模块；某个转换过的模块的 loader 不是 `NativeLoader`（被测试或别的工具从源码重新加载），或者 `sys.meta_path` 上根本没有 `NativeImporter`（解释器不是生成的程序）时，测试全部通过也算失败，退出码 1。插件靠 `NativeImporter` 新加的只读属性 `modules`、`root` 知道模块表
+- **pytest 从哪里来**。开发构建的解释器用构建时那个 venv 的 site-packages（§11），pytest 和项目的依赖要装在那里。只能用 `python -m pytest`，`pytest` 命令的 shebang 指向 CPython。`-m` 让当前目录成为 `sys.path[0]`，和平时一样
+- **测试文件和 conftest.py**。它们一般不在模块表里（`steelix transpile` 只转换入口静态 import 到的模块），照常从源码 import，测试代码本身仍然是 Python。即使被转换了（例如 `--include` 了整个目录），pytest 的断言改写 hook 排在 `sys.meta_path` 最前面，也会先从源码加载它们（`--assert=plain` 时除外）。包里的测试（`pkg/tests/test_x.py`）按 `pkg.tests.test_x` import，`pkg` 是原生的，`pkg.tests` 没有转换时从源码 import
+- **模块表**。只有转换过的模块是原生的。`steelix transpile app.py` 只转换入口脚本静态 import 到的模块，入口脚本自己只在被按名字 import 时才在模块表里，测试要 import 的模块不在里面时用 `--include` 加进来，插件在 `-v` 时列出没有被 import 的转换过的模块
+- **没有覆盖的**。开发构建的 `sys.executable` 是 venv 的 python（§11），测试里 `subprocess.run([sys.executable, ..])` 和 multiprocessing 的 spawn、forkserver 子进程是 CPython，从源码 import 项目模块。monkeypatch 和原生代码的关系和程序一样（§7、§12）
+
+不用 steelix 的命令也可以：`ln -s out/target/debug/app python && STEELIX_NATIVE_IMPORTS=1 ./python -m pytest tests/`，只是没有插件的检查。
+
+验证（`tests/test_projects.py`）：`inventory` 的包 `store` 在一个和项目无关的目录里跑测试，项目目录不在 `sys.path` 上，测试检查 loader 是 `NativeLoader`，包里的测试文件也能运行，把转换过的模块换成从源码加载时运行失败。skime 自己的 108 个测试（`tests/projects/skime/tests`，skime 0.3.1 的原样副本）全部通过，结果和时间见 `m10-skime.md` 第 3 节。
 
 ### 调用方
 

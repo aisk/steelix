@@ -11,6 +11,7 @@ sources: stdout, exit code, and full tracebacks with file names.
 from __future__ import annotations
 
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,10 +24,12 @@ from conftest import (
     ROOT,
     RUNTIME,
     Workspace,
+    cargo_env,
     compiler_warnings,
 )
 from test_e2e import Outcome, run
 
+from steelix.cli import pytest_command
 from steelix.emit.crate import CrateOptions, Mode, emit_project
 from steelix.project import Project, find_project
 
@@ -271,3 +274,135 @@ def test_ext_package_matches_python(tmp_path: Path) -> None:
     assert actual.stdout.replace(str(tmp_path), "<dir>") == expected.stdout.replace(
         str(root), "<dir>"
     )
+    # Installed as `store/__init__.so` the extension module is a package
+    # before it runs, so `python -m store` finds `store.__main__`.
+    package = tmp_path / "package"
+    (package / "store").mkdir(parents=True)
+    shutil.copyfile(tmp_path / "store.so", package / "store" / "__init__.so")
+    expected = run([str(PYTHON), "-B", "-m", "store"], root)
+    actual = run([str(PYTHON), "-B", "-m", "store"], package)
+    assert actual.returncode == expected.returncode == 0, actual.stderr
+    assert actual.stdout.replace(str(package), "<dir>") == expected.stdout.replace(
+        str(root), "<dir>"
+    )
+
+
+# `steelix test` (design §15): the project's own tests run with the program as
+# the Python interpreter and import the native modules.
+
+STORE_TESTS = """\
+import types
+
+import store
+from store.reports import render
+
+
+def test_package_is_native():
+    assert type(store.__spec__.loader).__name__ == "NativeLoader"
+    assert type(store.total_value) is not types.FunctionType
+
+
+def test_inventory():
+    inventory = store.Inventory()
+    inventory.add(store.Item("kiwi", 2, 3))
+    assert store.total_value(inventory) == 6
+    assert "kiwi" in render(inventory)
+"""
+
+# A test inside the package: pytest imports it as `store.test_inside`, through
+# the native `store`, while the test module itself is Python.
+INSIDE_TEST = """\
+import store
+
+
+def test_inside_the_package():
+    assert __name__ == "store.test_inside"
+    assert type(store.__spec__.loader).__name__ == "NativeLoader"
+    assert type(__spec__.loader).__name__ != "NativeLoader"
+"""
+
+# Replaces a transpiled module with one imported from its source, which the
+# plugin reports as a failure of the run.
+SOURCE_TEST = """\
+import importlib.util
+import sys
+
+import store
+
+
+def test_replace_with_source():
+    origin = store.errors.__file__
+    spec = importlib.util.spec_from_file_location("store.errors", origin)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["store.errors"] = module
+"""
+
+
+def steelix(*args: str, cwd: Path) -> Outcome:
+    proc = subprocess.run(
+        [str(PYTHON), "-m", "steelix", *args],
+        cwd=cwd,
+        env=cargo_env(extension=False),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    return Outcome(proc.stdout, proc.stderr, proc.returncode)
+
+
+@pytest.mark.e2e
+def test_steelix_test_runs_tests_natively(tmp_path: Path) -> None:
+    """`steelix test` builds the crate and runs pytest with the program as
+    `python`, in a directory that is not the project's: the tests import the
+    native modules although the project directory is not on `sys.path`."""
+    project = tmp_path / "inventory"
+    shutil.copytree(PROJECTS_DIR / "inventory", project)
+    (project / "store" / "test_inside.py").write_text(INSIDE_TEST)
+    crate = tmp_path / "crate"
+    result = steelix(
+        "transpile", "-m", "store", "--root", str(project), "-o", str(crate), "-q", cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    work = tmp_path / "work"
+    (work / "tests").mkdir(parents=True)
+    (work / "tests" / "test_store.py").write_text(STORE_TESTS)
+
+    result = steelix("test", str(crate), "--", "-p", "no:cacheprovider", "tests", cwd=work)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 passed" in result.stdout
+    # All but `store.__main__`, which the tests do not import.
+    assert "steelix: 8 of 9 transpiled modules imported natively" in result.stdout
+
+    inside = str(project / "store" / "test_inside.py")
+    result = steelix("test", str(crate), "-p", "no:cacheprovider", inside, cwd=work)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+    (work / "tests" / "test_source.py").write_text(SOURCE_TEST)
+    result = steelix("test", str(crate), "-p", "no:cacheprovider", "tests", cwd=work)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "3 passed" in result.stdout
+    assert "transpiled modules imported from source: store.errors" in result.stdout
+
+
+@pytest.mark.e2e
+def test_skime_tests_run_natively(projects_workspace: Workspace, tmp_path: Path) -> None:
+    """skime's own 108 tests (`tests/projects/skime/tests`, from skime 0.3.1)
+    pass against the transpiled skime, like `steelix test` runs them."""
+    shutil.copytree(PROJECTS_DIR / "skime" / "tests", tmp_path / "tests")
+    command, env = pytest_command(binary(BY_NAME["skime"]).with_name("skime_default"), [])
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [*command, "-p", "no:cacheprovider", "tests"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "108 passed" in proc.stdout
+    assert "steelix: 24 of 24 transpiled modules imported natively" in proc.stdout

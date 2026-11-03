@@ -235,6 +235,14 @@ fn role(args: &[OsString], paths: &Paths) -> Role {
 /// the machine it runs on does not change the program (design §11).
 pub const PYTHON_ENV: &str = "STEELIX_PYTHON_ENV";
 
+/// The environment variable that makes the executable in the interpreter
+/// role answer every import of a transpiled module with its native code
+/// when it is `1`, like the program does, instead of only the imports that
+/// would find the module's source on `sys.path`. `steelix test` sets it, so
+/// that the project's tests run against the native code wherever the
+/// project directory is (design §15).
+pub const NATIVE_IMPORTS: &str = "STEELIX_NATIVE_IMPORTS";
+
 /// How the interpreter is configured beyond the command line.
 #[derive(Clone, Copy)]
 struct Isolation {
@@ -299,16 +307,17 @@ fn run(script: &Script, modules: &'static [NativeModule], main: Main) -> ExitCod
                 // The project's modules, where CPython would find their
                 // sources: `python/bin/python -m pkg.cli` in the project
                 // directory, and `multiprocessing` children, which get the
-                // parent's `sys.path`.
+                // parent's `sys.path`. Or all of them, for the project's
+                // tests (`steelix test`).
+                let scope = if std::env::var_os(NATIVE_IMPORTS).is_some_and(|v| v == "1") {
+                    Scope::Always
+                } else {
+                    Scope::OnPath
+                };
                 let importer = if modules.is_empty() {
                     None
                 } else {
-                    Some(importer::install(
-                        py,
-                        &paths.project,
-                        modules,
-                        Scope::OnPath,
-                    )?)
+                    Some(importer::install(py, &paths.project, modules, scope)?)
                 };
                 if multiprocessing::is_child_command(&args) {
                     multiprocessing::install_main_fixups(py, main, &paths.file, importer)?;

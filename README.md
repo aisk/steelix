@@ -116,6 +116,7 @@ The generated crates depend on the [`steelix-runtime`](https://crates.io/crates/
 steelix transpile app.py -o out/               # a crate for app.py and the project modules it imports
 steelix transpile -m pkg --root src/ -o out/   # the same for `python -m pkg`
 steelix build app.py                           # transpile, build and assemble a relocatable dist/app/
+steelix test out/ -- tests/                    # run the project's pytest suite against the native modules
 steelix coverage app.py                        # how much of the code becomes Rust
 ```
 
@@ -128,6 +129,10 @@ When building a generated crate yourself, point PyO3 at the interpreter whose pa
 Each generated function keeps its Python calling convention, so it can be rewritten on its own: keep the signature as an adapter, move the logic into plain Rust, convert the arguments at the boundary. The rest of the program, including Python code that calls the function, does not notice. [`examples/logsum`](examples/logsum) shows a small CLI before and after rewriting some of its functions.
 
 Python containers can stay as they are at first (a `PyDict` is fine in Rust code), so the first step only changes the logic, not the data model.
+
+The project's own tests check each step. `steelix test out/ -- tests/` builds the crate and runs `python -m pytest tests/` with the generated executable acting as the Python interpreter: every import of a transpiled module gets the native code, wherever the project directory is, and the run fails if a transpiled module was imported from its Python source instead. pytest comes from the environment of the interpreter the crate is built with (`--python`, default `$PYO3_PYTHON`).
+
+`--mode ext` builds a PyO3 extension module instead of an executable, for publishing a transpiled library. Install a package as `pkg/__init__.so` so that `python -m pkg` works.
 
 ## What is missing
 

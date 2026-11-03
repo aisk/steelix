@@ -166,7 +166,7 @@
 - [x] ext 模式：有项目模块时安装 finder；`--mode ext -m pkg` 生成包形式的扩展模块（§11）
 - [x] 测试：多模块测试应用 `tests/projects/inventory`、标准库 `json` 包（也以 `python -m json` 运行），golden、clippy、与 CPython 比较完整 traceback 的 e2e
 - [x] 发现的问题：Python 参数 `_m` 和上下文参数 `m` 触发 clippy 的 `duplicate_underscore_argument`，这时上下文参数改叫 `module`；类的 mod 和所在模块同名（`module_inception`）时加 `_`；crate 根上 allow `too_many_arguments` 和 `doc_lazy_continuation`（§14）
-- [ ] ext 模式下 `python -m pkg`：M7a 给 `NativeLoader` 加了 `get_code`，剩下的问题是扩展模块 `pkg` 的 spec 不是包，runpy 不会去找 `pkg.__main__`
+- [x] ext 模式下 `python -m pkg`：M7a 给 `NativeLoader` 加了 `get_code`，剩下的问题是扩展模块 `pkg` 的 spec 不是包，runpy 不会去找 `pkg.__main__`。M12 用 `pkg/__init__.so` 的安装方式解决
 - [ ] 命名空间包（没有 `__init__.py` 的目录）里的模块现在不转换
 
 ## M7 分发 ✅
@@ -191,7 +191,7 @@
 - [x] 附带的解释器安装项目模块的 finder，只在 CPython 能找到源文件时回答（项目目录在 `sys.path` 里），`--no-sources` 的分发里 `subprocess.run([sys.executable, "-m", "pkg.cli"], cwd=项目目录)` 能用。比较路径时不要求目录存在：`--no-sources` 的分发里转换过的包没有目录，最初用 `canonicalize` 比较时 spawn 的子进程 import 不到 `pkg.sub`，Pool 不停地重启 worker（验收时发现，`tests/dist_apps/mp/mptools` 是回归测试）
 - [x] 小修：`SpawnFinder` 完成任务后把自己从 `sys.meta_path` 去掉；子进程里原生 `__main__` 出错时恢复 `sys.modules["__mp_main__"]`；purelib 和 platlib 不同时 `.pth` 的警告不再重复；输出路径是文件时报 `DistError`；remap 参数追加到用户的 rustflags 后面而不是覆盖；`inspect_python` 能处理没有 `METADATA` 的 `.dist-info`；`--python` 是 `include-system-site-packages = true` 的 venv 时给出警告
 - [x] §12 记录 `PYTHONSAFEPATH`（`-P`）的差异
-- ext 模式下 `python -m pkg`（M6 遗留）仍然不行：`pkg` 是扩展模块，runpy 在它变成包之前就按普通模块处理。`python -m pkg.__main__` 现在可以
+- ext 模式下 `python -m pkg`（M6 遗留）仍然不行：`pkg` 是扩展模块，runpy 在它变成包之前就按普通模块处理。`python -m pkg.__main__` 现在可以（M12 起安装成 `pkg/__init__.so` 时 `python -m pkg` 也可以）
 
 ## M8 推导式与其它 ✅
 
@@ -288,13 +288,13 @@ runtime 的宏变了（`rt::def!` 的装饰器和 `as`、`rt::class!` 的 `futur
 
 M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext 两个 crate 之间手工复制，只为了能用项目自己的 pytest 测原生代码。不做"一个 crate 同时产出 bin 和 ext"，改为直接用 bin 跑测试：程序以 `python` 的名字启动时就是完整的解释器，并且安装了原生 importer（M7a），`import` 项目模块得到的就是原生代码。
 
-- [ ] 提供用生成的程序以解释器身份运行项目测试的入口（例如 `steelix test` 或文档里的一条命令），确认测试里 import 的项目模块是原生的，项目目录不在 `sys.path` 上时也能找到
-- [ ] 用 skime 的 108 个测试验证这条路径，替代 M10 的 ext 复制脚本
+- [x] 提供用生成的程序以解释器身份运行项目测试的入口：`steelix test CRATE [pytest 参数]` 构建 crate，通过名为 `python` 的链接以解释器角色运行 `python -m pytest`，`STEELIX_NATIVE_IMPORTS=1` 让解释器回答所有转换过的模块的 import（项目目录不在 `sys.path` 上也一样），pytest 插件 `steelix_native` 报告原生导入的模块数，转换过的模块从源码 import 时运行失败（§15）
+- [x] 用 skime 的 108 个测试验证这条路径，替代 M10 的 ext 复制脚本：测试目录（skime 0.3.1 的原样副本）放在 `tests/projects/skime/tests`，`tests/test_projects.py` 在一个和项目无关的目录里运行它们，108 个全部通过，24 个模块都是原生的（`m10-skime.md` 第 3 节）。`inventory` 的 `store` 另有测试覆盖包里的测试文件和从源码 import 的检查
 - [ ] 补充 §15：被多个模块共享读写的类（如 skime 的 `Context`）怎么改写，适配层怎样构造别的模块的类、抛项目自己的异常类，Python 源码本身是生成出来的时候怎么保持单一来源
 - [ ] 属性读写索引：列出每个实例属性被哪些函数读写，改写共享的类之前先看这张表
 - [ ] `#[pyclass]` 改写草稿（只在用户指定某个类时生成，不接入构建）：字段取自 `__static_attributes__`，类型先留成 `Py<PyAny>` 加 TODO，并且和属性读写索引一起报告这个类是否被继承、有没有动态 `setattr`/`getattr`、`__dict__`/`vars` 的使用、装饰器和 metaclass，作为 §15 第二步的起点。不做自动升级（§10）
-- [ ] ext 模式下 `python -m pkg`（M6 遗留）
-- [ ] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程
+- [x] ext 模式下 `python -m pkg`（M6 遗留）：改写流程不再需要它，但发布的库也可能有 `__main__`。扩展模块安装成 `pkg/__init__.so` 时 import 之前就是包，`runpy` 能找到 `pkg.__main__`，`init_extension` 据此把项目目录提到包目录外面（§11）
+- [x] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程：§11、§15、README 改成用 bin 的解释器角色跑项目自己的测试
 
 ## M13 协程和生成器（PoC）
 
