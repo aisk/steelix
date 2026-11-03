@@ -10,18 +10,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // Copied unmodified (below this header) from Lib/json/__main__.py of CPython 3.14.9,
         // licensed under the PSF License Agreement. A steelix test project:
         // tests/test_projects.py runs it transpiled and with CPython and compares.
-        frame.line(16);
         m.set_global("json", rt::import(m, "json.tool")?)?;
-        frame.line(19);
         if m.global("__name__")?.eq("__main__")? {
-            frame.line(21);
             match (|| m.global("json")?.getattr("tool")?.call_method0("main"))() {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyBrokenPipeError>(m.py()) => {
                     let exception = frame.catch(err);
                     m.set_global("exc", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(23);
                     return Err(frame.raise(PySystemExit::new_err((m
                         .global("exc")?
                         .getattr("errno")?

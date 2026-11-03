@@ -80,17 +80,22 @@ def make_workspace(
     *,
     from_golden: bool,
     source_dir: Path = CASES_DIR,
+    traceback_lines: bool = False,
 ) -> Workspace:
     """Generate one crate per case under a shared cargo workspace.
 
     With `from_golden` the generated module file is replaced by the golden
     snapshot, so that the snapshots themselves are what gets compiled.
+    `traceback_lines` emits the `frame.line(n)` markers, for tests that
+    compare tracebacks with CPython's line for line (design §9).
     """
     root = E2E_DIR / name
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
-    options = CrateOptions(mode=mode, runtime_path=RUNTIME, standalone=False)
+    options = CrateOptions(
+        mode=mode, runtime_path=RUNTIME, standalone=False, traceback_lines=traceback_lines
+    )
     for case in cases:
         parsed = parse_file(source_dir / f"{case}.py")
         crate = root / case

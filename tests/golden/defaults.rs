@@ -12,8 +12,7 @@ pub fn greet<'py>(
     greeting: &Bound<'py, PyAny>,
     punct: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "greet", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "greet", 4, |_| {
         greeting.add(", ")?.add(name)?.add(punct)
     })
 }
@@ -26,14 +25,12 @@ pub fn span<'py>(
     step: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "span", 8, |frame| {
+    rt::frame!(m, "span", 8, |_| {
         let mut start = start.clone();
         let mut stop = stop.clone();
         if stop.is_none() {
-            frame.line(10);
             [start, stop] = rt::unpack(PyTuple::new(py, [&rt::int(py, 0), &start])?.as_any())?;
         }
-        frame.line(11);
         Ok(PyList::new(py, [&start, &stop, step])?.into_any())
     })
 }
@@ -46,8 +43,7 @@ pub fn collect<'py>(
     sep: &Bound<'py, PyAny>,
     options: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "collect", 14, |frame| {
-        frame.line(15);
+    rt::frame!(m, "collect", 14, |_| {
         Ok(PyList::new(m.py(), [first, rest.as_any(), sep, options.as_any()])?.into_any())
     })
 }
@@ -58,9 +54,8 @@ pub fn append_to<'py>(
     item: &Bound<'py, PyAny>,
     bucket: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "append_to", 18, |frame| {
+    rt::frame!(m, "append_to", 18, |_| {
         // The default list is created once and shared by every call.
-        frame.line(20);
         bucket.call_method1("append", (item,))?;
         Ok(bucket.clone())
     })
@@ -72,10 +67,7 @@ pub fn keyword_only<'py>(
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "keyword_only", 24, |frame| {
-        frame.line(25);
-        a.mul(10)?.add(b)
-    })
+    rt::frame!(m, "keyword_only", 24, |_| { a.mul(10)?.add(b) })
 }
 
 // defaults.py:28
@@ -84,16 +76,13 @@ pub fn scale<'py>(
     x: &Bound<'py, PyAny>,
     factor: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "scale", 28, |frame| {
-        frame.line(29);
-        x.mul(factor)
-    })
+    rt::frame!(m, "scale", 28, |_| { x.mul(factor) })
 }
 
 /// Executes the body of `defaults.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Default, keyword, keyword-only, positional-only, *args and **kwargs parameters.",
@@ -103,10 +92,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, collect(first, *rest, sep = "-", **options))?;
         rt::def!(m, append_to(item, bucket = PyList::empty(py)))?;
         rt::def!(m, keyword_only(*, a, b = 2))?;
-        frame.line(28);
         rt::def!(m, scale(x, factor = rt::int(py, 10).mul(2)?))?;
         // Direct calls with omitted defaults, keywords in any order, *args and **kwargs.
-        frame.line(33);
         rt::builtins::print(
             py,
             (
@@ -130,7 +117,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             ),
         )?;
-        frame.line(34);
         rt::builtins::print(
             py,
             (
@@ -149,7 +135,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 span(m, &rt::int(py, 2), &rt::int(py, 8), &rt::int(py, 3))?,
             ),
         )?;
-        frame.line(35);
         rt::builtins::print(
             py,
             (
@@ -169,7 +154,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             ),
         )?;
-        frame.line(36);
         rt::builtins::print(
             py,
             (
@@ -178,7 +162,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 append_to(m, &rt::int(py, 3), PyList::empty(py).as_any())?,
             ),
         )?;
-        frame.line(37);
         rt::builtins::print(
             py,
             (
@@ -186,15 +169,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 keyword_only(m, &rt::int(py, 2), &rt::int(py, 5))?,
             ),
         )?;
-        frame.line(38);
         rt::builtins::print(
             py,
             (scale(m, &rt::int(py, 2), &m.default("scale", "factor")?)?,),
         )?;
         // The same through the function objects.
-        frame.line(41);
         m.set_global("call", m.global("greet")?)?;
-        frame.line(42);
         rt::builtins::print(
             py,
             (
@@ -202,7 +182,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::call!(m.global("call")?, name = "Kim", punct = ".")?,
             ),
         )?;
-        frame.line(43);
         rt::builtins::print(
             py,
             (
@@ -212,16 +191,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ),
         )?;
         // Defaults are read from the function object at call time.
-        frame.line(46);
         let value = PyTuple::new(py, ["Howdy"])?;
         m.global("greet")?.setattr("__defaults__", value)?;
-        frame.line(47);
         let value = [("punct", "?!")].into_py_dict(py)?;
         m.global("greet")?.setattr("__kwdefaults__", value)?;
-        frame.line(48);
         let value = PyTuple::new(py, [3])?;
         m.global("scale")?.setattr("__defaults__", value)?;
-        frame.line(49);
         rt::builtins::print(
             py,
             (
@@ -235,9 +210,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 scale(m, &rt::int(py, 2), &m.default("scale", "factor")?)?,
             ),
         )?;
-        frame.line(50);
         m.global("greet")?.setattr("__kwdefaults__", py.None())?;
-        frame.line(51);
         rt::builtins::print(
             py,
             (
@@ -245,7 +218,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("keyword_only")?.getattr("__defaults__")?,
             ),
         )?;
-        frame.line(52);
         rt::builtins::print(py, (m.global("append_to")?.getattr("__defaults__")?,))?;
         Ok(())
     })

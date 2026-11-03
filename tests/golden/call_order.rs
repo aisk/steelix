@@ -11,8 +11,7 @@ pub fn show<'py>(
     label: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "show", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "show", 4, |_| {
         rt::builtins::print(m.py(), ("eval", label))?;
         Ok(value.clone())
     })
@@ -24,8 +23,7 @@ pub fn target<'py>(
     args: &Bound<'py, PyTuple>,
     kwargs: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "target", 9, |frame| {
-        frame.line(10);
+    rt::frame!(m, "target", 9, |_| {
         Ok(PyList::new(m.py(), [args.as_any(), kwargs.as_any()])?.into_any())
     })
 }
@@ -38,8 +36,7 @@ pub fn fixed<'py>(
     c: &Bound<'py, PyAny>,
     d: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "fixed", 13, |frame| {
-        frame.line(14);
+    rt::frame!(m, "fixed", 13, |_| {
         Ok(PyList::new(m.py(), [a, b, c, d])?.into_any())
     })
 }
@@ -47,7 +44,7 @@ pub fn fixed<'py>(
 /// Executes the body of `call_order.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Evaluation order of call arguments with keywords, `*` and `**`.",
@@ -55,7 +52,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, show(label, value = py.None()))?;
         rt::def!(m, target(*args, **kwargs))?;
         rt::def!(m, fixed(a, b, c = 3, *, d = 4))?;
-        frame.line(17);
         rt::builtins::print(
             py,
             (rt::call!(
@@ -67,7 +63,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 **show(m, &rt::str(py, "kw"), [("z", 6)].into_py_dict(py)?.as_any())?
             )?,),
         )?;
-        frame.line(18);
         rt::builtins::print(
             py,
             (rt::call!(
@@ -77,7 +72,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 y = show(m, &rt::str(py, "y"), &rt::int(py, 2))?
             )?,),
         )?;
-        frame.line(19);
         {
             let a = show(m, &rt::str(py, "1"), &rt::int(py, 1))?;
             let c = show(m, &rt::str(py, "c"), &rt::int(py, 30))?;
@@ -92,7 +86,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,),
             )?;
         }
-        frame.line(20);
         rt::builtins::print(
             py,
             (rt::call!(
@@ -105,7 +98,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?
             )?,),
         )?;
-        frame.line(21);
         rt::builtins::print(
             py,
             (
@@ -115,7 +107,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ))?,
             ),
         )?;
-        frame.line(22);
         rt::builtins::print(
             py,
             (

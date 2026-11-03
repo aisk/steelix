@@ -21,8 +21,7 @@ pub fn trace<'py>(
     label: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "trace", 5, |frame| {
-        frame.line(6);
+    rt::frame!(m, "trace", 5, |_| {
         rt::builtins::print(m.py(), ("eval", label))?;
         Ok(value.clone())
     })
@@ -30,8 +29,7 @@ pub fn trace<'py>(
 
 // classes_build.py:10
 pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "deco", 10, |frame| {
-        frame.line(11);
+    rt::frame!(m, "deco", 10, |_| {
         rt::builtins::print(m.py(), ("deco", label))?;
         // classes_build.py:13
         fn apply<'py>(
@@ -40,10 +38,8 @@ pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bou
             cls: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(m, "deco.<locals>.apply", 13, |frame| {
-                frame.line(14);
+            rt::frame!(m, "deco.<locals>.apply", 13, |_| {
                 rt::builtins::print(py, ("apply", label, cls.getattr("__name__")?))?;
-                frame.line(15);
                 cls.setattr(
                     "decorated",
                     rt::builtin(py, "getattr")?
@@ -67,7 +63,7 @@ pub fn fake_meta<'py>(
     kwargs: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "fake_meta", 264, |frame| {
+    rt::frame!(m, "fake_meta", 264, |_| {
         // classes_build.py:265
         fn genexpr<'py>(
             m: &rt::Module<'py>,
@@ -84,7 +80,6 @@ pub fn fake_meta<'py>(
                 Ok(None)
             })
         }
-        frame.line(265);
         rt::builtins::print(
             py,
             (
@@ -119,19 +114,15 @@ pub mod ordered {
     // classes_build.py:27
     /// The body of `class Ordered`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Ordered", 25, |frame| {
-            frame.line(28);
+        rt::frame!(ns, "Ordered", 25, |_| {
             ns.get("print")?.call1((
                 "body start",
                 ns.get("__name__")?,
                 ns.get("__module__")?,
                 ns.get("__qualname__")?,
             ))?;
-            frame.line(29);
             ns.set("x", ns.get("trace")?.call1(("x", 1))?)?;
-            frame.line(30);
             ns.set("y", ns.get("x")?.add(1)?)?;
-            frame.line(31);
             ns.get("print")?
                 .call1(("body end", ns.get("x")?, ns.get("y")?))?;
             Ok(())
@@ -145,9 +136,8 @@ pub mod logged {
     // classes_build.py:37
     /// The body of `class Logged`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Logged", 37, |frame| {
+        rt::frame!(ns, "Logged", 37, |_| {
             let __class__ = ns.class_cell();
-            frame.line(38);
             ns.set(
                 "__setitem__",
                 rt::function!(
@@ -169,10 +159,8 @@ pub mod logged {
         value: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Logged.__setitem__", 38, |frame| {
-            frame.line(39);
+        rt::frame!(m, "Logged.__setitem__", 38, |_| {
             rt::builtins::print(py, ("set", key))?;
-            frame.line(40);
             rt::super_(__class__, slf)?.call_method1("__setitem__", (key, value))?;
             Ok(rt::none(py))
         })
@@ -185,9 +173,8 @@ pub mod meta {
     // classes_build.py:43
     /// The body of `class Meta`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Meta", 43, |frame| {
+        rt::frame!(ns, "Meta", 43, |_| {
             let __class__ = ns.class_cell();
-            frame.line(45);
             {
                 let decorator = ns.get("classmethod")?;
                 let function = rt::function!(
@@ -197,7 +184,6 @@ pub mod meta {
                 )?;
                 ns.set("__prepare__", decorator.call1((function,))?)?;
             }
-            frame.line(49);
             ns.set(
                 "__new__",
                 rt::function!(
@@ -206,7 +192,6 @@ pub mod meta {
                     qualname = "Meta.__new__"
                 )?,
             )?;
-            frame.line(53);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -228,8 +213,7 @@ pub mod meta {
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Meta.__prepare__", 44, |frame| {
-            frame.line(46);
+        rt::frame!(m, "Meta.__prepare__", 44, |_| {
             let list = PyList::empty(py);
             for b in bases.try_iter()? {
                 let b = b?;
@@ -237,7 +221,6 @@ pub mod meta {
                 py.check_signals()?;
             }
             rt::builtins::print(py, ("prepare", name, list, kwargs))?;
-            frame.line(47);
             m.global("Logged")?.call0()
         })
     }
@@ -253,13 +236,11 @@ pub mod meta {
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Meta.__new__", 49, |frame| {
-            frame.line(50);
+        rt::frame!(m, "Meta.__new__", 49, |_| {
             rt::builtins::print(
                 py,
                 ("new", name, rt::builtin(py, "sorted")?.call1((kwargs,))?),
             )?;
-            frame.line(51);
             rt::super_(__class__, mcls)?.getattr("__new__")?.call1((
                 mcls,
                 name,
@@ -280,10 +261,8 @@ pub mod meta {
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Meta.__init__", 53, |frame| {
-            frame.line(54);
+        rt::frame!(m, "Meta.__init__", 53, |_| {
             rt::builtins::print(py, ("init", name))?;
-            frame.line(55);
             rt::super_(__class__, cls)?.call_method1("__init__", (name, bases, ns))?;
             Ok(rt::none(py))
         })
@@ -297,13 +276,10 @@ pub mod with_meta {
     // classes_build.py:58
     /// The body of `class WithMeta`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "WithMeta", 58, |frame| {
+        rt::frame!(ns, "WithMeta", 58, |_| {
             let __class__ = ns.class_cell();
-            frame.line(59);
             ns.set("__doc__", "Doc.")?;
-            frame.line(61);
             ns.set("a", 1)?;
-            frame.line(63);
             ns.set(
                 "method",
                 rt::function!(
@@ -323,8 +299,7 @@ pub mod with_meta {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "WithMeta.method", 63, |frame| {
-            frame.line(64);
+        rt::frame!(m, "WithMeta.method", 63, |_| {
             rt::super_(__class__, slf)?
                 .call_method0("__repr__")?
                 .get_item(rt::slice(py, py.None(), 9)?)
@@ -339,11 +314,9 @@ pub mod plugin {
     /// The body of `class Plugin`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
-        rt::frame!(ns, "Plugin", 70, |frame| {
+        rt::frame!(ns, "Plugin", 70, |_| {
             let __class__ = ns.class_cell();
-            frame.line(71);
             ns.set("registry", PyList::empty(py))?;
-            frame.line(73);
             ns.set(
                 "__init_subclass__",
                 rt::function!(
@@ -364,13 +337,11 @@ pub mod plugin {
         name: &Bound<'py, PyAny>,
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Plugin.__init_subclass__", 73, |frame| {
-            frame.line(74);
+        rt::frame!(m, "Plugin.__init_subclass__", 73, |_| {
             rt::call!(
                 rt::super_(__class__, cls)?.getattr("__init_subclass__")?,
                 **kwargs
             )?;
-            frame.line(75);
             cls.setattr(
                 "plugin_name",
                 if name.is_truthy()? {
@@ -379,7 +350,6 @@ pub mod plugin {
                     cls.getattr("__name__")?.call_method0("lower")?
                 },
             )?;
-            frame.line(76);
             m.global("Plugin")?
                 .getattr("registry")?
                 .getattr("append")?
@@ -415,8 +385,7 @@ pub mod field {
     // classes_build.py:90
     /// The body of `class Field`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Field", 90, |frame| {
-            frame.line(91);
+        rt::frame!(ns, "Field", 90, |_| {
             ns.set(
                 "__set_name__",
                 rt::function!(
@@ -425,7 +394,6 @@ pub mod field {
                     qualname = "Field.__set_name__"
                 )?,
             )?;
-            frame.line(95);
             ns.set(
                 "__get__",
                 rt::function!(
@@ -446,10 +414,8 @@ pub mod field {
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Field.__set_name__", 91, |frame| {
-            frame.line(92);
+        rt::frame!(m, "Field.__set_name__", 91, |_| {
             rt::builtins::print(py, ("set_name", owner.getattr("__name__")?, name))?;
-            frame.line(93);
             slf.setattr("name", name)?;
             Ok(rt::none(py))
         })
@@ -462,11 +428,10 @@ pub mod field {
         obj: &Bound<'py, PyAny>,
         objtype: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Field.__get__", 95, |frame| {
+        rt::frame!(m, "Field.__get__", 95, |_| {
             if obj.is_none() {
                 return Ok(slf.clone());
             }
-            frame.line(98);
             obj.getattr("__dict__")?
                 .getattr("get")?
                 .call1((slf.getattr("name")?, "unset"))
@@ -480,10 +445,8 @@ pub mod record {
     // classes_build.py:101
     /// The body of `class Record`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Record", 101, |frame| {
-            frame.line(102);
+        rt::frame!(ns, "Record", 101, |_| {
             ns.set("title", ns.get("Field")?.call0()?)?;
-            frame.line(103);
             ns.set("body", ns.get("Field")?.call0()?)?;
             Ok(())
         })
@@ -496,8 +459,7 @@ pub mod alias {
     // classes_build.py:111
     /// The body of `class Alias`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Alias", 111, |frame| {
-            frame.line(112);
+        rt::frame!(ns, "Alias", 111, |_| {
             ns.set(
                 "__mro_entries__",
                 rt::function!(
@@ -517,10 +479,8 @@ pub mod alias {
         bases: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Alias.__mro_entries__", 112, |frame| {
-            frame.line(113);
+        rt::frame!(m, "Alias.__mro_entries__", 112, |_| {
             rt::builtins::print(py, ("mro_entries", bases.len()?))?;
-            frame.line(114);
             Ok(PyTuple::new(py, [&m.global("Base")?])?.into_any())
         })
     }
@@ -555,7 +515,6 @@ pub mod errors {
         let py = m.py();
         rt::frame!(ns, "Errors", 161, |frame| {
             match (|| -> PyResult<()> {
-                frame.line(164);
                 ns.set(
                     "Bad",
                     rt::class!(
@@ -573,14 +532,12 @@ pub mod errors {
                     let exception = frame.catch(err);
                     ns.set("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(168);
                     ns.get("print")?.call1(("TypeError:", ns.get("err")?))?;
                     ns.unbind("err")?;
                 }
                 Err(err) => return Err(err),
             }
             match (|| -> PyResult<()> {
-                frame.line(171);
                 ns.set(
                     "Bad2",
                     rt::class!(
@@ -598,14 +555,12 @@ pub mod errors {
                     let exception = frame.catch(err);
                     ns.set("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(175);
                     ns.get("print")?.call1(("TypeError:", ns.get("err")?))?;
                     ns.unbind("err")?;
                 }
                 Err(err) => return Err(err),
             }
             match (|| -> PyResult<()> {
-                frame.line(178);
                 ns.set(
                     "Bad3",
                     rt::class!(
@@ -626,7 +581,6 @@ pub mod errors {
                     let exception = frame.catch(err);
                     ns.set("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(182);
                     ns.get("print")?.call1(("TypeError:", ns.get("err")?))?;
                     ns.unbind("err")?;
                 }
@@ -723,8 +677,7 @@ pub mod bad_entries {
     // classes_build.py:210
     /// The body of `class BadEntries`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "BadEntries", 210, |frame| {
-            frame.line(211);
+        rt::frame!(ns, "BadEntries", 210, |_| {
             ns.set(
                 "__mro_entries__",
                 rt::function!(
@@ -743,8 +696,7 @@ pub mod bad_entries {
         slf: &Bound<'py, PyAny>,
         bases: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "BadEntries.__mro_entries__", 211, |frame| {
-            frame.line(212);
+        rt::frame!(m, "BadEntries.__mro_entries__", 211, |_| {
             Ok(PyList::new(m.py(), [&m.global("Base")?])?.into_any())
         })
     }
@@ -766,8 +718,7 @@ pub mod bad_prepare {
     // classes_build.py:224
     /// The body of `class BadPrepare`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "BadPrepare", 224, |frame| {
-            frame.line(226);
+        rt::frame!(ns, "BadPrepare", 224, |_| {
             {
                 let decorator = ns.get("classmethod")?;
                 let function = rt::function!(
@@ -808,9 +759,8 @@ pub mod drop_cell {
     // classes_build.py:239
     /// The body of `class DropCell`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "DropCell", 239, |frame| {
+        rt::frame!(ns, "DropCell", 239, |_| {
             let __class__ = ns.class_cell();
-            frame.line(240);
             ns.set(
                 "__new__",
                 rt::function!(
@@ -833,9 +783,8 @@ pub mod drop_cell {
         ns: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "DropCell.__new__", 240, |frame| {
+        rt::frame!(m, "DropCell.__new__", 240, |_| {
             let mut ns = ns.clone();
-            frame.line(241);
             let dict = PyDict::new(py);
             for item in ns.call_method0("items")?.try_iter()? {
                 let [k, v] = rt::unpack(&item?)?;
@@ -845,7 +794,6 @@ pub mod drop_cell {
                 py.check_signals()?;
             }
             ns = dict.into_any();
-            frame.line(242);
             rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, &ns))
         })
     }
@@ -857,9 +805,8 @@ pub mod bad6 {
     // classes_build.py:247
     /// The body of `class Bad6`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Bad6", 247, |frame| {
+        rt::frame!(ns, "Bad6", 247, |_| {
             let __class__ = ns.class_cell();
-            frame.line(248);
             ns.set(
                 "method",
                 rt::function!(
@@ -878,10 +825,7 @@ pub mod bad6 {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Bad6.method", 248, |frame| {
-            frame.line(249);
-            __class__.get()
-        })
+        rt::frame!(m, "Bad6.method", 248, |_| { __class__.get() })
     }
 }
 
@@ -901,8 +845,7 @@ pub mod not_a_class {
     // classes_build.py:269
     /// The body of `class NotAClass`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "NotAClass", 269, |frame| {
-            frame.line(270);
+        rt::frame!(ns, "NotAClass", 269, |_| {
             ns.set("value", 1)?;
             Ok(())
         })
@@ -915,8 +858,7 @@ pub mod conditional {
     // classes_build.py:278
     /// The body of `class Conditional`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Conditional", 278, |frame| {
-            frame.line(279);
+        rt::frame!(ns, "Conditional", 278, |_| {
             ns.set("branch", "then")?;
             Ok(())
         })
@@ -929,8 +871,7 @@ pub mod conditional_ {
     // classes_build.py:283
     /// The body of `class Conditional`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Conditional", 283, |frame| {
-            frame.line(284);
+        rt::frame!(ns, "Conditional", 283, |_| {
             ns.set("branch", "else")?;
             Ok(())
         })
@@ -943,8 +884,7 @@ pub mod outer {
     // classes_build.py:290
     /// The body of `class Outer`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Outer", 290, |frame| {
-            frame.line(291);
+        rt::frame!(ns, "Outer", 290, |_| {
             ns.set(
                 "Inner",
                 rt::class!(
@@ -955,7 +895,6 @@ pub mod outer {
                     qualname = "Outer.Inner"
                 )?,
             )?;
-            frame.line(296);
             ns.set(
                 "make",
                 rt::function!(ns, make(slf as "self"), qualname = "Outer.make")?,
@@ -970,8 +909,7 @@ pub mod outer {
         // classes_build.py:291
         /// The body of `class Outer.Inner`, run in its namespace `ns`.
         pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-            rt::frame!(ns, "Outer.Inner", 291, |frame| {
-                frame.line(292);
+            rt::frame!(ns, "Outer.Inner", 291, |_| {
                 ns.set(
                     "Deepest",
                     rt::class!(
@@ -992,8 +930,7 @@ pub mod outer {
             // classes_build.py:292
             /// The body of `class Outer.Inner.Deepest`, run in its namespace `ns`.
             pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-                rt::frame!(ns, "Outer.Inner.Deepest", 292, |frame| {
-                    frame.line(293);
+                rt::frame!(ns, "Outer.Inner.Deepest", 292, |_| {
                     ns.set(
                         "where",
                         rt::function!(
@@ -1011,8 +948,7 @@ pub mod outer {
                 m: &rt::Module<'py>,
                 slf: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "Outer.Inner.Deepest.where", 293, |frame| {
-                    frame.line(294);
+                rt::frame!(m, "Outer.Inner.Deepest.where", 293, |_| {
                     slf.get_type().getattr("__qualname__")
                 })
             }
@@ -1021,8 +957,7 @@ pub mod outer {
 
     // classes_build.py:296
     pub fn make<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Outer.make", 296, |frame| {
-            frame.line(297);
+        rt::frame!(m, "Outer.make", 296, |_| {
             slf.getattr("Inner")?.call_method0("Deepest")
         })
     }
@@ -1034,8 +969,7 @@ pub mod in_loop {
     // classes_build.py:304
     /// The body of `class InLoop`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "InLoop", 304, |frame| {
-            frame.line(305);
+        rt::frame!(ns, "InLoop", 304, |_| {
             ns.set("index", ns.get("i")?)?;
             Ok(())
         })
@@ -1048,9 +982,8 @@ pub mod original {
     // classes_build.py:319
     /// The body of `class Original`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Original", 318, |frame| {
+        rt::frame!(ns, "Original", 318, |_| {
             let __class__ = ns.class_cell();
-            frame.line(320);
             ns.set(
                 "hello",
                 rt::function!(
@@ -1059,7 +992,6 @@ pub mod original {
                     qualname = "Original.hello"
                 )?,
             )?;
-            frame.line(323);
             ns.set(
                 "via_super",
                 rt::function!(
@@ -1078,8 +1010,7 @@ pub mod original {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Original.hello", 320, |frame| {
-            frame.line(321);
+        rt::frame!(m, "Original.hello", 320, |_| {
             rt::str(m.py(), "original:").add(__class__.get()?.getattr("__name__")?)
         })
     }
@@ -1091,8 +1022,7 @@ pub mod original {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Original.via_super", 323, |frame| {
-            frame.line(324);
+        rt::frame!(m, "Original.via_super", 323, |_| {
             rt::super_(__class__, slf)?
                 .call_method0("__repr__")?
                 .get_item(rt::slice(py, py.None(), 10)?)
@@ -1107,14 +1037,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("__doc__", "How a class statement runs: order of evaluation, metaclasses,\n`__prepare__`, `__mro_entries__`, `__init_subclass__`, `__set_name__`.")?;
         rt::def!(m, trace(label, value = py.None()))?;
         rt::def!(m, deco(label))?;
-        frame.line(21);
         m.set_global("Base", rt::class!(m, "Base"(), base::body, line = 21)?)?;
         {
-            frame.line(25);
             let decorator = deco(m, &rt::str(py, "outer"))?;
-            frame.line(26);
             let decorator2 = deco(m, &rt::str(py, "inner"))?;
-            frame.line(27);
             let ordered = rt::class!(
                 m,
                 "Ordered"(
@@ -1124,13 +1050,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ordered::body,
                 line = 25
             )?;
-            frame.line(26);
             let ordered = decorator2.call1((ordered,))?;
-            frame.line(25);
             let ordered = decorator.call1((ordered,))?;
             m.set_global("Ordered", ordered)?;
         }
-        frame.line(34);
         rt::builtins::print(
             py,
             (
@@ -1140,7 +1063,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Ordered")?.getattr("__firstlineno__")?,
             ),
         )?;
-        frame.line(37);
         m.set_global(
             "Logged",
             rt::class!(
@@ -1150,12 +1072,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 37
             )?,
         )?;
-        frame.line(43);
         m.set_global(
             "Meta",
             rt::class!(m, "Meta"(rt::builtin(py, "type")?), meta::body, line = 43)?,
         )?;
-        frame.line(58);
         m.set_global(
             "WithMeta",
             rt::class!(
@@ -1165,7 +1085,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 58
             )?,
         )?;
-        frame.line(67);
         rt::builtins::print(
             py,
             (
@@ -1174,12 +1093,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("WithMeta")?.call0()?.call_method0("method")?,
             ),
         )?;
-        frame.line(70);
         m.set_global(
             "Plugin",
             rt::class!(m, "Plugin"(), plugin::body, line = 70)?,
         )?;
-        frame.line(79);
         m.set_global(
             "Csv",
             rt::class!(
@@ -1189,12 +1106,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 79
             )?,
         )?;
-        frame.line(83);
         m.set_global(
             "Json",
             rt::class!(m, "Json"(m.global("Plugin")?), json::body, line = 83)?,
         )?;
-        frame.line(87);
         rt::builtins::print(
             py,
             (
@@ -1203,23 +1118,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Json")?.getattr("plugin_name")?,
             ),
         )?;
-        frame.line(90);
         m.set_global(
             "Field",
             rt::class!(m, "Field"(), field::body, line = 90, attributes = ["name"])?,
         )?;
-        frame.line(101);
         m.set_global(
             "Record",
             rt::class!(m, "Record"(), record::body, line = 101)?,
         )?;
-        frame.line(106);
         m.set_global("r", m.global("Record")?.call0()?)?;
-        frame.line(107);
         m.global("r")?
             .getattr("__dict__")?
             .set_item("title", "hello")?;
-        frame.line(108);
         rt::builtins::print(
             py,
             (
@@ -1228,11 +1138,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Record")?.getattr("title")?.getattr("name")?,
             ),
         )?;
-        frame.line(111);
         m.set_global("Alias", rt::class!(m, "Alias"(), alias::body, line = 111)?)?;
-        frame.line(117);
         m.set_global("alias", m.global("Alias")?.call0()?)?;
-        frame.line(120);
         m.set_global(
             "FromAlias",
             rt::class!(
@@ -1242,7 +1149,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 120
             )?,
         )?;
-        frame.line(124);
         rt::builtins::print(
             py,
             (
@@ -1254,14 +1160,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .rich_compare(PyTuple::new(py, [&m.global("alias")?])?, CompareOp::Eq)?,
             ),
         )?;
-        frame.line(126);
         m.set_global("bases", PyTuple::new(py, [&m.global("Base")?])?)?;
-        frame.line(127);
         m.set_global(
             "extra",
             [("metaclass", &rt::builtin(py, "type")?)].into_py_dict(py)?,
         )?;
-        frame.line(130);
         m.set_global(
             "Starred",
             rt::class!(
@@ -1271,7 +1174,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 130
             )?,
         )?;
-        frame.line(134);
         rt::builtins::print(
             py,
             (m.global("Starred")?
@@ -1307,33 +1209,27 @@ def errors():
         print("TypeError:", err)
 "#
         )?;
-        frame.line(161);
         m.set_global(
             "Errors",
             rt::class!(m, "Errors"(), errors::body, line = 161)?,
         )?;
-        frame.line(185);
         m.set_global(
             "M1",
             rt::class!(m, "M1"(rt::builtin(py, "type")?), m1::body, line = 185)?,
         )?;
-        frame.line(189);
         m.set_global(
             "M2",
             rt::class!(m, "M2"(rt::builtin(py, "type")?), m2::body, line = 189)?,
         )?;
-        frame.line(193);
         m.set_global(
             "A1",
             rt::class!(m, "A1"(metaclass = m.global("M1")?), a1::body, line = 193)?,
         )?;
-        frame.line(197);
         m.set_global(
             "A2",
             rt::class!(m, "A2"(metaclass = m.global("M2")?), a2::body, line = 197)?,
         )?;
         match (|| -> PyResult<()> {
-            frame.line(203);
             m.set_global(
                 "Conflict",
                 rt::class!(
@@ -1350,19 +1246,16 @@ def errors():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(207);
                 rt::builtins::print(py, ("TypeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(210);
         m.set_global(
             "BadEntries",
             rt::class!(m, "BadEntries"(), bad_entries::body, line = 210)?,
         )?;
         match (|| -> PyResult<()> {
-            frame.line(217);
             m.set_global(
                 "Bad4",
                 rt::class!(
@@ -1379,13 +1272,11 @@ def errors():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(221);
                 rt::builtins::print(py, ("TypeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(224);
         m.set_global(
             "BadPrepare",
             rt::class!(
@@ -1396,7 +1287,6 @@ def errors():
             )?,
         )?;
         match (|| -> PyResult<()> {
-            frame.line(232);
             m.set_global(
                 "Bad5",
                 rt::class!(
@@ -1413,13 +1303,11 @@ def errors():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(236);
                 rt::builtins::print(py, ("TypeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(239);
         m.set_global(
             "DropCell",
             rt::class!(
@@ -1430,7 +1318,6 @@ def errors():
             )?,
         )?;
         match (|| -> PyResult<()> {
-            frame.line(247);
             m.set_global(
                 "Bad6",
                 rt::class!(
@@ -1447,14 +1334,12 @@ def errors():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(252);
                 rt::builtins::print(py, ("RuntimeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
         match (|| -> PyResult<()> {
-            frame.line(257);
             m.set_global(
                 "Bad7",
                 rt::class!(m, "Bad7"(metaclass = 5), bad7::body, line = 257)?,
@@ -1466,14 +1351,12 @@ def errors():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(261);
                 rt::builtins::print(py, ("TypeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
         rt::def!(m, fake_meta(name, bases, ns, **kwargs))?;
-        frame.line(269);
         m.set_global(
             "NotAClass",
             rt::class!(
@@ -1483,27 +1366,20 @@ def errors():
                 line = 269
             )?,
         )?;
-        frame.line(273);
         rt::builtins::print(py, (m.global("NotAClass")?,))?;
-        frame.line(276);
         if m.global("Ordered")?.getattr("x")?.is_truthy()? {
-            frame.line(278);
             m.set_global(
                 "Conditional",
                 rt::class!(m, "Conditional"(), conditional::body, line = 278)?,
             )?;
         } else {
-            frame.line(283);
             m.set_global(
                 "Conditional",
                 rt::class!(m, "Conditional"(), conditional_::body, line = 283)?,
             )?;
         }
-        frame.line(287);
         rt::builtins::print(py, (m.global("Conditional")?.getattr("branch")?,))?;
-        frame.line(290);
         m.set_global("Outer", rt::class!(m, "Outer"(), outer::body, line = 290)?)?;
-        frame.line(300);
         rt::builtins::print(
             py,
             (
@@ -1521,15 +1397,12 @@ def errors():
                     .getattr("__qualname__")?,
             ),
         )?;
-        frame.line(302);
         for item in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
             m.set_global("i", item?)?;
-            frame.line(304);
             m.set_global(
                 "InLoop",
                 rt::class!(m, "InLoop"(), in_loop::body, line = 304)?,
             )?;
-            frame.line(307);
             rt::builtins::print(
                 py,
                 (
@@ -1538,7 +1411,6 @@ def errors():
                 ),
             )?;
             py.check_signals()?;
-            frame.line(302);
         }
         // classes_build.py:310, kept as Python: class definition in a function at 311:5
         rt::exec_python!(
@@ -1554,15 +1426,11 @@ def replaced(cls):
 "#
         )?;
         {
-            frame.line(318);
             let replaced = m.global("replaced")?;
-            frame.line(319);
             let original = rt::class!(m, "Original"(), original::body, line = 318)?;
-            frame.line(318);
             let original = replaced.call1((original,))?;
             m.set_global("Original", original)?;
         }
-        frame.line(327);
         rt::builtins::print(
             py,
             (

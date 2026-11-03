@@ -13,17 +13,13 @@ pub fn render<'py>(
     inventory: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "render", 12, |frame| {
+    rt::frame!(m, "render", 12, |_| {
         let out = PyList::empty(py).into_any();
-        frame.line(14);
         for line in m.global("lines")?.call1((inventory,))?.try_iter()? {
             let line = line?;
-            frame.line(15);
             out.call_method1("append", (&line,))?;
             py.check_signals()?;
-            frame.line(14);
         }
-        frame.line(16);
         rt::str(py, "\n").call_method1("join", (&out,))
     })
 }
@@ -31,7 +27,7 @@ pub fn render<'py>(
 /// Executes the body of `store/reports/text.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         let package = rt::import_names(m, "..", &["errors"])?;
         m.set_global("errors", rt::import_from(&package, "errors")?)?;
         // store/reports/text.py:4, kept as Python: yield at 9:9
@@ -48,12 +44,9 @@ def lines(inventory):
 "#
         )?;
         rt::def!(m, render(inventory))?;
-        frame.line(19);
         if m.global("__name__")?.eq("__main__")? {
-            frame.line(20);
             rt::builtins::print(py, ("store.reports.text: run as a script",))?;
         } else {
-            frame.line(22);
             rt::builtins::print(
                 py,
                 ("store.reports.text: imported as", m.global("__name__")?),

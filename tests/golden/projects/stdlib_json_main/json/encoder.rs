@@ -21,14 +21,13 @@ pub fn py_encode_basestring<'py>(
     m: &rt::Module<'py>,
     s: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "py_encode_basestring", 40, |frame| {
+    rt::frame!(m, "py_encode_basestring", 40, |_| {
         // json/encoder.py:44
         fn replace<'py>(
             m: &rt::Module<'py>,
             r#match: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "py_encode_basestring.<locals>.replace", 44, |frame| {
-                frame.line(45);
+            rt::frame!(m, "py_encode_basestring.<locals>.replace", 44, |_| {
                 m.global("ESCAPE_DCT")?
                     .get_item(r#match.call_method1("group", (0,))?)
             })
@@ -38,7 +37,6 @@ pub fn py_encode_basestring<'py>(
             replace(r#match),
             qualname = "py_encode_basestring.<locals>.replace"
         )?;
-        frame.line(46);
         rt::str(m.py(), "\"")
             .add(m.global("ESCAPE")?.call_method1("sub", (&replace, s))?)?
             .add("\"")
@@ -53,7 +51,7 @@ pub fn py_encode_basestring_ascii<'py>(
     m: &rt::Module<'py>,
     s: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "py_encode_basestring_ascii", 52, |frame| {
+    rt::frame!(m, "py_encode_basestring_ascii", 52, |_| {
         // json/encoder.py:56
         fn replace<'py>(
             m: &rt::Module<'py>,
@@ -68,29 +66,20 @@ pub fn py_encode_basestring_ascii<'py>(
                     let mut n: Bound<'py, PyAny>;
                     let s1: Bound<'py, PyAny>;
                     let s2: Bound<'py, PyAny>;
-                    frame.line(57);
                     let s = r#match.call_method1("group", (0,))?;
-                    frame.line(59);
                     match (|| m.global("ESCAPE_DCT")?.get_item(&s))() {
                         Ok(value) => Ok(value),
                         Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                             let _handling = rt::Handling::new(&frame.catch(err));
-                            frame.line(61);
                             n = rt::builtin(py, "ord")?.call1((&s,))?;
-                            frame.line(62);
                             if n.lt(65536)? {
-                                frame.line(63);
                                 rt::str(py, "\\u{0:04x}").call_method1("format", (&n,))
                             } else {
                                 // return '\\u%04x' % (n,)
                                 // surrogate pair
-                                frame.line(67);
                                 n = rt::isub(&n, 65536)?;
-                                frame.line(68);
                                 s1 = rt::int(py, 55296).bitor(n.rshift(10)?.bitand(1023)?)?;
-                                frame.line(69);
                                 s2 = rt::int(py, 56320).bitor(n.bitand(1023)?)?;
-                                frame.line(70);
                                 rt::str(py, "\\u{0:04x}\\u{1:04x}")
                                     .call_method1("format", (&s1, &s2))
                             }
@@ -105,7 +94,6 @@ pub fn py_encode_basestring_ascii<'py>(
             replace(r#match),
             qualname = "py_encode_basestring_ascii.<locals>.replace"
         )?;
-        frame.line(71);
         rt::str(m.py(), "\"")
             .add(
                 m.global("ESCAPE_ASCII")?
@@ -149,35 +137,28 @@ pub mod json_encoder {
     /// The body of `class JSONEncoder`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
-        rt::frame!(ns, "JSONEncoder", 77, |frame| {
-            frame.line(78);
+        rt::frame!(ns, "JSONEncoder", 77, |_| {
             ns.set("__doc__", "Extensible JSON <https://json.org> encoder for Python data structures.\n\nSupports the following objects and types by default:\n\n+-------------------+---------------+\n| Python            | JSON          |\n+===================+===============+\n| dict              | object        |\n+-------------------+---------------+\n| list, tuple       | array         |\n+-------------------+---------------+\n| str               | string        |\n+-------------------+---------------+\n| int, float        | number        |\n+-------------------+---------------+\n| True              | true          |\n+-------------------+---------------+\n| False             | false         |\n+-------------------+---------------+\n| None              | null          |\n+-------------------+---------------+\n\nTo extend this to recognize other objects, subclass and implement a\n``.default()`` method with another method that returns a serializable\nobject for ``o`` if possible, otherwise it should call the superclass\nimplementation (to raise ``TypeError``).\n\n")?;
-            frame.line(106);
             ns.set("item_separator", ", ")?;
-            frame.line(107);
             ns.set("key_separator", ": ")?;
-            frame.line(108);
             ns.set("__init__", rt::function!(
     ns,
     __init__(slf as "self", *, skipkeys = false, ensure_ascii = true, check_circular = true, allow_nan = true, sort_keys = false, indent = py.None(), separators = py.None(), default = py.None()),
     qualname = "JSONEncoder.__init__",
     doc = "Constructor for JSONEncoder, with sensible defaults.\n\nIf skipkeys is false, then it is a TypeError to attempt\nencoding of keys that are not str, int, float, bool or None.\nIf skipkeys is True, such items are simply skipped.\n\nIf ensure_ascii is true, the output is guaranteed to be str objects\nwith all incoming non-ASCII and non-printable characters escaped.\nIf ensure_ascii is false, the output can contain non-ASCII and\nnon-printable characters.\n\nIf check_circular is true, then lists, dicts, and custom encoded\nobjects will be checked for circular references during encoding to\nprevent an infinite recursion (which would cause an RecursionError).\nOtherwise, no such check takes place.\n\nIf allow_nan is true, then NaN, Infinity, and -Infinity will be\nencoded as such.  This behavior is not JSON specification compliant,\nbut is consistent with most JavaScript based encoders and decoders.\nOtherwise, it will be a ValueError to encode such floats.\n\nIf sort_keys is true, then the output of dictionaries will be\nsorted by key; this is useful for regression tests to ensure\nthat JSON serializations can be compared on a day-to-day basis.\n\nIf indent is a non-negative integer, then JSON array\nelements and object members will be pretty-printed with that\nindent level.  An indent level of 0 will only insert newlines.\nNone is the most compact representation.\n\nIf specified, separators should be an (item_separator,\nkey_separator) tuple.  The default is (', ', ': ') if *indent* is\n``None`` and (',', ': ') otherwise.  To get the most compact JSON\nrepresentation, you should specify (',', ':') to eliminate\nwhitespace.\n\nIf specified, default is a function that gets called for objects\nthat can't otherwise be serialized.  It should return a JSON\nencodable version of the object or raise a ``TypeError``.\n\n"
 )?)?;
-            frame.line(166);
             ns.set("default", rt::function!(
     ns,
     default(slf as "self", o),
     qualname = "JSONEncoder.default",
     doc = "Implement this method in a subclass such that it returns\na serializable object for ``o``, or calls the base implementation\n(to raise a ``TypeError``).\n\nFor example, to support arbitrary iterators, you could\nimplement default like this::\n\n    def default(self, o):\n        try:\n            iterable = iter(o)\n        except TypeError:\n            pass\n        else:\n            return list(iterable)\n        # Let the base class default method raise the TypeError\n        return super().default(o)\n\n"
 )?)?;
-            frame.line(188);
             ns.set("encode", rt::function!(
     ns,
     encode(slf as "self", o),
     qualname = "JSONEncoder.encode",
     doc = "Return a JSON string representation of a Python data structure.\n\n>>> from json.encoder import JSONEncoder\n>>> JSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\n'{\"foo\": [\"bar\", \"baz\"]}'\n\n"
 )?)?;
-            frame.line(210);
             ns.set("iterencode", rt::function!(
     ns,
     iterencode(slf as "self", o, _one_shot = false),
@@ -241,30 +222,21 @@ pub mod json_encoder {
         separators: &Bound<'py, PyAny>,
         default: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "JSONEncoder.__init__", 108, |frame| {
-            frame.line(153);
+        rt::frame!(m, "JSONEncoder.__init__", 108, |_| {
             slf.setattr("skipkeys", skipkeys)?;
-            frame.line(154);
             slf.setattr("ensure_ascii", ensure_ascii)?;
-            frame.line(155);
             slf.setattr("check_circular", check_circular)?;
-            frame.line(156);
             slf.setattr("allow_nan", allow_nan)?;
-            frame.line(157);
             slf.setattr("sort_keys", sort_keys)?;
-            frame.line(158);
             slf.setattr("indent", indent)?;
             if !separators.is_none() {
-                frame.line(160);
                 let [item_separator, key_separator] = rt::unpack(separators)?;
                 slf.setattr("item_separator", item_separator)?;
                 slf.setattr("key_separator", key_separator)?;
             } else if !indent.is_none() {
-                frame.line(162);
                 slf.setattr("item_separator", ",")?;
             }
             if !default.is_none() {
-                frame.line(164);
                 slf.setattr("default", default)?;
             }
             Ok(rt::none(m.py()))
@@ -295,7 +267,6 @@ pub mod json_encoder {
         o: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "JSONEncoder.default", 166, |frame| {
-            frame.line(185);
             Err(frame.raise(PyTypeError::new_err((rt::fstring(
                 m.py(),
                 (
@@ -321,32 +292,24 @@ pub mod json_encoder {
         o: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "JSONEncoder.encode", 188, |frame| {
+        rt::frame!(m, "JSONEncoder.encode", 188, |_| {
             // This is for extremely simple cases and benchmarks.
-            frame.line(197);
             if o.is_instance(&rt::builtin(py, "str")?)? {
-                frame.line(198);
                 if slf.getattr("ensure_ascii")?.is_truthy()? {
-                    frame.line(199);
                     return m.global("encode_basestring_ascii")?.call1((o,));
                 } else {
-                    frame.line(201);
                     return m.global("encode_basestring")?.call1((o,));
                 }
             }
             // This doesn't pass the iterator directly to ''.join() because the
             // exceptions aren't as detailed.  The list call should be roughly
             // equivalent to the PySequence_Fast that ''.join() would do.
-            frame.line(205);
             let mut chunks = rt::call!(slf.getattr("iterencode")?, o, _one_shot = true)?;
-            frame.line(206);
             if !chunks.is_instance(
                 PyTuple::new(py, [&rt::builtin(py, "list")?, &rt::builtin(py, "tuple")?])?.as_any(),
             )? {
-                frame.line(207);
                 chunks = rt::builtin(py, "list")?.call1((&chunks,))?;
             }
-            frame.line(208);
             rt::str(py, "").call_method1("join", (&chunks,))
         })
     }
@@ -367,23 +330,19 @@ pub mod json_encoder {
         _one_shot: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "JSONEncoder.iterencode", 210, |frame| {
+        rt::frame!(m, "JSONEncoder.iterencode", 210, |_| {
             let markers: Bound<'py, PyAny>;
             let _encoder: Bound<'py, PyAny>;
             let indent: Bound<'py, PyAny>;
             let _iterencode: Bound<'py, PyAny>;
-            frame.line(220);
             if slf.getattr("check_circular")?.is_truthy()? {
                 markers = PyDict::new(py).into_any();
             } else {
                 markers = rt::none(py);
             }
-            frame.line(224);
             if slf.getattr("ensure_ascii")?.is_truthy()? {
-                frame.line(225);
                 _encoder = m.global("encode_basestring_ascii")?;
             } else {
-                frame.line(227);
                 _encoder = m.global("encode_basestring")?;
             }
             // json/encoder.py:229
@@ -405,26 +364,16 @@ pub mod json_encoder {
                         // Check for specials.  Note that this type of test is processor
                         // and/or platform-specific, so do tests which don't depend on the
                         // internals.
-                        frame.line(235);
                         if o.ne(o)? {
                             text = rt::str(py, "NaN");
+                        } else if o.eq(_inf)? {
+                            text = rt::str(py, "Infinity");
+                        } else if o.eq(_neginf)? {
+                            text = rt::str(py, "-Infinity");
                         } else {
-                            frame.line(237);
-                            if o.eq(_inf)? {
-                                text = rt::str(py, "Infinity");
-                            } else {
-                                frame.line(239);
-                                if o.eq(_neginf)? {
-                                    text = rt::str(py, "-Infinity");
-                                } else {
-                                    frame.line(242);
-                                    return _repr.call1((o,));
-                                }
-                            }
+                            return _repr.call1((o,));
                         }
-                        frame.line(244);
                         if !allow_nan.is_truthy()? {
-                            frame.line(245);
                             return Err(frame.raise(PyValueError::new_err((rt::str(
                                 py,
                                 "Out of range float values are not JSON compliant: ",
@@ -436,7 +385,6 @@ pub mod json_encoder {
                     }
                 )
             }
-            frame.line(229);
             let floatstr = rt::function!(
                 m,
                 floatstr(
@@ -448,21 +396,16 @@ pub mod json_encoder {
                 ),
                 qualname = "JSONEncoder.iterencode.<locals>.floatstr"
             )?;
-            frame.line(252);
             if slf.getattr("indent")?.is_none()
                 || slf
                     .getattr("indent")?
                     .is_instance(&rt::builtin(py, "str")?)?
             {
-                frame.line(253);
                 indent = slf.getattr("indent")?;
             } else {
-                frame.line(255);
                 indent = rt::str(py, " ").mul(slf.getattr("indent")?)?;
             }
-            frame.line(256);
             if _one_shot.is_truthy()? && !m.global("c_make_encoder")?.is_none() {
-                frame.line(257);
                 _iterencode = m.global("c_make_encoder")?.call1((
                     &markers,
                     slf.getattr("default")?,
@@ -475,7 +418,6 @@ pub mod json_encoder {
                     slf.getattr("allow_nan")?,
                 ))?;
             } else {
-                frame.line(262);
                 _iterencode = m.global("_make_iterencode")?.call1((
                     &markers,
                     slf.getattr("default")?,
@@ -489,7 +431,6 @@ pub mod json_encoder {
                     _one_shot,
                 ))?;
             }
-            frame.line(266);
             _iterencode.call1((o, 0))
         })
     }
@@ -503,10 +444,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // Copied unmodified (below this header) from Lib/json/encoder.py of CPython 3.14.9,
         // licensed under the PSF License Agreement. A steelix test project:
         // tests/test_projects.py runs it transpiled and with CPython and compares.
-        frame.line(6);
         m.set_global("re", rt::import(m, "re")?)?;
         match (|| -> PyResult<()> {
-            frame.line(9);
             let _json = rt::import_names(m, "_json", &["encode_basestring_ascii"])?;
             m.set_global(
                 "c_encode_basestring_ascii",
@@ -517,13 +456,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
-                frame.line(11);
                 m.set_global("c_encode_basestring_ascii", py.None())?;
             }
             Err(err) => return Err(err),
         }
         match (|| -> PyResult<()> {
-            frame.line(13);
             let _json = rt::import_names(m, "_json", &["encode_basestring"])?;
             m.set_global(
                 "c_encode_basestring",
@@ -534,13 +471,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
-                frame.line(15);
                 m.set_global("c_encode_basestring", py.None())?;
             }
             Err(err) => return Err(err),
         }
         match (|| -> PyResult<()> {
-            frame.line(17);
             let _json = rt::import_names(m, "_json", &["make_encoder"])?;
             m.set_global("c_make_encoder", rt::import_from(&_json, "make_encoder")?)?;
             Ok(())
@@ -548,30 +483,25 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
-                frame.line(19);
                 m.set_global("c_make_encoder", py.None())?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(21);
         m.set_global(
             "ESCAPE",
             m.global("re")?
                 .call_method1("compile", ("[\\x00-\\x1f\\\\\"\\b\\f\\n\\r\\t]",))?,
         )?;
-        frame.line(22);
         m.set_global(
             "ESCAPE_ASCII",
             m.global("re")?
                 .call_method1("compile", ("([\\\\\"]|[^\\ -~])",))?,
         )?;
-        frame.line(23);
         m.set_global(
             "HAS_UTF8",
             m.global("re")?
                 .call_method1("compile", (rt::bytes(py, b"[\x80-\xff]"),))?,
         )?;
-        frame.line(24);
         m.set_global(
             "ESCAPE_DCT",
             [
@@ -585,10 +515,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ]
             .into_py_dict(py)?,
         )?;
-        frame.line(33);
         for item in rt::builtin(py, "range")?.call1((32,))?.try_iter()? {
             m.set_global("i", item?)?;
-            frame.line(34);
             m.global("ESCAPE_DCT")?.getattr("setdefault")?.call1((
                 rt::builtin(py, "chr")?.call1((m.global("i")?,))?,
                 rt::str(py, "\\u{0:04x}")
@@ -596,19 +524,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .call1((m.global("i")?,))?,
             ))?;
             py.check_signals()?;
-            frame.line(33);
         }
         // ESCAPE_DCT.setdefault(chr(i), '\\u%04x' % (i,))
-        frame.line(36);
         m.del_global("i")?;
-        frame.line(38);
         m.set_global("INFINITY", rt::builtin(py, "float")?.call1(("inf",))?)?;
         rt::def!(
             m,
             py_encode_basestring(s),
             doc = "Return a JSON representation of a Python string\n\n    "
         )?;
-        frame.line(49);
         {
             let c_encode_basestring = m.global("c_encode_basestring")?;
             m.set_global(
@@ -625,7 +549,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py_encode_basestring_ascii(s),
             doc = "Return an ASCII-only JSON representation of a Python string\n\n    "
         )?;
-        frame.line(75);
         {
             let c_encode_basestring_ascii = m.global("c_encode_basestring_ascii")?;
             m.set_global(
@@ -637,7 +560,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 },
             )?;
         }
-        frame.line(77);
         m.set_global(
             "JSONEncoder",
             rt::class!(

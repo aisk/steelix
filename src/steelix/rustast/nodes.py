@@ -149,6 +149,8 @@ class Closure(Expr):
     """Parameter names or patterns such as `_`."""
     body: Block
     ret: str | None = None
+    braces: bool = False
+    """Keep the braces around a body that is a single expression."""
 
 
 @dataclass(frozen=True)

@@ -6,9 +6,7 @@ use steelix_runtime as rt;
 // genexpr_stop_iteration.py:5
 pub fn boom<'py>(m: &rt::Module<'py>, v: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "boom", 5, |frame| {
-        frame.line(6);
         if v.eq(1)? {
-            frame.line(7);
             return Err(frame.raise(PyStopIteration::new_err("inner")));
         }
         Ok(v.clone())
@@ -18,7 +16,7 @@ pub fn boom<'py>(m: &rt::Module<'py>, v: &Bound<'py, PyAny>) -> PyResult<Bound<'
 // genexpr_stop_iteration.py:11
 pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "run", 11, |frame| {
+    rt::frame!(m, "run", 11, |_| {
         // genexpr_stop_iteration.py:12
         fn genexpr<'py>(
             m: &rt::Module<'py>,
@@ -31,7 +29,6 @@ pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(None)
             })
         }
-        frame.line(12);
         rt::builtin(py, "list")?.call1((rt::genexpr!(
             m,
             genexpr(rt::builtin(py, "range")?.call1((3,))?.try_iter()?),
@@ -42,11 +39,10 @@ pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 /// Executes the body of `genexpr_stop_iteration.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global("__doc__", "A `StopIteration` raised in a generator expression becomes a\n`RuntimeError` (PEP 479); the traceback chains both.")?;
         rt::def!(m, boom(v))?;
         rt::def!(m, run())?;
-        frame.line(15);
         run(m)?;
         Ok(())
     })

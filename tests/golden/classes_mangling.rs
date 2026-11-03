@@ -11,15 +11,12 @@ pub mod account {
     // classes_mangling.py:4
     /// The body of `class Account`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Account", 4, |frame| {
-            frame.line(5);
+        rt::frame!(ns, "Account", 4, |_| {
             ns.set("_Account__count", 0)?;
-            frame.line(6);
             ns.set(
                 "_Account__slots_like",
                 PyTuple::new(m.py(), ["__a", "__b"])?,
             )?;
-            frame.line(8);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -28,7 +25,6 @@ pub mod account {
                     qualname = "Account.__init__"
                 )?,
             )?;
-            frame.line(13);
             ns.set(
                 "_Account__secret",
                 rt::function!(
@@ -37,12 +33,10 @@ pub mod account {
                     qualname = "Account.__secret"
                 )?,
             )?;
-            frame.line(16);
             ns.set(
                 "reveal",
                 rt::function!(ns, reveal(slf as "self"), qualname = "Account.reveal")?,
             )?;
-            frame.line(19);
             ns.set(
                 "get",
                 rt::function!(
@@ -51,13 +45,11 @@ pub mod account {
                     qualname = "Account.get"
                 )?,
             )?;
-            frame.line(23);
             {
                 let decorator = ns.get("staticmethod")?;
                 let function = rt::function!(ns, count(), qualname = "Account.count")?;
                 ns.set("count", decorator.call1((function,))?)?;
             }
-            frame.line(26);
             ns.set(
                 "_Account__Inner",
                 rt::class!(
@@ -68,12 +60,10 @@ pub mod account {
                     qualname = "Account.__Inner"
                 )?,
             )?;
-            frame.line(32);
             ns.set(
                 "inner",
                 rt::function!(ns, inner(slf as "self"), qualname = "Account.inner")?,
             )?;
-            frame.line(35);
             ns.set(
                 "handler",
                 rt::function!(
@@ -82,7 +72,6 @@ pub mod account {
                     qualname = "Account.handler"
                 )?,
             )?;
-            frame.line(41);
             ns.set(
                 "names",
                 rt::function!(ns, names(slf as "self"), qualname = "Account.names")?,
@@ -97,10 +86,8 @@ pub mod account {
         slf: &Bound<'py, PyAny>,
         owner: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Account.__init__", 8, |frame| {
-            frame.line(9);
+        rt::frame!(m, "Account.__init__", 8, |_| {
             slf.setattr("_Account__owner", owner)?;
-            frame.line(10);
             {
                 let __class__ = slf.getattr("__class__")?;
                 __class__.setattr(
@@ -108,7 +95,6 @@ pub mod account {
                     rt::iadd(&__class__.getattr("_Account__count")?, 1)?,
                 )?;
             }
-            frame.line(11);
             {
                 let Account = m.global("Account")?;
                 Account.setattr(
@@ -125,8 +111,7 @@ pub mod account {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Account.__secret", 13, |frame| {
-            frame.line(14);
+        rt::frame!(m, "Account.__secret", 13, |_| {
             rt::str(m.py(), "secret of ").add(slf.getattr("_Account__owner")?)
         })
     }
@@ -136,8 +121,7 @@ pub mod account {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Account.reveal", 16, |frame| {
-            frame.line(17);
+        rt::frame!(m, "Account.reveal", 16, |_| {
             slf.call_method0("_Account__secret")
         })
     }
@@ -153,8 +137,7 @@ pub mod account {
 
     // classes_mangling.py:23
     pub fn count<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Account.count", 22, |frame| {
-            frame.line(24);
+        rt::frame!(m, "Account.count", 22, |_| {
             m.global("Account")?.getattr("_Account__count")
         })
     }
@@ -165,10 +148,8 @@ pub mod account {
         // classes_mangling.py:26
         /// The body of `class Account.__Inner`, run in its namespace `ns`.
         pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-            rt::frame!(ns, "Account.__Inner", 26, |frame| {
-                frame.line(27);
+            rt::frame!(ns, "Account.__Inner", 26, |_| {
                 ns.set("_Inner__level", 2)?;
-                frame.line(29);
                 ns.set(
                     "level",
                     rt::function!(
@@ -186,8 +167,7 @@ pub mod account {
             m: &rt::Module<'py>,
             slf: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "Account.__Inner.level", 29, |frame| {
-                frame.line(30);
+            rt::frame!(m, "Account.__Inner.level", 29, |_| {
                 slf.getattr("_Inner__level")
             })
         }
@@ -195,8 +175,7 @@ pub mod account {
 
     // classes_mangling.py:32
     pub fn inner<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Account.inner", 32, |frame| {
-            frame.line(33);
+        rt::frame!(m, "Account.inner", 32, |_| {
             slf.call_method0("_Account__Inner")?.call_method0("level")
         })
     }
@@ -207,13 +186,11 @@ pub mod account {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.handler", 35, |frame| {
-            frame.line(37);
             match Err(frame.raise(PyKeyError::new_err("k"))) {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyKeyError>(m.py()) => {
                     let _Account__err = frame.catch(err);
                     let _handling = rt::Handling::new(&_Account__err);
-                    frame.line(39);
                     Ok(_Account__err.repr()?.into_any())
                 }
                 Err(err) => Err(err),
@@ -224,9 +201,8 @@ pub mod account {
     // classes_mangling.py:41
     pub fn names<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Account.names", 41, |frame| {
+        rt::frame!(m, "Account.names", 41, |_| {
             let _Account__local = rt::int(py, 1);
-            frame.line(43);
             let list = PyList::empty(py);
             for n in rt::builtin(py, "dir")?.call1((slf,))?.try_iter()? {
                 let n = n?;
@@ -246,13 +222,11 @@ pub mod _under {
     // classes_mangling.py:46
     /// The body of `class _Under`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "_Under", 46, |frame| {
-            frame.line(47);
+        rt::frame!(ns, "_Under", 46, |_| {
             ns.set(
                 "_Under__x",
                 rt::function!(ns, __x(slf as "self"), qualname = "_Under.__x")?,
             )?;
-            frame.line(50);
             ns.set(
                 "call",
                 rt::function!(ns, call(slf as "self"), qualname = "_Under.call")?,
@@ -268,10 +242,7 @@ pub mod _under {
 
     // classes_mangling.py:50
     pub fn call<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "_Under.call", 50, |frame| {
-            frame.line(51);
-            slf.call_method0("_Under__x")
-        })
+        rt::frame!(m, "_Under.call", 50, |_| { slf.call_method0("_Under__x") })
     }
 }
 
@@ -281,13 +252,11 @@ pub mod ___ {
     // classes_mangling.py:54
     /// The body of `class ___`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "___", 54, |frame| {
-            frame.line(55);
+        rt::frame!(ns, "___", 54, |_| {
             ns.set(
                 "__y",
                 rt::function!(ns, __y(slf as "self"), qualname = "___.__y")?,
             )?;
-            frame.line(58);
             ns.set(
                 "call",
                 rt::function!(ns, call(slf as "self"), qualname = "___.call")?,
@@ -303,19 +272,15 @@ pub mod ___ {
 
     // classes_mangling.py:58
     pub fn call<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "___.call", 58, |frame| {
-            frame.line(59);
-            slf.call_method0("__y")
-        })
+        rt::frame!(m, "___.call", 58, |_| { slf.call_method0("__y") })
     }
 }
 
 /// Executes the body of `classes_mangling.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global("__doc__", "Private names are mangled like CPython does.")?;
-        frame.line(4);
         m.set_global(
             "Account",
             rt::class!(
@@ -326,18 +291,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["__owner"]
             )?,
         )?;
-        frame.line(46);
         m.set_global(
             "_Under",
             rt::class!(m, "_Under"(), _under::body, line = 46)?,
         )?;
-        frame.line(54);
         m.set_global("___", rt::class!(m, "___"(), ___::body, line = 54)?)?;
-        frame.line(62);
         m.set_global("a", m.global("Account")?.call1(("ann",))?)?;
-        frame.line(63);
         m.global("Account")?.call1(("bob",))?;
-        frame.line(64);
         rt::builtins::print(
             py,
             (
@@ -349,7 +309,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::call!(m.global("a")?.getattr("get")?, _Account__key = 1)?,
             ),
         )?;
-        frame.line(65);
         rt::builtins::print(
             py,
             (
@@ -361,7 +320,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .contains("_Account__secret")?,
             ),
         )?;
-        frame.line(66);
         rt::builtins::print(
             py,
             (
@@ -387,7 +345,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Ok(None)
             })
         }
-        frame.line(67);
         rt::builtins::print(
             py,
             (
@@ -399,7 +356,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,))?,
             ),
         )?;
-        frame.line(68);
         rt::builtins::print(py, (m.global("Account")?.getattr("_Account__slots_like")?,))?;
         Ok(())
     })

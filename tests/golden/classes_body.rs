@@ -18,8 +18,7 @@ use steelix_runtime as rt;
 // classes_body.py:7
 pub fn show_tb<'py>(m: &rt::Module<'py>, err: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "show_tb", 7, |frame| {
-        frame.line(8);
+    rt::frame!(m, "show_tb", 7, |_| {
         let list = PyList::empty(py);
         for f in m
             .global("traceback")?
@@ -46,50 +45,36 @@ pub mod body_ {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
         rt::frame!(ns, "Body", 11, |frame| {
-            frame.line(12);
             ns.set("paths", rt::import_module(m, "os.path")?)?;
-            frame.line(13);
             let math = rt::import_names(m, "math", &["sqrt"])?;
             ns.set("root", rt::import_from(&math, "sqrt")?)?;
-            frame.line(15);
             ns.set("total", 0)?;
-            frame.line(16);
             for item in ns.get("range")?.call1((4,))?.try_iter()? {
                 ns.set("i", item?)?;
-                frame.line(17);
                 ns.set("total", rt::iadd(&ns.get("total")?, ns.get("i")?)?)?;
                 py.check_signals()?;
-                frame.line(16);
             }
-            frame.line(18);
             while ns.get("total")?.gt(10)? {
-                frame.line(19);
                 ns.set("total", rt::isub(&ns.get("total")?, 1)?)?;
                 py.check_signals()?;
-                frame.line(18);
             }
-            frame.line(20);
             ns.set("names", PyList::empty(py))?;
-            frame.line(21);
             if ns
                 .get("sys")?
                 .getattr("version_info")?
                 .ge(PyTuple::new(py, [3, 0])?)?
             {
-                frame.line(23);
                 ns.set(
                     "version",
                     rt::function!(ns, version(slf as "self"), qualname = "Body.version")?,
                 )?;
             } else {
-                frame.line(28);
                 ns.set(
                     "version",
                     rt::function!(ns, version_(slf as "self"), qualname = "Body.version")?,
                 )?;
             }
             let result = (|| -> PyResult<()> {
-                frame.line(32);
                 match PyDict::new(py).as_any().get_item("key") {
                     Ok(value) => {
                         ns.set("missing", &value)?;
@@ -98,7 +83,6 @@ pub mod body_ {
                         let exception = frame.catch(err);
                         ns.set("err", &exception)?;
                         let _handling = rt::Handling::new(&exception);
-                        frame.line(34);
                         ns.set("caught", ns.get("repr")?.call1((ns.get("err")?,))?)?;
                         ns.unbind("err")?;
                     }
@@ -107,13 +91,10 @@ pub mod body_ {
                 Ok(())
             })();
             let finally = frame.finally(result);
-            frame.line(36);
             ns.set("cleanup", true)?;
             finally.resume()?;
-            frame.line(37);
             frame.with(&ns.get("open")?.call1((ns.get("__file__")?,))?, |value| {
                 ns.set("handle", value)?;
-                frame.line(38);
                 ns.set(
                     "first",
                     ns.get("handle")?
@@ -122,12 +103,9 @@ pub mod body_ {
                 )?;
                 Ok(())
             })?;
-            frame.line(39);
             ns.set("temp", 1)?;
-            frame.line(40);
             ns.del("temp")?;
             match (|| -> PyResult<()> {
-                frame.line(42);
                 ns.del("temp")?;
                 Ok(())
             })() {
@@ -136,13 +114,11 @@ pub mod body_ {
                     let exception = frame.catch(err);
                     ns.set("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(44);
                     ns.set("name_error", ns.get("str")?.call1((ns.get("err")?,))?)?;
                     ns.unbind("err")?;
                 }
                 Err(err) => return Err(err),
             }
-            frame.line(45);
             ns.set("x", 1)?;
             let list = PyList::empty(py);
             for x in ns.get("range")?.call1((3,))?.try_iter()? {
@@ -157,26 +133,21 @@ pub mod body_ {
                 m: &rt::Module<'py>,
                 slf: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "Body.<lambda>", 46, |_| rt::str(m.py(), "lambda ")
-                    .add(slf.get_type().getattr("__name__")?))
+                rt::frame!(m, "Body.<lambda>", 46, |_| {
+                    rt::str(m.py(), "lambda ").add(slf.get_type().getattr("__name__")?)
+                })
             }
-            frame.line(46);
             ns.set(
                 "label",
                 rt::function!(m, lambda(slf as "self"), qualname = "Body.<lambda>")?,
             )?;
-            frame.line(47);
             ns.set("shadow", ns.get("len")?)?;
-            frame.line(48);
             ns.set("len", 5)?;
-            frame.line(49);
             ns.set(
                 "used",
                 ns.get("shadow")?.call1((PyList::new(py, [1, 2])?,))?,
             )?;
-            frame.line(50);
             ns.set("builtin", ns.get("print")?.getattr("__name__")?)?;
-            frame.line(51);
             if !ns.get("total")?.eq(6)? {
                 return Err(frame.raise(PyAssertionError::new_err("total")));
             }
@@ -207,8 +178,7 @@ pub mod generic {
     // classes_body.py:61
     /// The body of `class Generic`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Generic", 61, |frame| {
-            frame.line(62);
+        rt::frame!(ns, "Generic", 61, |_| {
             ns.set(
                 "__class_getitem__",
                 rt::function!(
@@ -217,7 +187,6 @@ pub mod generic {
                     qualname = "Generic.__class_getitem__"
                 )?,
             )?;
-            frame.line(65);
             ns.set(
                 "__init_subclass__",
                 rt::function!(
@@ -236,8 +205,7 @@ pub mod generic {
         cls: &Bound<'py, PyAny>,
         item: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Generic.__class_getitem__", 62, |frame| {
-            frame.line(63);
+        rt::frame!(m, "Generic.__class_getitem__", 62, |_| {
             rt::fstring(
                 m.py(),
                 (
@@ -256,8 +224,7 @@ pub mod generic {
         cls: &Bound<'py, PyAny>,
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Generic.__init_subclass__", 65, |frame| {
-            frame.line(66);
+        rt::frame!(m, "Generic.__init_subclass__", 65, |_| {
             cls.setattr("created", true)?;
             Ok(rt::none(m.py()))
         })
@@ -280,9 +247,8 @@ pub mod new {
     // classes_body.py:76
     /// The body of `class New`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "New", 76, |frame| {
+        rt::frame!(ns, "New", 76, |_| {
             let __class__ = ns.class_cell();
-            frame.line(77);
             ns.set(
                 "__new__",
                 rt::function!(
@@ -291,7 +257,6 @@ pub mod new {
                     qualname = "New.__new__"
                 )?,
             )?;
-            frame.line(81);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -311,10 +276,8 @@ pub mod new {
         cls: &Bound<'py, PyAny>,
         args: &Bound<'py, PyTuple>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "New.__new__", 77, |frame| {
-            frame.line(78);
+        rt::frame!(m, "New.__new__", 77, |_| {
             rt::builtins::print(m.py(), ("new", cls.getattr("__name__")?, args))?;
-            frame.line(79);
             rt::super_(__class__, cls)?.call_method1("__new__", (cls,))
         })
     }
@@ -325,8 +288,7 @@ pub mod new {
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "New.__init__", 81, |frame| {
-            frame.line(82);
+        rt::frame!(m, "New.__init__", 81, |_| {
             slf.setattr("value", value)?;
             Ok(rt::none(m.py()))
         })
@@ -339,10 +301,8 @@ pub mod failing {
     // classes_body.py:95
     /// The body of `class Failing`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Failing", 95, |frame| {
-            frame.line(96);
+        rt::frame!(ns, "Failing", 95, |_| {
             ns.set("before", 1)?;
-            frame.line(97);
             ns.set("value", rt::int(m.py(), 1).div(0)?)?;
             Ok(())
         })
@@ -356,8 +316,7 @@ pub mod failing_kept {
     /// The body of `class FailingKept`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
-        rt::frame!(ns, "FailingKept", 104, |frame| {
-            frame.line(105);
+        rt::frame!(ns, "FailingKept", 104, |_| {
             let list = PyList::empty(py);
             for underscore in rt::str(py, "x").try_iter()? {
                 let underscore = underscore?;
@@ -376,10 +335,8 @@ pub mod annotated {
     // classes_body.py:111
     /// The body of `class Annotated`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Annotated", 111, |frame| {
-            frame.line(112);
+        rt::frame!(ns, "Annotated", 111, |_| {
             ns.set("alias", ns.get("int")?)?;
-            frame.line(114);
             ns.set(
                 "method",
                 rt::function!(
@@ -388,7 +345,6 @@ pub mod annotated {
                     qualname = "Annotated.method"
                 )?,
             )?;
-            frame.line(117);
             ns.set(
                 "kept",
                 rt::function!(
@@ -417,8 +373,7 @@ pub mod annotated {
         x: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Annotated.kept", 117, |frame| {
-            frame.line(118);
+        rt::frame!(m, "Annotated.kept", 117, |_| {
             let list = PyList::empty(py);
             for underscore in rt::str(py, "x").try_iter()? {
                 let underscore = underscore?;
@@ -436,9 +391,8 @@ pub mod uses {
     // classes_body.py:124
     /// The body of `class Uses`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Uses", 124, |frame| {
+        rt::frame!(ns, "Uses", 124, |_| {
             let __class__ = ns.class_cell();
-            frame.line(125);
             ns.set(
                 "__getattr__",
                 rt::function!(
@@ -447,7 +401,6 @@ pub mod uses {
                     qualname = "Uses.__getattr__"
                 )?,
             )?;
-            frame.line(128);
             ns.set(
                 "__setattr__",
                 rt::function!(
@@ -456,7 +409,6 @@ pub mod uses {
                     qualname = "Uses.__setattr__"
                 )?,
             )?;
-            frame.line(131);
             ns.set(
                 "__contains__",
                 rt::function!(
@@ -465,7 +417,6 @@ pub mod uses {
                     qualname = "Uses.__contains__"
                 )?,
             )?;
-            frame.line(134);
             ns.set(
                 "__lt__",
                 rt::function!(
@@ -474,7 +425,6 @@ pub mod uses {
                     qualname = "Uses.__lt__"
                 )?,
             )?;
-            frame.line(137);
             ns.set(
                 "__enter__",
                 rt::function!(
@@ -483,7 +433,6 @@ pub mod uses {
                     qualname = "Uses.__enter__"
                 )?,
             )?;
-            frame.line(140);
             ns.set(
                 "__exit__",
                 rt::function!(
@@ -502,8 +451,7 @@ pub mod uses {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Uses.__getattr__", 125, |frame| {
-            frame.line(126);
+        rt::frame!(m, "Uses.__getattr__", 125, |_| {
             name.call_method0("upper")
         })
     }
@@ -516,8 +464,7 @@ pub mod uses {
         name: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Uses.__setattr__", 128, |frame| {
-            frame.line(129);
+        rt::frame!(m, "Uses.__setattr__", 128, |_| {
             rt::super_(__class__, slf)?
                 .getattr("__setattr__")?
                 .call1((name, value.mul(2)?))?;
@@ -531,8 +478,7 @@ pub mod uses {
         slf: &Bound<'py, PyAny>,
         item: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Uses.__contains__", 131, |frame| {
-            frame.line(132);
+        rt::frame!(m, "Uses.__contains__", 131, |_| {
             item.rich_compare("x", CompareOp::Eq)
         })
     }
@@ -561,8 +507,7 @@ pub mod uses {
         exc: &Bound<'py, PyTuple>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Uses.__exit__", 140, |frame| {
-            frame.line(141);
+        rt::frame!(m, "Uses.__exit__", 140, |_| {
             rt::builtins::print(py, ("exit", exc.as_any().get_item(0)?))?;
             Ok(rt::bool(py, true))
         })
@@ -577,16 +522,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "__doc__",
             "Statements in a class body run in the class namespace.",
         )?;
-        frame.line(3);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        frame.line(4);
         m.set_global("traceback", rt::import(m, "traceback")?)?;
         rt::def!(m, show_tb(err))?;
-        frame.line(11);
         m.set_global("Body", rt::class!(m, "Body"(), body_::body, line = 11)?)?;
-        frame.line(54);
         m.set_global("b", m.global("Body")?.call0()?)?;
-        frame.line(55);
         rt::builtins::print(
             py,
             (
@@ -600,7 +540,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Body")?.getattr("first")?,
             ),
         )?;
-        frame.line(56);
         rt::builtins::print(
             py,
             (
@@ -613,7 +552,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Body")?.getattr("len")?,
             ),
         )?;
-        frame.line(57);
         rt::builtins::print(
             py,
             (
@@ -625,7 +563,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtin(py, "hasattr")?.call1((m.global("Body")?, "err"))?,
             ),
         )?;
-        frame.line(58);
         rt::builtins::print(
             py,
             (
@@ -635,17 +572,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Body")?.getattr("__static_attributes__")?,
             ),
         )?;
-        frame.line(61);
         m.set_global(
             "Generic",
             rt::class!(m, "Generic"(), generic::body, line = 61)?,
         )?;
-        frame.line(69);
         m.set_global(
             "Sub",
             rt::class!(m, "Sub"(m.global("Generic")?), sub::body, line = 69)?,
         )?;
-        frame.line(73);
         rt::builtins::print(
             py,
             (
@@ -658,12 +592,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .getattr("__name__")?,
             ),
         )?;
-        frame.line(76);
         m.set_global(
             "New",
             rt::class!(m, "New"(), new::body, line = 76, attributes = ["value"])?,
         )?;
-        frame.line(85);
         rt::builtins::print(
             py,
             (
@@ -686,7 +618,6 @@ def failing_body():
 "#
         )?;
         match (|| -> PyResult<()> {
-            frame.line(95);
             m.set_global(
                 "Failing",
                 rt::class!(m, "Failing"(), failing::body, line = 95)?,
@@ -698,14 +629,12 @@ def failing_body():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(100);
                 rt::builtins::print(py, ("ZeroDivisionError", show_tb(m, &m.global("err")?)?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
         match (|| -> PyResult<()> {
-            frame.line(104);
             m.set_global(
                 "FailingKept",
                 rt::class!(m, "FailingKept"(), failing_kept::body, line = 104)?,
@@ -717,18 +646,15 @@ def failing_body():
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(108);
                 rt::builtins::print(py, ("ZeroDivisionError", show_tb(m, &m.global("err")?)?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(111);
         m.set_global(
             "Annotated",
             rt::class!(m, "Annotated"(), annotated::body, line = 111)?,
         )?;
-        frame.line(121);
         rt::builtins::print(
             py,
             (
@@ -740,13 +666,9 @@ def failing_body():
                     .getattr("__annotations__")?,
             ),
         )?;
-        frame.line(124);
         m.set_global("Uses", rt::class!(m, "Uses"(), uses::body, line = 124)?)?;
-        frame.line(145);
         m.set_global("u", m.global("Uses")?.call0()?)?;
-        frame.line(146);
         m.global("u")?.setattr("v", 2)?;
-        frame.line(147);
         rt::builtins::print(
             py,
             (
@@ -760,13 +682,10 @@ def failing_body():
                     .is(m.global("u")?),
             ),
         )?;
-        frame.line(148);
         frame.with(&m.global("u")?, |value| -> PyResult<()> {
             m.set_global("same", value)?;
-            frame.line(149);
             Err(frame.raise(PyValueError::new_err("suppressed")))
         })?;
-        frame.line(150);
         rt::builtins::print(py, (m.global("same")?.is(m.global("u")?),))?;
         Ok(())
     })

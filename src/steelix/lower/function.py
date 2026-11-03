@@ -182,7 +182,10 @@ def in_frame(context: str, qualname: str, line: int, body: rs.Block) -> rs.Block
     if not fallible([*body.stmts, *tail]):
         return body
     param = "frame" if count_path(body, "frame") else "_"
-    args = (rs.Path(context), rs.StrLit(qualname), rs.IntLit(line), rs.Closure((param,), body))
+    # Always a block: `|_| { expr }` reads better than an expression that
+    # rustfmt breaks across the lines of the macro call.
+    closure = rs.Closure((param,), body, braces=True)
+    args = (rs.Path(context), rs.StrLit(qualname), rs.IntLit(line), closure)
     return rs.Block((), rs.MacroCall("rt::frame", args))
 
 

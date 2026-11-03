@@ -73,7 +73,12 @@ CASES = [(app, args) for app, commands in COMMANDS.items() for args in commands]
 @pytest.fixture(scope="session")
 def apps_workspace() -> Workspace:
     workspace = make_workspace(
-        "apps", list(COMMANDS), Mode.BIN, from_golden=False, source_dir=APPS_DIR
+        "apps",
+        list(COMMANDS),
+        Mode.BIN,
+        from_golden=False,
+        source_dir=APPS_DIR,
+        traceback_lines=True,
     )
     result = workspace.cargo("build", "--workspace", "--message-format=json")
     assert result.returncode == 0, result.stderr + result.stdout

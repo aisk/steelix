@@ -15,8 +15,7 @@ use steelix_runtime as rt;
 
 // mixed_mode.py:9
 pub fn log<'py>(m: &rt::Module<'py>, event: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "log", 9, |frame| {
-        frame.line(10);
+    rt::frame!(m, "log", 9, |_| {
         m.global("events")?.call_method1("append", (event,))?;
         Ok(event.clone())
     })
@@ -24,10 +23,7 @@ pub fn log<'py>(m: &rt::Module<'py>, event: &Bound<'py, PyAny>) -> PyResult<Boun
 
 // mixed_mode.py:31
 pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "double", 31, |frame| {
-        frame.line(32);
-        x.mul(2)
-    })
+    rt::frame!(m, "double", 31, |_| { x.mul(2) })
 }
 
 // mixed_mode.py:41
@@ -35,15 +31,13 @@ pub fn use_counter<'py>(
     m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "use_counter", 41, |frame| {
+    rt::frame!(m, "use_counter", 41, |_| {
         // Native code calling the class and the Python generator through globals.
-        frame.line(43);
         let counter = m
             .global("Counter")?
             .call1((start,))?
             .call_method0("bump")?
             .call_method0("bump")?;
-        frame.line(44);
         counter
             .getattr("value")?
             .add(rt::builtin(m.py(), "sum")?.call1((m.global("evens")?.call1((5,))?,))?)
@@ -57,8 +51,7 @@ pub fn twice<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // mixed_mode.py:81
 pub fn set_mode<'py>(m: &rt::Module<'py>, mode: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "set_mode", 81, |frame| {
-        frame.line(83);
+    rt::frame!(m, "set_mode", 81, |_| {
         m.set_global("MODE", mode)?;
         Ok(rt::none(m.py()))
     })
@@ -66,8 +59,7 @@ pub fn set_mode<'py>(m: &rt::Module<'py>, mode: &Bound<'py, PyAny>) -> PyResult<
 
 // mixed_mode.py:91
 pub fn trace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "trace", 91, |frame| {
-        frame.line(92);
+    rt::frame!(m, "trace", 91, |_| {
         log(
             m,
             &rt::fstring(
@@ -86,15 +78,12 @@ pub mod counter {
     // mixed_mode.py:17
     /// The body of `class Counter`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Counter", 17, |frame| {
-            frame.line(18);
+        rt::frame!(ns, "Counter", 17, |_| {
             ns.set(
                 "__doc__",
                 "A native class whose methods call native functions.",
             )?;
-            frame.line(20);
             ns.set("instances", ns.get("log")?.call1(("class body",))?)?;
-            frame.line(22);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -103,7 +92,6 @@ pub mod counter {
                     qualname = "Counter.__init__"
                 )?,
             )?;
-            frame.line(25);
             ns.set(
                 "bump",
                 rt::function!(ns, bump(slf as "self"), qualname = "Counter.bump")?,
@@ -118,8 +106,7 @@ pub mod counter {
         slf: &Bound<'py, PyAny>,
         start: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Counter.__init__", 22, |frame| {
-            frame.line(23);
+        rt::frame!(m, "Counter.__init__", 22, |_| {
             slf.setattr("value", start)?;
             Ok(rt::none(m.py()))
         })
@@ -127,9 +114,8 @@ pub mod counter {
 
     // mixed_mode.py:25
     pub fn bump<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Counter.bump", 25, |frame| {
+        rt::frame!(m, "Counter.bump", 25, |_| {
             // A method calling a native function.
-            frame.line(27);
             slf.setattr("value", double(m, &slf.getattr("value")?)?)?;
             Ok(slf.clone())
         })
@@ -144,16 +130,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "__doc__",
             "Mixed mode: what steelix can not lower yet stays Python and runs in place.",
         )?;
-        frame.line(3);
         m.set_global("inspect", rt::import(m, "inspect")?)?;
-        frame.line(4);
         m.set_global("os", rt::import(m, "os")?)?;
-        frame.line(6);
         m.set_global("events", PyList::empty(py))?;
         rt::def!(m, log(event))?;
-        frame.line(14);
         log(m, &rt::str(py, "native statement before the class"))?;
-        frame.line(17);
         m.set_global(
             "Counter",
             rt::class!(
@@ -177,7 +158,6 @@ def evens(limit):
 "#
         )?;
         rt::def!(m, use_counter(start))?;
-        frame.line(47);
         log(m, &rt::str(py, "native statement after the class"))?;
         // mixed_mode.py:48, kept as Python: generator expression with several for clauses at 48:15
         rt::exec_python!(
@@ -187,9 +167,7 @@ def evens(limit):
 squares = list(s for s in map(double, range(4)) for _ in "1")
 "#
         )?;
-        frame.line(49);
         rt::builtins::print(py, (m.global("squares")?, use_counter(m, &rt::int(py, 3))?))?;
-        frame.line(50);
         rt::builtins::print(
             py,
             (
@@ -201,7 +179,6 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
                 m.global("evens")?.getattr("__module__")?,
             ),
         )?;
-        frame.line(51);
         rt::builtins::print(
             py,
             (
@@ -217,7 +194,6 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
                     .getattr("co_firstlineno")?,
             ),
         )?;
-        frame.line(52);
         rt::builtins::print(
             py,
             (m.global("inspect")?
@@ -227,44 +203,36 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
                 .get_item(0)?,),
         )?;
         match (|| -> PyResult<()> {
-            frame.line(55);
             m.set_global("json", rt::import(m, "json")?)?;
             Ok(())
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
-                frame.line(57);
                 m.set_global("json", py.None())?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(58);
         rt::builtins::print(
             py,
             (m.global("json")?
                 .getattr("dumps")?
                 .call1(([("kept", true)].into_py_dict(py)?,))?,),
         )?;
-        frame.line(60);
         m.set_global("FLAG", true)?;
-        frame.line(61);
         if m.global("FLAG")?.is_truthy()? {
             // mixed_mode.py:62
             fn pick<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "first"))
             }
-            frame.line(62);
             m.set_global("pick", rt::function!(m, pick())?)?;
         } else {
             // mixed_mode.py:65
             fn pick_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "second"))
             }
-            frame.line(65);
             m.set_global("pick", rt::function!(m, pick_(), name = "pick")?)?;
         }
-        frame.line(67);
         rt::builtins::print(py, (m.global("pick")?.call0()?,))?;
         rt::def!(m, twice())?;
         // mixed_mode.py:74, kept as Python: function redefinition at 74:1
@@ -276,12 +244,9 @@ def twice():
     return "redefined, kept as Python"
 "#
         )?;
-        frame.line(78);
         rt::builtins::print(py, (m.global("twice")?.call0()?,))?;
         rt::def!(m, set_mode(mode))?;
-        frame.line(86);
         set_mode(m, &rt::str(py, "set by native code"))?;
-        frame.line(87);
         m.set_global(
             "MODES",
             rt::dict!(
@@ -290,7 +255,6 @@ def twice():
                 ("b", m.global("MODE")?)
             )?,
         )?;
-        frame.line(88);
         rt::builtins::print(py, (m.global("MODES")?,))?;
         rt::def!(m, trace(r#fn))?;
         // mixed_mode.py:96, kept as Python: yield from at 98:5
@@ -303,16 +267,13 @@ def chunks(items):
     yield from items
 "#
         )?;
-        frame.line(101);
         rt::builtins::print(
             py,
             (rt::builtin(py, "list")?
                 .call1((m.global("chunks")?.call1((PyList::new(py, [1, 2])?,))?,))?,),
         )?;
-        frame.line(102);
         rt::builtins::print(py, (m.global("events")?,))?;
         // `:=` in a comprehension binds a global, here shadowing a builtin.
-        frame.line(105);
         {
             let list = PyList::empty(py);
             for v in PyTuple::new(py, [3, 7])?.try_iter()? {
@@ -322,7 +283,6 @@ def chunks(items):
                 py.check_signals()?;
             }
         }
-        frame.line(106);
         rt::builtins::print(py, (m.global("min")?,))?;
         Ok(())
     })

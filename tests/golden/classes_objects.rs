@@ -13,8 +13,7 @@ pub mod point {
     // classes_objects.py:8
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Point", 8, |frame| {
-            frame.line(9);
+        rt::frame!(ns, "Point", 8, |_| {
             ns.set(
                 "__init__",
                 rt::function!(
@@ -23,7 +22,6 @@ pub mod point {
                     qualname = "Point.__init__"
                 )?,
             )?;
-            frame.line(13);
             ns.set(
                 "__eq__",
                 rt::function!(
@@ -32,9 +30,7 @@ pub mod point {
                     qualname = "Point.__eq__"
                 )?,
             )?;
-            frame.line(16);
             ns.set("__hash__", m.py().None())?;
-            frame.line(18);
             ns.set(
                 "__repr__",
                 rt::function!(
@@ -54,10 +50,8 @@ pub mod point {
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.__init__", 9, |frame| {
-            frame.line(10);
+        rt::frame!(m, "Point.__init__", 9, |_| {
             slf.setattr("x", x)?;
-            frame.line(11);
             slf.setattr("y", y)?;
             Ok(rt::none(m.py()))
         })
@@ -70,8 +64,7 @@ pub mod point {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Point.__eq__", 13, |frame| {
-            frame.line(14);
+        rt::frame!(m, "Point.__eq__", 13, |_| {
             Ok(if other.is_instance(&m.global("Point")?)? {
                 PyTuple::new(py, [&slf.getattr("x")?, &slf.getattr("y")?])?.rich_compare(
                     PyTuple::new(py, [&other.getattr("x")?, &other.getattr("y")?])?,
@@ -88,8 +81,7 @@ pub mod point {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.__repr__", 18, |frame| {
-            frame.line(19);
+        rt::frame!(m, "Point.__repr__", 18, |_| {
             rt::fstring(
                 m.py(),
                 (
@@ -110,10 +102,8 @@ pub mod slots {
     // classes_objects.py:22
     /// The body of `class Slots`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Slots", 22, |frame| {
-            frame.line(23);
+        rt::frame!(ns, "Slots", 22, |_| {
             ns.set("__slots__", PyTuple::new(m.py(), ["a", "b"])?)?;
-            frame.line(25);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -122,7 +112,6 @@ pub mod slots {
                     qualname = "Slots.__init__"
                 )?,
             )?;
-            frame.line(28);
             ns.set(
                 "__reduce__",
                 rt::function!(
@@ -141,8 +130,7 @@ pub mod slots {
         slf: &Bound<'py, PyAny>,
         a: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Slots.__init__", 25, |frame| {
-            frame.line(26);
+        rt::frame!(m, "Slots.__init__", 25, |_| {
             slf.setattr("a", a)?;
             Ok(rt::none(m.py()))
         })
@@ -154,8 +142,7 @@ pub mod slots {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Slots.__reduce__", 28, |frame| {
-            frame.line(29);
+        rt::frame!(m, "Slots.__reduce__", 28, |_| {
             Ok(PyTuple::new(
                 py,
                 [
@@ -174,8 +161,7 @@ pub mod tree {
     // classes_objects.py:32
     /// The body of `class Tree`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Tree", 32, |frame| {
-            frame.line(33);
+        rt::frame!(ns, "Tree", 32, |_| {
             ns.set(
                 "__init__",
                 rt::function!(
@@ -184,7 +170,6 @@ pub mod tree {
                     qualname = "Tree.__init__"
                 )?,
             )?;
-            frame.line(37);
             ns.set(
                 "__deepcopy__",
                 rt::function!(
@@ -193,7 +178,6 @@ pub mod tree {
                     qualname = "Tree.__deepcopy__"
                 )?,
             )?;
-            frame.line(41);
             ns.set(
                 "total",
                 rt::function!(ns, total(slf as "self"), qualname = "Tree.total")?,
@@ -210,10 +194,8 @@ pub mod tree {
         children: &Bound<'py, PyTuple>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Tree.__init__", 33, |frame| {
-            frame.line(34);
+        rt::frame!(m, "Tree.__init__", 33, |_| {
             slf.setattr("value", value)?;
-            frame.line(35);
             slf.setattr("children", rt::builtin(py, "list")?.call1((children,))?)?;
             Ok(rt::none(py))
         })
@@ -225,10 +207,8 @@ pub mod tree {
         slf: &Bound<'py, PyAny>,
         memo: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Tree.__deepcopy__", 37, |frame| {
-            frame.line(38);
+        rt::frame!(m, "Tree.__deepcopy__", 37, |_| {
             rt::builtins::print(m.py(), ("deepcopy", slf.getattr("value")?))?;
-            frame.line(39);
             rt::call!(
                 m.global("Tree")?,
                 slf.getattr("value")?,
@@ -242,7 +222,7 @@ pub mod tree {
     // classes_objects.py:41
     pub fn total<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Tree.total", 41, |frame| {
+        rt::frame!(m, "Tree.total", 41, |_| {
             // classes_objects.py:42
             fn genexpr<'py>(
                 m: &rt::Module<'py>,
@@ -255,7 +235,6 @@ pub mod tree {
                     Ok(None)
                 })
             }
-            frame.line(42);
             Ok(if false {
                 slf.getattr("value")?
                     .add(rt::builtin(py, "sum")?.call1((rt::genexpr!(
@@ -280,21 +259,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
         m.set_global("__doc__", "Instances of transpiled classes behave like Python ones: pickling,\ncopying, `__slots__`, comparisons and `isinstance`.")?;
-        frame.line(4);
         m.set_global("copy", rt::import(m, "copy")?)?;
-        frame.line(5);
         m.set_global("pickle", rt::import(m, "pickle")?)?;
-        frame.line(8);
         m.set_global(
             "Point",
             rt::class!(m, "Point"(), point::body, line = 8, attributes = ["x", "y"])?,
         )?;
-        frame.line(22);
         m.set_global(
             "Slots",
             rt::class!(m, "Slots"(), slots::body, line = 22, attributes = ["a"])?,
         )?;
-        frame.line(32);
         m.set_global(
             "Tree",
             rt::class!(
@@ -305,12 +279,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["children", "value"]
             )?,
         )?;
-        frame.line(47);
         m.set_global(
             "p",
             m.global("Point")?.call1((1, PyList::new(py, [2, 3])?))?,
         )?;
-        frame.line(48);
         m.set_global(
             "q",
             m.global("pickle")?.getattr("loads")?.call1((m
@@ -318,7 +290,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .getattr("dumps")?
                 .call1((m.global("p")?,))?,))?,
         )?;
-        frame.line(49);
         rt::builtins::print(
             py,
             (
@@ -328,16 +299,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("q")?.get_type().is(m.global("Point")?),
             ),
         )?;
-        frame.line(50);
         m.set_global(
             "r",
             m.global("copy")?
                 .getattr("deepcopy")?
                 .call1((m.global("p")?,))?,
         )?;
-        frame.line(51);
         m.global("r")?.getattr("y")?.call_method1("append", (4,))?;
-        frame.line(52);
         rt::builtins::print(
             py,
             (
@@ -350,22 +318,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .is(m.global("p")?.getattr("y")?),
             ),
         )?;
-        frame.line(54);
         match (|| rt::builtin(py, "hash")?.call1((m.global("p")?,)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(56);
                 rt::builtins::print(py, ("TypeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(57);
         m.set_global("s", m.global("Slots")?.call1((5,))?)?;
-        frame.line(58);
         rt::builtins::print(
             py,
             (
@@ -382,7 +346,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ),
         )?;
         match (|| -> PyResult<()> {
-            frame.line(60);
             m.global("s")?.setattr("c", 1)?;
             Ok(())
         })() {
@@ -391,13 +354,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(62);
                 rt::builtins::print(py, ("AttributeError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(63);
         m.set_global(
             "t",
             m.global("Tree")?.call1((
@@ -407,14 +368,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .call1((3, m.global("Tree")?.call1((4,))?))?,
             ))?,
         )?;
-        frame.line(64);
         m.set_global(
             "u",
             m.global("copy")?
                 .getattr("deepcopy")?
                 .call1((m.global("t")?,))?,
         )?;
-        frame.line(65);
         rt::builtins::print(
             py,
             (
@@ -428,7 +387,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 !m.global("u")?.is(m.global("t")?),
             ),
         )?;
-        frame.line(66);
         rt::builtins::print(
             py,
             (m.global("pickle")?
@@ -439,7 +397,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .call1((m.global("Point")?.getattr("__init__")?,))?,))?
                 .is(m.global("Point")?.getattr("__init__")?),),
         )?;
-        frame.line(67);
         rt::builtins::print(
             py,
             (

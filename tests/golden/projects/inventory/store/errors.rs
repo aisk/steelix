@@ -18,9 +18,8 @@ pub mod out_of_stock {
     // store/errors.py:8
     /// The body of `class OutOfStock`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "OutOfStock", 8, |frame| {
+        rt::frame!(ns, "OutOfStock", 8, |_| {
             let __class__ = ns.class_cell();
-            frame.line(9);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -42,8 +41,7 @@ pub mod out_of_stock {
         wanted: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "OutOfStock.__init__", 9, |frame| {
-            frame.line(10);
+        rt::frame!(m, "OutOfStock.__init__", 9, |_| {
             rt::super_(__class__, slf)?
                 .getattr("__init__")?
                 .call1((if false {
@@ -51,7 +49,6 @@ pub mod out_of_stock {
                 } else {
                     rt::fstring(py, ("not enough ", rt::format(name, "")?))?
                 },))?;
-            frame.line(11);
             slf.setattr("wanted", wanted)?;
             Ok(rt::none(py))
         })
@@ -63,7 +60,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
         rt::builtins::print(py, ("store.errors: imported", m.global("__package__")?))?;
-        frame.line(4);
         m.set_global(
             "StoreError",
             rt::class!(
@@ -73,7 +69,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 4
             )?,
         )?;
-        frame.line(8);
         m.set_global(
             "OutOfStock",
             rt::class!(
@@ -85,7 +80,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,
         )?;
         match (|| -> PyResult<()> {
-            frame.line(15);
             let package = rt::import_names(m, "...", &["beyond"])?;
             m.set_global("beyond", rt::import_from(&package, "beyond")?)?;
             Ok(())
@@ -95,7 +89,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(17);
                 rt::builtins::print(py, ("store.errors:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }

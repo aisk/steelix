@@ -48,6 +48,10 @@ class ModuleContext:
     """Names of the Rust modules in `class_mods`."""
     static_attributes: dict[tuple[str, int], tuple[str, ...]] = field(default_factory=dict)
     """`__static_attributes__` of each class by qualified name and first line."""
+    traceback_lines: bool = False
+    """Emit `frame.line(n)` before fallible statements so tracebacks show
+    the line of the statement; otherwise native frames report their `def`
+    line (design §9)."""
 
     def unsupported(self, feature: str, node: ast.AST) -> UnsupportedError:
         return UnsupportedError(feature, SourceLocation.of(self.filename, node))

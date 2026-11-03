@@ -14,10 +14,9 @@ pub fn constant<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // try_infallible.py:12
 pub fn local_copy<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "local_copy", 12, |frame| {
+    rt::frame!(m, "local_copy", 12, |_| {
         let b = a.clone();
         let c = b.clone();
-        frame.line(20);
         rt::builtins::print(m.py(), ("else runs",))?;
         Ok(c)
     })
@@ -26,15 +25,13 @@ pub fn local_copy<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<B
 // try_infallible.py:24
 pub fn nothing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "nothing", 24, |frame| {
+    rt::frame!(m, "nothing", 24, |_| {
         let mut i: Option<Bound<'py, PyAny>> = None;
-        frame.line(25);
         for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
             i = Some(item?);
             py.check_signals()?;
             continue;
         }
-        frame.line(32);
         Ok(rt::local(&i, "i")?.clone())
     })
 }
@@ -49,15 +46,12 @@ pub fn pair<'py>(
     rt::frame!(m, "pair", 35, |frame| {
         let mut t: Option<Bound<'py, PyAny>> = None;
         let result = (|| -> PyResult<()> {
-            frame.line(37);
             t = Some(PyTuple::new(py, [a, b])?.into_any());
             Ok(())
         })();
         let finally = frame.finally(result);
-        frame.line(41);
         rt::builtins::print(py, ("finally",))?;
         finally.resume()?;
-        frame.line(42);
         Ok(rt::local(&t, "t")?.clone())
     })
 }
@@ -73,13 +67,11 @@ pub fn maybe_unbound<'py>(
     flag: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "maybe_unbound", 52, |frame| {
+    rt::frame!(m, "maybe_unbound", 52, |_| {
         let mut y: Option<Bound<'py, PyAny>> = None;
-        frame.line(53);
         if flag.is_truthy()? {
             y = Some(rt::str(py, "set"));
         }
-        frame.line(56);
         let z = match (|| -> PyResult<Bound<'py, PyAny>> { Ok(rt::local(&y, "y")?.clone()) })() {
             Ok(value) => value,
             Err(err) if err.is_instance_of::<PyUnboundLocalError>(py) => rt::str(py, "unbound"),
@@ -95,44 +87,36 @@ pub fn deleted_in_loop<'py>(
     n: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "deleted_in_loop", 62, |frame| {
+    rt::frame!(m, "deleted_in_loop", 62, |_| {
         let mut w: Bound<'py, PyAny>;
         let mut v = Some(rt::int(py, 0));
-        frame.line(64);
         for underscore in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
             let underscore = underscore?;
-            frame.line(66);
             w = rt::local(&v, "v")?.clone();
             v = None;
             v = Some(w.clone());
             py.check_signals()?;
-            frame.line(64);
         }
-        frame.line(72);
         Ok(rt::local(&v, "v")?.clone())
     })
 }
 
 // try_infallible.py:75
 pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "captured", 75, |frame| {
+    rt::frame!(m, "captured", 75, |_| {
         let k = rt::int(m.py(), 5);
         // try_infallible.py:78
         fn inner<'py>(m: &rt::Module<'py>, k: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(
-                m,
-                "captured.<locals>.inner",
-                78,
-                |_| match Ok::<_, PyErr>(k.clone()) {
+            rt::frame!(m, "captured.<locals>.inner", 78, |_| {
+                match Ok::<_, PyErr>(k.clone()) {
                     Ok(value) => Ok(value),
                     Err(err) if err.is_instance_of::<PyNameError>(py) => Ok(rt::none(py)),
                     Err(err) => Err(err),
                 }
-            )
+            })
         }
         let inner = rt::function!(m, inner[k](), qualname = "captured.<locals>.inner")?;
-        frame.line(84);
         inner.call0()
     })
 }
@@ -149,7 +133,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, maybe_unbound(flag))?;
         rt::def!(m, deleted_in_loop(n))?;
         rt::def!(m, captured())?;
-        frame.line(87);
         rt::builtins::print(
             py,
             (
@@ -160,7 +143,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 returned(m, &rt::str(py, "r"))?,
             ),
         )?;
-        frame.line(88);
         rt::builtins::print(
             py,
             (
@@ -176,12 +158,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) if err.is_instance_of::<PyException>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
-                frame.line(93);
                 m.set_global("g", 0)?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(98);
         rt::builtins::print(py, (m.global("g")?,))?;
         Ok(())
     })

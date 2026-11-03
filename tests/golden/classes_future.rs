@@ -8,9 +8,8 @@ pub mod meta {
     // classes_future.py:10
     /// The body of `class Meta`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Meta", 10, |frame| {
+        rt::frame!(ns, "Meta", 10, |_| {
             let __class__ = ns.class_cell();
-            frame.line(11);
             ns.set(
                 "__new__",
                 rt::function!(
@@ -33,8 +32,7 @@ pub mod meta {
         ns: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Meta.__new__", 11, |frame| {
-            frame.line(12);
+        rt::frame!(m, "Meta.__new__", 11, |_| {
             let list = PyList::empty(py);
             for k in ns.try_iter()? {
                 let k = k?;
@@ -44,7 +42,6 @@ pub mod meta {
                 py.check_signals()?;
             }
             rt::builtins::print(py, (name, list))?;
-            frame.line(13);
             rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, ns))
         })
     }
@@ -57,16 +54,12 @@ pub mod config {
     // classes_future.py:16
     /// The body of `class Config`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Config", 16, |frame| {
+        rt::frame!(ns, "Config", 16, |_| {
             ns.setup_annotations()?;
-            frame.line(17);
             ns.set("__doc__", "Settings.")?;
-            frame.line(19);
             ns.set("name", "app")?;
             ns.annotate("name", "str")?;
-            frame.line(20);
             ns.annotate("size", "int")?;
-            frame.line(21);
             {
                 let name = ns.get("name")?;
                 ns.set(
@@ -79,7 +72,6 @@ pub mod config {
                 )?;
                 ns.annotate("ratio", "float")?;
             }
-            frame.line(23);
             ns.set(
                 "scaled",
                 rt::function!(
@@ -108,11 +100,9 @@ pub mod pair {
     // classes_future.py:32
     /// The body of `class Pair`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Pair", 31, |frame| {
+        rt::frame!(ns, "Pair", 31, |_| {
             ns.setup_annotations()?;
-            frame.line(33);
             ns.annotate("left", "int")?;
-            frame.line(34);
             ns.set("right", 0)?;
             ns.annotate("right", "int")?;
             Ok(())
@@ -126,15 +116,12 @@ pub mod private {
     // classes_future.py:40
     /// The body of `class Private`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Private", 40, |frame| {
+        rt::frame!(ns, "Private", 40, |_| {
             ns.setup_annotations()?;
             // The strings keep the names as written, the keys are mangled.
-            frame.line(42);
             ns.set("_Private__x", 1)?;
             ns.annotate("_Private__x", "__T")?;
-            frame.line(43);
             ns.annotate("y", "list[__T]")?;
-            frame.line(45);
             ns.set(
                 "f",
                 rt::function!(
@@ -160,21 +147,16 @@ pub mod private {
 /// Executes the body of `classes_future.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global("__doc__", "Class annotations with `from __future__ import annotations` are strings in\n`__annotations__`, created at the start of the body.")?;
-        frame.line(4);
         let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
         m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
-        frame.line(6);
         m.set_global("dataclasses", rt::import(m, "dataclasses")?)?;
-        frame.line(7);
         m.set_global("typing", rt::import(m, "typing")?)?;
-        frame.line(10);
         m.set_global(
             "Meta",
             rt::class!(m, "Meta"(rt::builtin(py, "type")?), meta::body, line = 10)?,
         )?;
-        frame.line(16);
         m.set_global(
             "Config",
             rt::class!(
@@ -184,7 +166,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 16
             )?,
         )?;
-        frame.line(27);
         rt::builtins::print(
             py,
             (
@@ -196,7 +177,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .getattr("__annotations__")?,
             ),
         )?;
-        frame.line(28);
         rt::builtins::print(
             py,
             (m.global("typing")?
@@ -204,15 +184,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .call1((m.global("Config")?,))?,),
         )?;
         {
-            frame.line(31);
             let dataclass = m.global("dataclasses")?.getattr("dataclass")?;
-            frame.line(32);
             let pair = rt::class!(m, "Pair"(), pair::body, line = 31)?;
-            frame.line(31);
             let pair = dataclass.call1((pair,))?;
             m.set_global("Pair", pair)?;
         }
-        frame.line(37);
         rt::builtins::print(
             py,
             (
@@ -220,12 +196,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Pair")?.getattr("__annotations__")?,
             ),
         )?;
-        frame.line(40);
         m.set_global(
             "Private",
             rt::class!(m, "Private"(), private::body, line = 40)?,
         )?;
-        frame.line(49);
         rt::builtins::print(
             py,
             (

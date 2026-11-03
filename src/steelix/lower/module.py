@@ -71,11 +71,16 @@ class ModuleRole:
 
 
 def lower_module(
-    parsed: ParsedModule, *, fallback: bool = True, role: ModuleRole | None = None
+    parsed: ParsedModule,
+    *,
+    fallback: bool = True,
+    role: ModuleRole | None = None,
+    traceback_lines: bool = False,
 ) -> LoweredModule:
     """Lower `parsed`. Without `fallback`, the first unsupported construct
     raises `UnsupportedError` instead of being kept as Python. `role`
-    defaults to a script run as `__main__`."""
+    defaults to a script run as `__main__`. `traceback_lines` emits the
+    `frame.line(n)` markers (design §9)."""
     role = role or ModuleRole()
     tree = parsed.tree
     desugar(tree)
@@ -90,7 +95,7 @@ def lower_module(
     attributes = static_attributes(parsed.source, parsed.filename)
     while True:
         try:
-            return _lower(parsed, plan, attributes, role)
+            return _lower(parsed, plan, attributes, role, traceback_lines)
         except UnsupportedError as err:
             # Found while lowering rather than by the subset check: keep the
             # statement as Python and start over, since keeping it changes
@@ -117,6 +122,7 @@ def _lower(
     plan: FallbackPlan,
     attributes: dict[tuple[str, int], tuple[str, ...]],
     role: ModuleRole,
+    traceback_lines: bool = False,
 ) -> LoweredModule:
     tree = parsed.tree
     python = plan.python
@@ -140,6 +146,7 @@ def _lower(
         source_lines=source_lines(parsed.source),
         leading_comments=_leading_comments(tree, parsed, plan),
         static_attributes=attributes,
+        traceback_lines=traceback_lines,
         # Class modules avoid the submodules and the module's own name.
         mod_names={
             *role.submodules,

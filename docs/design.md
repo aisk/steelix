@@ -111,12 +111,10 @@ use steelix_runtime as rt;
 // fib.py:1
 pub fn fib<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let _guard = rt::RecursionGuard::enter(m.py())?;
-    rt::frame!(m, "fib", 1, |frame| {
-        frame.line(2);
+    rt::frame!(m, "fib", 1, |_| {
         if n.lt(2)? {
             return Ok(n.clone());
         }
-        frame.line(4);
         fib(m, &n.sub(1)?)?.add(fib(m, &n.sub(2)?)?)
     })
 }
@@ -124,9 +122,8 @@ pub fn fib<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'p
 /// Executes the body of `fib.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         rt::def!(m, fib(n))?;
-        frame.line(7);
         rt::builtins::print(py, (fib(m, &rt::int(py, 10))?,))?;
         Ok(())
     })
@@ -136,7 +133,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 要点
 
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`getattr`、`call` 等方法
-- 函数体和模块体包在 `rt::frame!` 里，可能出错的语句前用 `frame.line(N);` 记下 Python 行号，异常的 traceback 因此有原生函数的帧（见第 9 节）
+- 函数体和模块体包在 `rt::frame!` 里，异常的 traceback 因此有原生函数的帧，函数名和 Python 一样，行号是 `def` 所在的行。闭包参数 `frame` 只在用到时出现（`raise`、`except` 等），否则写 `|_|`。`--traceback-lines` 在可能出错的语句前加 `frame.line(N);`，行号精确到语句（见第 9 节）
 - 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
 - 模块体生成 `exec_module(m)`，只依赖传入的模块上下文，与输出模式无关
 - 模块级变量的读写走 globals 字典：`m.global("LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `m.set_global("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "max")?`
@@ -535,7 +532,7 @@ Ok(dict.into_any())
 - 类体里的推导式看不到类的命名空间（第一个可迭代对象除外），名字直接查 globals 和 builtins，和 CPython 一样抛 `NameError`
 - dict 推导式先求值 key 再求值 value（3.8 起的顺序），重复的 key 后者覆盖前者。set 推导式的 `set.add(..)` 是 `PySet` 自己的方法，生成的方法调用带 `concrete` 标记，检查器（§2）不要求擦除类型
 - 每次迭代结尾 `py.check_signals()?`，和普通循环一样
-- 行号：错误报告在外层帧里，行号是出错的部分所在的行。推导式跨行时，第一个可迭代对象、条件、元素前面各写 `frame.line(N)`，迭代体改变了行号时在结尾设回 `for` 的行（取下一个元素时出错报这一行），推导式结束后设回语句的行。推导式写在一行里时没有额外的 marker
+- 行号：错误报告在外层帧里。默认（§9）就是外层函数的 `def` 行。`--traceback-lines` 时行号是出错的部分所在的行：推导式跨行时，第一个可迭代对象、条件、元素前面各写 `frame.line(N)`，迭代体改变了行号时在结尾设回 `for` 的行（取下一个元素时出错报这一行），推导式结束后设回语句的行。推导式写在一行里时没有额外的 marker
 - 推导式里定义的 lambda 或生成器表达式捕获推导式的变量时，这个变量是一个在循环之前创建的 `rt::Cell`，所有迭代共用（`[lambda: i for i in range(3)]` 的三个函数都返回 2），和 CPython 内联之后的行为一样
 - `locals()`、`vars()`、`dir()`（不带参数）和不带命名空间的 `exec`/`eval` 在推导式里会看到推导式的变量，所在的函数或语句保留为 Python
 - 变量在绑定它的 `for` 之前就被读到的推导式（`[y for x in xs for y in f(y)]`，CPython 抛 `UnboundLocalError`）保留为 Python
@@ -555,7 +552,6 @@ fn genexpr<'py>(
         Ok(None)
     })
 }
-frame.line(10);
 rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
     m,
     genexpr(xs.try_iter()?),
@@ -633,11 +629,33 @@ for x in xs.try_iter()? {
 
 原生函数运行时没有 Python 帧。和 Cython 一样，异常离开函数时再把这个函数补进 traceback
 
-- 每个函数体包在 `rt::frame!(m, "qualname", def 所在行, |frame| { .. })` 里，模块体用 `<module>`。`RecursionGuard` 在它外面。函数体里不可能出错的（没有 `?`）不包
-- 每条可能出错的语句前写 `frame.line(N);`，只是写一个 `Cell<u32>`。复合语句的 marker 写在头部（`if`、`while` 的条件，`for` 的迭代），循环体正常走完时把行号设回循环头，和 CPython 在 `JUMP_BACKWARD` 处的行号一致。不会出错的语句、`break`/`continue`、和上一条行号相同的语句不写
+- 每个函数体包在 `rt::frame!(m, "qualname", def 所在行, |frame| { .. })` 里，模块体用 `<module>`，行号是 1。`RecursionGuard` 在它外面。函数体里不可能出错的（没有 `?`）不包。函数体不用 `frame`（没有 `raise`、`except`、`finally`、`with` 等）时闭包参数写 `|_|`
 - 异常离开函数（或者到达 handler、`finally`、`with` 的 `__exit__`）时，`Frame` 用 `PyCode_NewEmpty` 和 `code.replace(co_qualname=..)` 创建 code 对象（每个函数只创建一次，`PyOnceLock` 缓存），`PyFrame_New` 创建帧，再用 `types.TracebackType(tb_next, frame, -1, line)` 插到 traceback 前面。同一次调用只创建一个帧对象，异常已经带有这个帧的条目时（在这里 `raise`，或者裸 `raise` 重新抛出）不再重复添加，和 CPython 一样
-- 多行语句的行号取值所在的那一行（`return`、赋值、表达式语句取值的第一行），traceback 只显示这一行源码。`tb_lasti` 是 -1，所以原生帧没有 `^^^` 定位，这是和 CPython traceback 唯一的文字差异
-- 可读性的取舍：marker 让每条语句多一行，但它是显式的、和 Python 源码一一对应，手工修改 Rust 时也容易维护。示例（`total_size`，第 24 行起）
+- 默认（M9a 起）traceback 里原生帧的函数名、文件和帧的顺序都和 CPython 一样，行号是 `def` 所在的行（有装饰器时是第一个装饰器的行），显示的源码行也是这一行。例外是 `except` 的类型不是 builtin 异常类时，`frame.matches(&err, LINE, ..)` 要在 `except` 那一行求值类型，之后的行号停在这一行
+- `--traceback-lines`（`CrateOptions.traceback_lines`）恢复精确到语句的行号，是调试和验证用的模式，e2e、`tests/apps`、`tests/projects` 的测试都用它和 CPython 逐行比较 traceback
+  - 每条可能出错的语句前写 `frame.line(N);`，只是写一个 `Cell<u32>`。复合语句的 marker 写在头部（`if`、`while` 的条件，`for` 的迭代），循环体正常走完时把行号设回循环头，和 CPython 在 `JUMP_BACKWARD` 处的行号一致。不会出错的语句、`break`/`continue`、和上一条行号相同的语句不写
+  - 多行语句的行号取值所在的那一行（`return`、赋值、表达式语句取值的第一行），traceback 只显示这一行源码。`tb_lasti` 是 -1，所以原生帧没有 `^^^` 定位，这是和 CPython traceback 唯一的文字差异
+  - 实现在 lowering 里（`StmtLowering.at_line` 和推导式的 `at_line`）：两种模式的行号记录完全一样，只是默认不输出 marker，`rustflow` 的分析本来就跳过 marker，所以两种模式生成的代码结构相同。除了 marker 和闭包参数（`|frame|`/`|_|`），唯一的区别是去掉 marker 后 `else { if .. }` 会合并成 `else if`。`rt::frame!` 的闭包体总是带花括号，只有一个表达式时也写 `|_| { expr }`，不让 rustfmt 把长表达式拆在宏调用的几行里
+- 为什么默认不写 marker
+  - 噪音：M9a 之前 marker 占 golden 非空行的 11.6%，转换后的标准库工具（`tests/apps`）的 14.1%。去掉之后 golden 从 20493 行变成 18114 行，`tests/apps` 的输出从 11041 行变成 9419 行
+  - 会过期：生成的代码是要给人改的（第 15 节），改过的 Rust 里 marker 很容易和 Python 源码对不上，这时 traceback 会很肯定地报一个错的行号，比只报 `def` 行更误导人。`def` 行不会错，函数名加上 Rust 的源码已经足够定位
+- 示例（`total_size`，第 24 行起），默认
+
+  ```rust
+  rt::frame!(m, "total_size", 24, |_| {
+      let mut text: Bound<'py, PyAny>;
+      let mut total = rt::int(py, 0);
+      for path in paths.try_iter()? {
+          let path = path?;
+          text = read_first_line(m, &path)?;
+          total = rt::iadd(&total, text.len()?)?;
+          py.check_signals()?;
+      }
+      Ok(total)
+  })
+  ```
+
+  `--traceback-lines`
 
   ```rust
   rt::frame!(m, "total_size", 24, |frame| {
@@ -658,11 +676,15 @@ for x in xs.try_iter()? {
   ```
 
 - 否决的方案
-  - 由 `#[track_caller]` 或 Rust 源码行号反查 Python 行号：rustfmt 和手工修改都会打乱对应关系
+  - `#[rt::frame]` 属性宏代替 `rt::frame!` 闭包：只省 2% 到 3% 的行，要多依赖一个 proc macro crate，函数体里的 `frame` 也会凭空出现
+  - 只在调用 Python 的语句前写 marker：不可靠，运算符也会调用用户的 `__mod__` 等方法，几乎每条语句都可能进入 Python 代码
+  - 每个函数一张行号表，语句处只写表的下标：每条语句仍然要一个 key，噪音没有少
+  - 用 `#[track_caller]` 或 Rust 源码行号报告 Rust 的位置：rustfmt 和手工修改都会打乱和 Python 行号的对应关系。直接在 traceback 里报 Rust 文件和行号以后可以考虑，但那是另一个产品决定（traceback 指向 Rust 而不是 Python）
   - proc macro 改写函数体，或者把每个 `?` 改写成带行号的形式：生成的代码不再是普通 Rust，也增加编译时间
   - 为每条语句生成伪造的行号表（`co_linetable`），可以得到多行显示和 `^` 定位，但要在生成代码里放一张静态位置表，噪音太大
   - 在调用期间压入真正的解释器帧：没有公开 API，见下面的 logging
-- 每次调用的代价是 `frame!` 里几个字段的初始化和每条语句一次 `Cell::set`，`fib(27)` 和 `for i in range(n): total += i` 在 release 下测不出差别（M4 前后都是 21 ms 和 130 ms）
+  - 在 Rust AST 上做后处理删掉 marker（M9 原来的计划）：lowering 里不输出更简单，`|frame|`/`|_|` 也能一起决定
+- 每次调用的代价是 `frame!` 里几个字段的初始化，`--traceback-lines` 时再加每条语句一次 `Cell::set`，`fib(27)` 和 `for i in range(n): total += i` 在 release 下测不出差别（M4 前后都是 21 ms 和 130 ms）
 - logging、warnings 仍然看不到原生帧。它们读的是线程状态里正在执行的解释器帧（`sys._getframe`、`PyEval_GetFrame`），原生函数运行时这个链上没有它，而在调用期间伪造一个解释器帧没有公开 API（`_PyInterpreterFrame` 是内部结构，`f_lineno` 只能在 trace 函数里设置），所以只记录为已知差异（第 12 节）
 
 ### raise
@@ -676,7 +698,6 @@ for x in xs.try_iter()? {
 两种结构。第一种（下面叫 A）是 `try` 里只有一条语句，形如 `x = expr`、`return expr` 或者 `expr`，并且 handler 不需要异常对象：直接对表达式的结果 `match`
 
 ```rust
-frame.line(3);
 let int = rt::builtin(py, "int")?;
 match int.call1((s,)) {
     Ok(value) => x = value,
@@ -687,7 +708,7 @@ match int.call1((s,)) {
 
 - 表达式里查找 builtin 或全局名字的 `?` 提到 `match` 前面（`let int = ..;`），这样 scrutinee 里没有 `?`。还有别的 `?` 时写成 `(|| expr)()`
 - `else` 的语句放在 `Ok` 分支里
-- handler 的类型是 builtin 异常时写成 `err.is_instance_of::<PyX>(py)`，元组写成几个 `||`。其余写 `frame.matches(&err, LINE, || handler)?`：先把这一帧补进 traceback 并把异常设为正在处理的异常，再在 `except` 那一行求值 handler 的类型。类型不是异常类时和 CPython 一样抛 `TypeError`，它的 `__context__` 是原来的异常，traceback 指向 `except` 行
+- handler 的类型是 builtin 异常时写成 `err.is_instance_of::<PyX>(py)`，元组写成几个 `||`。其余写 `frame.matches(&err, LINE, || handler)?`：先把这一帧补进 traceback 并把异常设为正在处理的异常，再求值 handler 的类型。类型不是异常类时和 CPython 一样抛 `TypeError`，它的 `__context__` 是原来的异常。`LINE` 在 `--traceback-lines` 时是 `except` 所在的行，traceback 指向这一行；默认是 `def` 行，这样求值之后不会留下一个过期的 `except` 行号
 - body 不会失败的 `try` 只生成 body（§5）。scrutinee 是不带 `?` 的 `Ok(..)` 时写成 `Ok::<_, PyErr>(..)`，否则 rustc 推断不出错误类型（E0282）
 - 最后一个分支 `Err(err) => return Err(err)` 把没有匹配的异常传出去
 
@@ -695,7 +716,6 @@ match int.call1((s,)) {
 
 ```rust
 match (|| -> PyResult<()> {
-    frame.line(65);
     ..
     Ok(())
 })() {
@@ -703,7 +723,6 @@ match (|| -> PyResult<()> {
     Err(err) if frame.matches(&err, 66, || m.global("ValueError"))? => {
         let e = frame.catch(err);
         let _handling = rt::Handling::new(&e);
-        frame.line(67);
         ..
     }
     Err(err) => return Err(err),
@@ -722,14 +741,12 @@ match (|| -> PyResult<()> {
 
 ```rust
 let result = (|| -> PyResult<rt::Flow<'py>> {
-    frame.line(12);
     if item.eq(target)? {
         return Ok(rt::Flow::Return(item.clone()));
     }
     Ok(rt::Flow::Next)
 })();
 let finally = frame.finally(result);
-frame.line(15);
 rt::builtins::print(py, ("checked", &item))?;
 if let rt::Flow::Return(value) = finally.resume()? {
     return Ok(value);
@@ -742,10 +759,8 @@ if let rt::Flow::Return(value) = finally.resume()? {
 ### with
 
 ```rust
-frame.line(20);
 if let rt::Flow::Return(value) =
     frame.with(&rt::builtin(py, "open")?.call1((path,))?, |f| {
-        frame.line(21);
         Ok(rt::Flow::Return(f.call_method0("readline")?))
     })?
 {
@@ -753,7 +768,7 @@ if let rt::Flow::Return(value) =
 }
 ```
 
-- `frame.with(manager, |value| body)` 在类型上查找 `__enter__`、`__exit__`（`_PyObject_LookupSpecial` 的规则，找不到时的报错和 CPython 一样，包括"支持异步上下文管理协议"的提示），调用 `__enter__`，执行 body，最后调用 `__exit__`：正常结束传三个 `None`，异常时传异常并设为正在处理的异常，返回真值时吞掉异常。`__exit__` 在 `with` 所在的行执行
+- `frame.with(manager, |value| body)` 在类型上查找 `__enter__`、`__exit__`（`_PyObject_LookupSpecial` 的规则，找不到时的报错和 CPython 一样，包括"支持异步上下文管理协议"的提示），调用 `__enter__`，执行 body，最后调用 `__exit__`：正常结束传三个 `None`，异常时传异常并设为正在处理的异常，返回真值时吞掉异常。`__exit__` 在当前行执行（默认是 def 行，`--traceback-lines` 时是 `with` 所在的行）
 - `as` 的目标是只在这个 `with` 里使用的局部名字时，直接是闭包参数 `|f|`；元组、属性、全局变量等目标在闭包开头赋值。多个 item 写成嵌套的 `frame.with`
 - body 的跳转和 `try` 一样用 `Flow`。`async with` 保留为 Python
 
@@ -772,18 +787,15 @@ pub mod point {
     // point.py:6
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Point", 6, |frame| {
+        rt::frame!(ns, "Point", 6, |_| {
             let __class__ = ns.class_cell();
-            frame.line(7);
             ns.set(
                 "__init__",
                 rt::function!(ns, __init__(slf as "self", x, y), qualname = "Point.__init__")?,
             )?;
-            frame.line(12);
             let decorator = ns.get("property")?;
             let function = rt::function!(ns, norm(slf as "self"), qualname = "Point.norm")?;
             ns.set("norm", decorator.call1((&function,))?)?;
-            frame.line(19);
             ns.set(
                 "describe",
                 rt::function!(ns, describe[&__class__](slf as "self"), qualname = "Point.describe")?,
@@ -799,10 +811,8 @@ pub mod point {
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.__init__", 7, |frame| {
-            frame.line(8);
+        rt::frame!(m, "Point.__init__", 7, |_| {
             slf.setattr("x", x)?;
-            frame.line(9);
             slf.setattr("y", y)?;
             Ok(rt::none(m.py()))
         })
@@ -814,8 +824,7 @@ pub mod point {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.describe", 19, |frame| {
-            frame.line(20);
+        rt::frame!(m, "Point.describe", 19, |_| {
             rt::str(m.py(), "point on ").add(rt::super_(__class__, slf)?.call_method0("describe")?)
         })
     }
@@ -883,6 +892,11 @@ m.set_global(
 
 两种模式共用生成的 `exec_module(m)`，区别只在 crate 的入口。
 
+和模式无关的生成选项（`steelix transpile` 的参数，`emit.crate.CrateOptions` 的字段）
+
+- `--no-fallback`（`fallback`）：不支持的语句报错，不保留为 Python（§13）
+- `--traceback-lines`（`traceback_lines`，M9a）：在可能出错的语句前写 `frame.line(N);`，原生帧的行号精确到语句。默认不写，行号是 `def` 行（§9）。调试转换结果、和 CPython 逐行比较 traceback 时打开
+
 - **bin 模式**（默认，主要场景）：嵌入 libpython 的可执行程序，`main.rs` 只调用 `rt::embed::run_main`
   - 不用 `auto-initialize`，用 `PyConfig` 初始化，设置 `executable`，否则 `sys.path` 里没有 `.venv` 的 site-packages。同时传入真实的 `argv`，`parse_argv = 0`
   - 以 `__main__` 身份执行模块。结束时调用 `Py_FinalizeEx`，这样会 flush stdout 并执行 atexit
@@ -926,8 +940,8 @@ m.set_global(
 已知且有意保留的语义差异
 
 - 直接调用的模块函数不受其他模块 monkeypatch 影响（可用 `--dynamic-globals` 关闭）
-- 原生函数的 traceback 帧是异常离开时合成的（第 9 节）。和 CPython 的区别：原生帧没有 `^^^` 定位（`tb_lasti` 是 -1），多行语句只显示取值所在的一行，`f_locals` 为空。保留为 Python 的代码（§13）的帧和 CPython 完全一样
-- 行号的细节：`rt::def!` 执行出错（例如装饰器抛异常）时报告的是上一条语句的行号；`continue` 之前检查信号时的行号是上一条执行的语句；只有一个表达式的 `try`（第 9 节的 A）里查找 builtin 和全局名字提前到 `match` 之前，只有这个查找本身出错（`NameError`）时才看得出顺序不同
+- 原生函数的 traceback 帧是异常离开时合成的（第 9 节）。和 CPython 的区别：默认行号是 `def` 所在的行（`<module>` 是 1），显示的源码行也是这一行；`--traceback-lines` 时是语句所在的行。原生帧没有 `^^^` 定位（`tb_lasti` 是 -1），`f_locals` 为空。保留为 Python 的代码（§13）的帧和 CPython 完全一样
+- 以下行号的细节只在 `--traceback-lines` 时有意义：多行语句只显示取值所在的一行；`rt::def!` 执行出错（例如装饰器抛异常）时报告的是上一条语句的行号；`continue` 之前检查信号时的行号是上一条执行的语句；只有一个表达式的 `try`（第 9 节的 A）里查找 builtin 和全局名字提前到 `match` 之前，只有这个查找本身出错（`NameError`）时才看得出顺序不同
 - 编译期的 `SyntaxWarning`（例如 3.14 PEP 765 对 `finally` 里 `return` 的警告）由 CPython 在编译时输出，二进制程序没有编译 Python 源码这一步，不输出
 - 合成的帧只在异常经过时存在，运行期间解释器的帧链上没有原生函数，所以按调用方的帧工作的标准库功能看到的是离它最近的 Python 帧（`tests/cases/frames_logging.py` 记录了现在的输出）
   - `logging` 的 `%(filename)s`、`%(lineno)d`、`%(funcName)s` 指向 logging 自己的帧，例如 `__init__.py:2191 warning` 而不是 `app.py:8 step`
@@ -1022,7 +1036,6 @@ def evens(limit):
 
 ```rust
         if m.global("sys")?.getattr("argv")?.len()? > 5 {
-            frame.line(11);
             m.set_global("mode", "many")?;
             // mixed_nested.py:12, kept as Python: unpacking in a display at 12:15
             rt::exec_python!(
@@ -1052,7 +1065,6 @@ def evens(limit):
 类体里不能降级的语句（方法、类属性的赋值、类体里的 `if` 等）保留为 Python，生成的 `body` 在原来的位置用类的命名空间执行它们，前后的语句仍是原生代码。下面节选自 `tests/golden/classes_mixed.rs`：
 
 ```rust
-            frame.line(15);
             ns.set("native_before", 1)?;
             // classes_mixed.py:16, kept as Python: list comprehension at 16:15
             rt::exec_python!(
@@ -1062,7 +1074,6 @@ def evens(limit):
     squares = [i * i for i in range(4)]
 "#
             )?;
-            frame.line(17);
             ns.set("native_after", ns.get("squares")?.get_item(-1)?)?;
             // classes_mixed.py:22, kept as Python: list comprehension at 23:18
             rt::exec_python!(
@@ -1123,23 +1134,24 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 ## 14. 测试与构建
 
 - **单元测试**：rustast 打印、作用域与绑定分析等纯 Python 逻辑
-- **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动
+- **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动。golden 是默认的输出（没有行号 marker），`tests/golden/traceback_lines/` 另有几个用例（`fib`、`control_flow`、`try_except`、`classes_basic`）在 `--traceback-lines` 下的输出
 - **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段。同一层还对所有 golden 跑 `cargo clippy`（默认 lint 组，警告也算失败）。crate 根上另外 allow 五个 clippy lint：`never_loop`（Python 里 `for` 的第一轮就 `return`/`break` 是常见写法）、`approx_constant`（Python 源码里的 `3.14159` 本来就是那个字面量）、`if_same_then_else`（Python 两个分支写同样的代码是程序本身的事）、`too_many_arguments`（Python 函数的参数个数，M6 转换 `json` 时遇到）、`doc_lazy_continuation`（docstring 不是 Markdown，doctest 的 `>>>` 会被当成引用块），它们说的是 Python 程序本身，不是生成方式
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
-- **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码和 stderr。有 traceback 时比较完整的 traceback（M4 起原生函数也有帧，第 9 节），只去掉原生帧没有的 `^^^` 行和 CPython 编译时的 `SyntaxWarning`；少数用例（直接调用的递归，§12）只比较异常类型。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
+- **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码和 stderr。这些 crate 用 `--traceback-lines` 生成，有 traceback 时比较完整的 traceback（M4 起原生函数也有帧，第 9 节），只去掉原生帧没有的 `^^^` 行和 CPython 编译时的 `SyntaxWarning`；少数用例（直接调用的递归，§12）只比较异常类型。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
   - 文档化的差异里有 CPython 成功而生成的程序报错的情况（§12 里被替换的直接调用）。这类用例用 `# steelix-test: expect-error 消息` 注释写明期望的错误，测试检查输出是 CPython 输出的前缀，并且最后一行是这条消息
   - stdout 里文档化的差异（§12 里原生函数运行时没有解释器帧对 `logging`、`warnings` 的影响）写在 `tests/test_e2e.py` 的 `KNOWN_DIFFERENCES` 里：CPython 的哪一行在生成的程序里应该是什么样子（正则），其余行必须相同。差异消失时测试失败，提醒删掉这一项
   - 带 `# steelix-test: interrupt after the first line of output` 的用例会一直运行，测试在它输出第一行之后发送 `SIGINT`，两边都必须以 `KeyboardInterrupt` 结束，退出码相同
+  - 默认模式（没有 marker）另外用一个小 workspace 构建几个有 traceback 的用例（`uncaught`、`tracebacks`、`exceptions_uncaught`、`with_stmt`），要求 stdout、退出码、最后一行相同，traceback 的帧（文件名和函数名）顺序和 CPython 一样，原生帧的行号是 `def` 行
   - 混合模式：保留为 Python 的代码的 traceback 帧必须和 CPython 的最后几帧完全相同（文件名、行号、源码行）。bin 模式下的 panic 必须以退出码 1 结束（用手写的模块文件替换生成的文件来触发）
-- **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
-- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，`main.rs` 里仓库的路径换成 `$ROOT`），要求编译没有警告、clippy 干净，并在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
+- **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式和 `--traceback-lines` 转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
+- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，`main.rs` 里仓库的路径换成 `$ROOT`），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
 - **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
-- 源码映射：函数前的 `// file.py:LINE` 注释，语句前的 `frame.line(N);`，异常的 traceback 里有原生函数的帧和 Python 行号（第 9 节）
+- 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
 - CI：GitHub Actions 跑 ruff、pytest（含 e2e），后续补上
 
 ## 15. 把函数改写成原生 Rust（M3b）
@@ -1164,6 +1176,12 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 2. 生成的同名函数只留下类型转换：用 `extract` 把参数转成原生类型，调用新函数，再用 `into_bound_py_any`、`PyDict::set_item` 等把结果转回 Python 对象
 
 所以 `extract`/`into_pyobject` 只出现在适配层里，每个函数一个地方。
+
+生成的函数体包在 `rt::frame!(m, "name", N, |_| { .. })` 里（§9），改写时按情况处理
+
+- 函数自己的逻辑不再抛 Python 异常（错误由原生代码的 `Result` 表达，适配层只做转换）时，去掉这个包装，下面的 `percentile` 就是这样。这时 traceback 里没有这个函数的帧，异常显示在调用方的帧里
+- 想在 traceback 里继续看到这个函数时，保留两行的包装 `rt::frame!(m, "name", N, |_| { .. })` 把适配层包起来，`N` 仍是 `def` 行，不用跟着改写调整
+- 默认的输出里没有 `frame.line(N)` marker，改写时没有要同步的行号。用 `--traceback-lines` 生成的代码改写时，改过的部分直接删掉 marker 就行，留着过期的 marker 会让 traceback 报错的行号
 
 ```rust
 // logsum.py:66

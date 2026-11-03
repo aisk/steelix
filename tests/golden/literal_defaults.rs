@@ -12,14 +12,12 @@ pub fn greet<'py>(
     sep: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "greet", 4, |frame| {
+    rt::frame!(m, "greet", 4, |_| {
         let mut sep = sep.clone();
-        frame.line(5);
         let text = greeting.add(", ")?.add(name)?.add(punct)?;
         if sep.is_none() {
             sep = rt::str(py, " ");
         }
-        frame.line(8);
         sep.getattr("join")?
             .call1((PyList::new(py, [&text])?.mul(times)?,))
     })
@@ -34,8 +32,7 @@ pub fn scaled<'py>(
     raw: &Bound<'py, PyAny>,
     big: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "scaled", 11, |frame| {
-        frame.line(12);
+    rt::frame!(m, "scaled", 11, |_| {
         Ok(PyList::new(m.py(), [&x.mul(factor)?, flag, raw, big])?.into_any())
     })
 }
@@ -46,9 +43,8 @@ pub fn remember<'py>(
     item: &Bound<'py, PyAny>,
     seen: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "remember", 15, |frame| {
+    rt::frame!(m, "remember", 15, |_| {
         // A mutable default is still read from the function object.
-        frame.line(17);
         seen.call_method1("append", (item,))?;
         Ok(seen.clone())
     })
@@ -57,7 +53,7 @@ pub fn remember<'py>(
 /// Executes the body of `literal_defaults.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Direct calls pass immutable literal defaults in place.",
@@ -66,7 +62,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             m,
             greet(name, greeting = "Hello", *, punct = "!", times = 1, sep = py.None())
         )?;
-        frame.line(11);
         rt::def!(
             m,
             scaled(
@@ -78,7 +73,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )
         )?;
         rt::def!(m, remember(item, seen = PyList::empty(py)))?;
-        frame.line(21);
         rt::builtins::print(
             py,
             (
@@ -108,7 +102,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             ),
         )?;
-        frame.line(22);
         rt::builtins::print(
             py,
             (
@@ -130,7 +123,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             ),
         )?;
-        frame.line(23);
         rt::builtins::print(
             py,
             (
@@ -138,7 +130,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 remember(m, &rt::int(py, 2), &m.default("remember", "seen")?)?,
             ),
         )?;
-        frame.line(24);
         rt::builtins::print(
             py,
             (

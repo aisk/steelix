@@ -9,14 +9,12 @@ use steelix_runtime as rt;
 
 /// Executes the body of `namespaces.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "`dir()`, `vars()` and `locals()` without arguments read the current scope.",
         )?;
-        frame.line(3);
         m.set_global("x", 1)?;
-        frame.line(4);
         m.global("print")?.call1((
             m.dir()?.contains("x")?,
             m.dir()?.rich_compare(
@@ -25,7 +23,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 CompareOp::Eq,
             )?,
         ))?;
-        frame.line(5);
         m.global("print")?.call1((
             m.globals()
                 .clone()
@@ -46,7 +43,6 @@ def local_names(a):
     return sorted(locals()), dir()
 "#
         )?;
-        frame.line(13);
         m.global("print")?
             .call1((m.global("local_names")?.call1((1,))?,))?;
         Ok(())

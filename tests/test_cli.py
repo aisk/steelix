@@ -39,6 +39,20 @@ def test_script_path_is_kept_as_given(tmp_path: Path, monkeypatch) -> None:
     assert f'file: "{tmp_path / "app.py"}",' in main_rs
 
 
+def test_traceback_lines_flag(tmp_path: Path) -> None:
+    source = tmp_path / "app.py"
+    source.write_text("def f(x):\n    y = x + 1\n    return y * 2\n\nprint(f(1))\n")
+    assert build_parser().parse_args(["transpile", "a.py", "-o", "o"]).traceback_lines is False
+    assert main(["transpile", str(source), "-o", str(tmp_path / "plain"), "-q"]) == 0
+    plain = (tmp_path / "plain" / "src" / "app.rs").read_text()
+    assert "frame.line(" not in plain
+    args = ["transpile", str(source), "-o", str(tmp_path / "lines"), "-q", "--traceback-lines"]
+    assert main(args) == 0
+    lines = (tmp_path / "lines" / "src" / "app.rs").read_text()
+    assert "frame.line(2);" in lines
+    assert "frame.line(5);" in lines
+
+
 def test_transpile_ext_mode(tmp_path: Path) -> None:
     source = tmp_path / "lib_mod.py"
     source.write_text("x = 1\n")

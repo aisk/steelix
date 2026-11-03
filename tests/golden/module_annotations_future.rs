@@ -21,15 +21,13 @@ pub mod box_ {
 /// Executes the body of `module_annotations_future.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         // The module's `__annotations__`, which CPython creates before running it
         m.set_global("__annotations__", PyDict::new(py))?;
         // With `from __future__ import annotations`, module annotations go into one
         // `__annotations__` dict, created before the first statement as in CPython.
-        frame.line(3);
         let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
         m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
-        frame.line(5);
         rt::builtins::print(py, (m.dir()?.contains("__annotations__")?,))?;
         // module_annotations_future.py:6, kept as Python: annotated assignment at module level at 6:1
         rt::exec_python!(
@@ -40,9 +38,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 A: int = 1
 "#
         )?;
-        frame.line(7);
         rt::builtins::print(py, (m.global("__annotations__")?,))?;
-        frame.line(10);
         m.set_global("Box", rt::class!(m, "Box"(), box_::body, line = 10)?)?;
         // module_annotations_future.py:14, kept as Python: annotated assignment at module level at 14:1
         rt::exec_python!(
@@ -53,7 +49,6 @@ A: int = 1
 B: Box = Box()
 "#
         )?;
-        frame.line(15);
         rt::builtins::print(py, (m.global("__annotations__")?,))?;
         Ok(())
     })

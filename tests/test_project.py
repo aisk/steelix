@@ -220,7 +220,7 @@ def test_patched_function_is_called_through_globals() -> None:
     source = "def f():\n    return 1\n\n\ndef g():\n    return f()\n"
     parsed = parse_source(source, "helpers")
     direct = lower_module(parsed, role=ModuleRole(own_names=("helpers",)))
-    assert "        f(m)\n" in _fn_text(direct)
+    assert "|_| { f(m) })\n" in _fn_text(direct)
     parsed = parse_source(source, "helpers")
     patched = lower_module(
         parsed, role=ModuleRole(own_names=("helpers",), patched=frozenset({"f"}))

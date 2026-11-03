@@ -4,8 +4,7 @@ use steelix_runtime as rt;
 
 // conditional_defs.py:32
 pub fn top<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "top", 32, |frame| {
-        frame.line(33);
+    rt::frame!(m, "top", 32, |_| {
         rt::call!(m.global("helper")?, 1, scale = 3)
     })
 }
@@ -17,10 +16,7 @@ pub fn f<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // conditional_defs.py:49
 pub fn g<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "g", 49, |frame| {
-        frame.line(50);
-        m.global("f")?.call0()
-    })
+    rt::frame!(m, "g", 49, |_| { m.global("f")?.call0() })
 }
 
 /// Executes the body of `conditional_defs.py` in the module `m`.
@@ -28,11 +24,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
         m.set_global("__doc__", "Functions defined in module level compound statements: nested fn items of\n`exec_module`, bound in the globals when the `def` runs.")?;
-        frame.line(4);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        frame.line(6);
         m.set_global("counter", 10)?;
-        frame.line(8);
         if !rt::builtin(py, "hasattr")?
             .call1((m.global("sys")?, "no_such_attribute"))?
             .is_truthy()?
@@ -44,12 +37,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 x: &Bound<'py, PyAny>,
                 scale: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "helper", 9, |frame| {
-                    frame.line(11);
+                rt::frame!(m, "helper", 9, |_| {
                     x.mul(scale)?.add(m.global("counter")?)
                 })
             }
-            frame.line(9);
             m.set_global(
                 "helper",
                 rt::function!(m, helper(x, scale = 2), doc = "Doc of helper.")?,
@@ -60,8 +51,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 n: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
                 let py = m.py();
-                rt::frame!(m, "recurse", 13, |frame| {
-                    frame.line(14);
+                rt::frame!(m, "recurse", 13, |_| {
                     Ok(if n.eq(0)? {
                         rt::int(py, 0)
                     } else {
@@ -69,7 +59,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     })
                 })
             }
-            frame.line(13);
             m.set_global("recurse", rt::function!(m, recurse(n))?)?;
         } else {
             // conditional_defs.py:16
@@ -80,13 +69,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::int(m.py(), -1))
             }
-            frame.line(16);
             m.set_global(
                 "helper",
                 rt::function!(m, helper_(x, scale = 2), name = "helper")?,
             )?;
         }
-        frame.line(19);
         for item in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
             m.set_global("i", item?)?;
             // conditional_defs.py:20
@@ -96,9 +83,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ) -> PyResult<Bound<'py, PyAny>> {
                 Ok(y.clone())
             }
-            frame.line(20);
             m.set_global("in_loop", rt::function!(m, in_loop(y = m.global("i")?))?)?;
-            frame.line(23);
             rt::builtins::print(
                 py,
                 (
@@ -108,13 +93,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ),
             )?;
             py.check_signals()?;
-            frame.line(19);
         }
         let result = (|| -> PyResult<()> {
             // conditional_defs.py:26
             fn in_try<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "in_try", 26, |frame| {
-                    frame.line(27);
+                rt::frame!(m, "in_try", 26, |_| {
                     Ok(PyTuple::new(
                         m.py(),
                         [
@@ -126,30 +109,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .into_any())
                 })
             }
-            frame.line(26);
             m.set_global("in_try", rt::function!(m, in_try())?)?;
             Ok(())
         })();
         let finally = frame.finally(result);
-        frame.line(29);
         rt::builtins::print(py, (m.global("in_try")?.call0()?,))?;
         finally.resume()?;
         rt::def!(m, top())?;
-        frame.line(36);
         rt::builtins::print(py, (top(m)?,))?;
         rt::def!(m, f())?;
-        frame.line(43);
         if m.global("counter")?.gt(5)? {
             // Rebinding a module function: calls go through the globals.
             // conditional_defs.py:45
             fn f_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "conditional"))
             }
-            frame.line(45);
             m.set_global("f", rt::function!(m, f_(), name = "f")?)?;
         }
         rt::def!(m, g())?;
-        frame.line(53);
         rt::builtins::print(
             py,
             (

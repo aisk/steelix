@@ -6,16 +6,15 @@ use steelix_runtime as rt;
 
 // lambdas.py:7
 pub fn make_adder<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "make_adder", 7, |frame| {
+    rt::frame!(m, "make_adder", 7, |_| {
         // lambdas.py:8
         fn lambda<'py>(
             m: &rt::Module<'py>,
             n: &Bound<'py, PyAny>,
             x: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "make_adder.<locals>.<lambda>", 8, |_| x.add(n))
+            rt::frame!(m, "make_adder.<locals>.<lambda>", 8, |_| { x.add(n) })
         }
-        frame.line(8);
         rt::function!(m, lambda[n](x), qualname = "make_adder.<locals>.<lambda>")
     })
 }
@@ -23,13 +22,12 @@ pub fn make_adder<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
 /// Executes the body of `lambdas.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global("__doc__", "Lambda expressions.")?;
         // lambdas.py:3
         fn lambda<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "<lambda>", 3, |_| x.mul(x))
+            rt::frame!(m, "<lambda>", 3, |_| { x.mul(x) })
         }
-        frame.line(3);
         m.set_global(
             "square",
             rt::function!(m, lambda(x), qualname = "<lambda>")?,
@@ -43,13 +41,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             scale: &Bound<'py, PyAny>,
             extra: &Bound<'py, PyDict>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "<lambda>", 4, |_| a
-                .add(b)?
-                .add(rest.len())?
-                .add(extra.len())?
-                .mul(scale))
+            rt::frame!(m, "<lambda>", 4, |_| {
+                a.add(b)?.add(rest.len())?.add(extra.len())?.mul(scale)
+            })
         }
-        frame.line(4);
         m.set_global(
             "add",
             rt::function!(
@@ -59,9 +54,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,
         )?;
         rt::def!(m, make_adder(n))?;
-        frame.line(11);
         m.set_global("words", PyList::new(py, ["banana", "Apple", "cherry"])?)?;
-        frame.line(12);
         rt::builtins::print(
             py,
             (
@@ -72,9 +65,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         // lambdas.py:13
         fn lambda3<'py>(m: &rt::Module<'py>, w: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "<lambda>", 13, |_| w.call_method0("lower"))
+            rt::frame!(m, "<lambda>", 13, |_| { w.call_method0("lower") })
         }
-        frame.line(13);
         rt::builtins::print(
             py,
             (
@@ -86,7 +78,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             ),
         )?;
-        frame.line(14);
         rt::builtins::print(
             py,
             (
@@ -99,16 +90,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         fn lambda4<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::str(m.py(), "called at once"))
         }
-        frame.line(15);
         rt::builtins::print(
             py,
             (rt::function!(m, lambda4(), qualname = "<lambda>")?.call0()?,),
         )?;
         // lambdas.py:16
         fn lambda5<'py>(m: &rt::Module<'py>, p: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "<lambda>", 16, |_| p.get_item(0)?.mul(p.get_item(1)?))
+            rt::frame!(m, "<lambda>", 16, |_| {
+                p.get_item(0)?.mul(p.get_item(1)?)
+            })
         }
-        frame.line(16);
         rt::builtins::print(
             py,
             (

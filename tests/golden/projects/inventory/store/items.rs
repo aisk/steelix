@@ -6,8 +6,7 @@ pub fn fmt_price<'py>(
     m: &rt::Module<'py>,
     price: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "fmt_price", 6, |frame| {
-        frame.line(7);
+    rt::frame!(m, "fmt_price", 6, |_| {
         rt::fstring(
             m.py(),
             (
@@ -26,8 +25,7 @@ pub fn fmt_price<'py>(
 
 // store/items.py:10
 pub fn label<'py>(m: &rt::Module<'py>, item: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "label", 10, |frame| {
-        frame.line(11);
+    rt::frame!(m, "label", 10, |_| {
         rt::fstring(
             m.py(),
             (
@@ -49,8 +47,7 @@ pub mod item {
     // store/items.py:14
     /// The body of `class Item`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Item", 14, |frame| {
-            frame.line(15);
+        rt::frame!(ns, "Item", 14, |_| {
             ns.set(
                 "__init__",
                 rt::function!(
@@ -59,7 +56,6 @@ pub mod item {
                     qualname = "Item.__init__"
                 )?,
             )?;
-            frame.line(20);
             ns.set(
                 "unit_price",
                 rt::function!(
@@ -68,12 +64,10 @@ pub mod item {
                     qualname = "Item.unit_price"
                 )?,
             )?;
-            frame.line(23);
             ns.set(
                 "value",
                 rt::function!(ns, value(slf as "self"), qualname = "Item.value")?,
             )?;
-            frame.line(26);
             ns.set(
                 "__repr__",
                 rt::function!(ns, __repr__(slf as "self"), qualname = "Item.__repr__")?,
@@ -90,12 +84,9 @@ pub mod item {
         price: &Bound<'py, PyAny>,
         quantity: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.__init__", 15, |frame| {
-            frame.line(16);
+        rt::frame!(m, "Item.__init__", 15, |_| {
             slf.setattr("name", name)?;
-            frame.line(17);
             slf.setattr("price", price)?;
-            frame.line(18);
             slf.setattr("quantity", quantity)?;
             Ok(rt::none(m.py()))
         })
@@ -106,16 +97,12 @@ pub mod item {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.unit_price", 20, |frame| {
-            frame.line(21);
-            slf.getattr("price")
-        })
+        rt::frame!(m, "Item.unit_price", 20, |_| { slf.getattr("price") })
     }
 
     // store/items.py:23
     pub fn value<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.value", 23, |frame| {
-            frame.line(24);
+        rt::frame!(m, "Item.value", 23, |_| {
             slf.call_method0("unit_price")?
                 .mul(slf.getattr("quantity")?)
         })
@@ -126,8 +113,7 @@ pub mod item {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.__repr__", 26, |frame| {
-            frame.line(27);
+        rt::frame!(m, "Item.__repr__", 26, |_| {
             rt::fstring(
                 m.py(),
                 (
@@ -149,9 +135,8 @@ pub mod perishable {
     // store/items.py:30
     /// The body of `class Perishable`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Perishable", 30, |frame| {
+        rt::frame!(ns, "Perishable", 30, |_| {
             let __class__ = ns.class_cell();
-            frame.line(31);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -174,10 +159,8 @@ pub mod perishable {
         quantity: &Bound<'py, PyAny>,
         days: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Perishable.__init__", 31, |frame| {
-            frame.line(32);
+        rt::frame!(m, "Perishable.__init__", 31, |_| {
             rt::super_(__class__, slf)?.call_method1("__init__", (name, price, quantity))?;
-            frame.line(33);
             slf.setattr("days", days)?;
             Ok(rt::none(m.py()))
         })
@@ -186,13 +169,11 @@ pub mod perishable {
 
 /// Executes the body of `store/items.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global("config", rt::import(m, "config")?)?;
-        frame.line(3);
         rt::builtins::print(m.py(), ("store.items: imported",))?;
         rt::def!(m, fmt_price(price))?;
         rt::def!(m, label(item))?;
-        frame.line(14);
         m.set_global(
             "Item",
             rt::class!(
@@ -203,7 +184,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["name", "price", "quantity"]
             )?,
         )?;
-        frame.line(30);
         m.set_global(
             "Perishable",
             rt::class!(

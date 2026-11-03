@@ -6,8 +6,7 @@ use steelix_runtime as rt;
 // operators.py:4
 pub fn unary<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "unary", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "unary", 4, |_| {
         rt::builtins::print(py, (x.neg()?, x.pos()?, x.bitnot()?, !x.is_truthy()?))?;
         Ok(rt::none(py))
     })
@@ -20,8 +19,7 @@ pub fn logic<'py>(
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "logic", 8, |frame| {
-        frame.line(9);
+    rt::frame!(m, "logic", 8, |_| {
         rt::builtins::print(
             py,
             (
@@ -41,19 +39,12 @@ pub fn logic<'py>(
                 },
             ),
         )?;
-        frame.line(10);
         if a.is_truthy()? && !b.is_truthy()? {
-            frame.line(11);
             rt::builtins::print(py, ("a only",))?;
+        } else if a.is_truthy()? || b.is_truthy()? {
+            rt::builtins::print(py, ("some",))?;
         } else {
-            frame.line(12);
-            if a.is_truthy()? || b.is_truthy()? {
-                frame.line(13);
-                rt::builtins::print(py, ("some",))?;
-            } else {
-                frame.line(15);
-                rt::builtins::print(py, ("none",))?;
-            }
+            rt::builtins::print(py, ("none",))?;
         }
         Ok(rt::none(py))
     })
@@ -66,14 +57,12 @@ pub fn choose<'py>(
     x: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "choose", 18, |frame| {
-        frame.line(19);
+    rt::frame!(m, "choose", 18, |_| {
         let label = if x.gt(10)? {
             rt::str(py, "big")
         } else {
             rt::str(py, "small")
         };
-        frame.line(20);
         rt::builtins::print(
             py,
             (
@@ -85,7 +74,6 @@ pub fn choose<'py>(
                 },
             ),
         )?;
-        frame.line(21);
         Ok(if flag.is_truthy()? && x.is_truthy()? {
             rt::str(py, "yes")
         } else {
@@ -101,8 +89,7 @@ pub fn identity<'py>(
     y: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "identity", 24, |frame| {
-        frame.line(25);
+    rt::frame!(m, "identity", 24, |_| {
         rt::builtins::print(
             py,
             (x.is(y), !x.is(y), x.is_none(), !x.is_none(), x.is_none()),
@@ -121,12 +108,10 @@ pub fn membership<'py>(
     container: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "membership", 31, |frame| {
-        frame.line(32);
+    rt::frame!(m, "membership", 31, |_| {
         if container.contains(item)? && !rt::str(py, "xyz").contains(item)? {
             return Ok(rt::bool(py, true));
         }
-        frame.line(34);
         Ok(rt::bool(py, container.contains(item)?))
     })
 }
@@ -138,10 +123,8 @@ pub fn values<'py>(
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "values", 37, |frame| {
-        frame.line(38);
+    rt::frame!(m, "values", 37, |_| {
         let lt = a.rich_compare(b, CompareOp::Lt)?;
-        frame.line(39);
         rt::builtins::print(
             py,
             (
@@ -153,7 +136,6 @@ pub fn values<'py>(
                 a.rich_compare(b, CompareOp::Ge)?,
             ),
         )?;
-        frame.line(40);
         {
             let result = rt::int(py, 1).rich_compare(a, CompareOp::Lt)?;
             let value = if result.is_truthy()? {
@@ -186,14 +168,10 @@ pub fn values<'py>(
                 ),
             )?;
         }
-        frame.line(41);
         if rt::int(py, 0).le(a)? && a.lt(10)? {
-            frame.line(42);
             rt::builtins::print(py, ("digit",))?;
         }
-        frame.line(43);
         if !(rt::int(py, 0).le(b)? && b.lt(10)?) {
-            frame.line(44);
             rt::builtins::print(py, ("not a digit",))?;
         }
         Ok(rt::none(py))
@@ -203,7 +181,7 @@ pub fn values<'py>(
 /// Executes the body of `operators.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Unary operators, and/or, conditional expressions and comparisons.",
@@ -214,19 +192,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, identity(x, y))?;
         rt::def!(m, membership(item, container))?;
         rt::def!(m, values(a, b))?;
-        frame.line(47);
         unary(m, &rt::int(py, 5))?;
-        frame.line(48);
         unary(m, &rt::int(py, -3))?;
-        frame.line(49);
         logic(m, &rt::int(py, 0), &rt::int(py, 3))?;
-        frame.line(50);
         logic(m, &rt::int(py, 2), &rt::int(py, 0))?;
-        frame.line(51);
         logic(m, &rt::int(py, 0), &rt::int(py, 0))?;
-        frame.line(52);
         logic(m, PyList::empty(py).as_any(), &rt::str(py, "s"))?;
-        frame.line(53);
         rt::builtins::print(
             py,
             (
@@ -234,7 +205,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 choose(m, &rt::bool(py, false), &rt::int(py, 0))?,
             ),
         )?;
-        frame.line(54);
         rt::builtins::print(
             py,
             (
@@ -242,7 +212,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 identity(m, &rt::int(py, 1), &rt::none(py))?,
             ),
         )?;
-        frame.line(55);
         rt::builtins::print(
             py,
             (
@@ -251,15 +220,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 membership(m, &rt::int(py, 4), PyList::new(py, [1, 2])?.as_any())?,
             ),
         )?;
-        frame.line(56);
         values(m, &rt::int(py, 3), &rt::int(py, 7))?;
-        frame.line(57);
         values(m, &rt::int(py, 12), &rt::int(py, 3))?;
-        frame.line(58);
         values(m, &rt::int(py, 3), &rt::int(py, 3))?;
-        frame.line(59);
         m.set_global("nothing", py.None())?;
-        frame.line(60);
         {
             let nothing = m.global("nothing")?;
             let value = if nothing.is_truthy()? {
@@ -281,7 +245,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ),
             )?;
         }
-        frame.line(61);
         rt::builtins::print(
             py,
             (

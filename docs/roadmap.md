@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M7 → M9。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 → M9。
 
 ## M0 项目骨架 ✅
 
@@ -188,9 +188,19 @@
 
 覆盖率的变化见 `coverage.md`：6 个工具的原生函数从 73% 到 93%（剩下的 11 个都是 generator），标准库从 90% 到 96%。
 
+## M9a 默认去掉行号 marker ✅
+
+M9 第一项提前做，并且改成默认行为。
+
+- [x] 默认不生成 `frame.line(N)`，保留 `rt::frame!`（它同时承担异常协议），traceback 里原生帧的函数名和帧的顺序不变，行号是 `def` 行，`<module>` 是 1（§9）。marker 原来占 golden 非空行的 11.6%、转换后的标准库工具的 14.1%，并且改过的 Rust 里 marker 过期后会报一个很肯定的错行号
+- [x] `--traceback-lines`（`CrateOptions.traceback_lines`）恢复语句级的行号。在 lowering 里实现（`at_line` 不输出 marker，行号记录照旧），不是 Rust AST 上的后处理。两种模式生成的代码结构相同，只差 marker、`|frame|`/`|_|`，以及去掉 marker 后 `else { if }` 合并成 `else if`（用所有用例、`tests/apps`、`tests/projects` 和 154 个标准库模块比较过）
+- [x] 函数体不用 `frame` 时闭包参数写 `|_|`。`rt::frame!` 的闭包体总是带花括号，只有一个表达式时也是 `|_| { expr }`，避免 rustfmt 把长表达式拆在宏调用的几行里
+- [x] e2e、`tests/apps`、`tests/projects` 用 `--traceback-lines` 构建，和 CPython 逐行比较的测试不变。另加默认模式的 e2e（帧的顺序和 CPython 一样，原生帧报 `def` 行），项目的默认输出也要求编译没有警告、clippy 干净
+- [x] golden 重新生成，`tests/golden/traceback_lines/` 留几个用例的 marker 版本。golden 从 20493 行减到 18114 行，`tests/apps` 的输出从 11041 行减到 9419 行
+- [x] `examples/logsum/rewritten` 里没改写的函数换成新的生成结果，§15 写明改写时怎么处理 `rt::frame!`
+
 ## M9 可读性与渐进式改写
 
-- [ ] 生成选项：去掉 `frame.line(N)` 行号标记（约占生成代码的 12% 到 14%），保留 `rt::frame!`（它同时承担异常协议），traceback 行号退化为函数定义行。做成 Rust AST 上的后处理，单独一套 golden
 - [ ] 基于类型注解的可选 typed lowering（`int` → `i64` 等），只在用户显式开启时启用
 - [ ] 符合条件的类可选升级为 `#[pyclass]`（§10）
 - [ ] 生成代码的清理 pass：去掉多余 clone、合并临时变量

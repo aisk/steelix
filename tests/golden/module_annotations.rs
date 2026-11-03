@@ -23,7 +23,7 @@ pub mod box_ {
 /// Executes the body of `module_annotations.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         // The module's `__annotate__`, which CPython defines before running it
         rt::module_annotate(
             m,
@@ -38,11 +38,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // Module level annotations in several blocks kept as Python make one
         // `__annotate__`, defined before the first statement as in CPython, which
         // only reports the annotations whose assignments have run.
-        frame.line(4);
         m.set_global("annotationlib", rt::import(m, "annotationlib")?)?;
-        frame.line(5);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        frame.line(7);
         rt::builtins::print(py, (m.dir()?.contains("__annotate__")?,))?;
         // module_annotations.py:8, kept as Python: annotated assignment at module level at 8:1
         rt::exec_python!(
@@ -53,9 +50,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 A: int = 1
 "#
         )?;
-        frame.line(9);
         rt::builtins::print(py, (m.global("__annotate__")?.call1((1,))?,))?;
-        frame.line(12);
         m.set_global("Box", rt::class!(m, "Box"(), box_::body, line = 12)?)?;
         // module_annotations.py:16, kept as Python: annotated assignment at module level at 16:1
         rt::exec_python!(
@@ -68,7 +63,6 @@ B: list[
 ] = []
 "#
         )?;
-        frame.line(19);
         if m.global("sys")?.getattr("argv")?.len()? > 5 {
             // module_annotations.py:20, kept as Python: annotated assignment at module level at 20:5
             rt::exec_python!(
@@ -89,7 +83,6 @@ B: list[
 D: "Box" = Box()
 "#
         )?;
-        frame.line(22);
         rt::builtins::print(
             py,
             (m.global("annotationlib")?
@@ -99,7 +92,6 @@ D: "Box" = Box()
                     .getattr("modules")?
                     .get_item(m.global("__name__")?)?,))?,),
         )?;
-        frame.line(23);
         rt::builtins::print(
             py,
             (rt::call!(
@@ -122,12 +114,10 @@ D: "Box" = Box()
 E: undefined_name
 "#
         )?;
-        frame.line(25);
         rt::builtins::print(
             py,
             (rt::builtin(py, "sorted")?.call1((m.global("__conditional_annotations__")?,))?,),
         )?;
-        frame.line(26);
         rt::builtins::print(py, (m.global("__annotate__")?.call1((1,))?,))?;
         Ok(())
     })

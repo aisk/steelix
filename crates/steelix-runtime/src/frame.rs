@@ -3,10 +3,11 @@
 //! Native functions have no Python frame while they run. Like Cython, they
 //! add one to the traceback of an exception on its way out instead: every
 //! generated function body runs inside [`frame!`](crate::frame), which knows
-//! the Python file, the function's qualified name and its `def` line, and the
-//! body keeps the line of the statement it is running up to date with
-//! [`Frame::line`]. Tracebacks of uncaught exceptions and
-//! `traceback.extract_tb` then look like CPython's.
+//! the Python file, the function's qualified name and its `def` line.
+//! Tracebacks of uncaught exceptions and `traceback.extract_tb` then have
+//! CPython's frames, with the `def` line for native ones. Code generated with
+//! `--traceback-lines` also keeps the line of the statement it is running up
+//! to date with [`Frame::line`], so the lines are CPython's too.
 //!
 //! The same object implements the parts of `try`, `except`, `finally`,
 //! `raise` and `with` that need to know about the frame: an exception gets an
@@ -307,8 +308,9 @@ impl<'py> Frame<'py> {
     /// its result, then `__exit__`, which may suppress an exception from the
     /// body. Both methods are looked up on the type, as CPython does.
     ///
-    /// `__exit__` runs on the line of the `with` statement, the current line
-    /// when this is called. The body returns what the statement does next
+    /// `__exit__` runs on the current line when this is called: the line of
+    /// the `with` statement with `--traceback-lines`, else the `def` line.
+    /// The body returns what the statement does next
     /// ([`Flow`] if it may jump out of it), the default after a suppressed
     /// exception.
     pub fn with<T: Default>(
@@ -639,13 +641,15 @@ fn traceback_type(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 ///
 /// ```ignore
 /// pub fn parse<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-///     rt::frame!(m, "parse", 10, |frame| {
-///         frame.line(11);
+///     rt::frame!(m, "parse", 10, |_| {
 ///         let value = text.call_method0("strip")?;
 ///         ..
 ///     })
 /// }
 /// ```
+///
+/// The closure gets the [`Frame`] (`|frame|`) when the body raises or
+/// handles exceptions, or records statement lines (`--traceback-lines`).
 ///
 /// The arguments are the module, the function's `__qualname__` (`<module>`
 /// for the module body) and the line of its `def`. A class body passes its

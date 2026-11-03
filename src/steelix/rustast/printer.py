@@ -219,11 +219,11 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
             if isinstance(orelse, rs.IfExpr):
                 return text + print_expr(orelse, level)
             return text + print_block(orelse, level)
-        case rs.Closure(params, body, ret):
+        case rs.Closure(params, body, ret, braces):
             head = f"|{', '.join(params)}|"
             if ret is not None:
                 return f"{head} -> {ret} {print_block(body, level)}"
-            if not body.stmts and body.tail is not None:
+            if not braces and not body.stmts and body.tail is not None:
                 return f"{head} {print_expr(body.tail, level)}"
             return f"{head} {print_block(body, level)}"
         case rs.Match(scrutinee, arms):

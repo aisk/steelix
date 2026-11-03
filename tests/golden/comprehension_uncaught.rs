@@ -6,7 +6,7 @@ use steelix_runtime as rt;
 // comprehension_uncaught.py:6
 pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "totals", 6, |frame| {
+    rt::frame!(m, "totals", 6, |_| {
         // comprehension_uncaught.py:7
         fn genexpr<'py>(
             m: &rt::Module<'py>,
@@ -19,7 +19,6 @@ pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
                 Ok(None)
             })
         }
-        frame.line(7);
         let list = PyList::empty(py);
         for row in rows.try_iter()? {
             let row = row?;
@@ -37,10 +36,9 @@ pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
 /// Executes the body of `comprehension_uncaught.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global("__doc__", "An uncaught exception raised inside a generator expression that a list\ncomprehension consumes: the traceback has the comprehension's line in the\nfunction and the `<genexpr>` frame.")?;
         rt::def!(m, totals(rows))?;
-        frame.line(10);
         rt::builtins::print(
             py,
             (totals(
@@ -48,7 +46,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 PyList::new(py, [PyList::new(py, [1, 2])?.as_any()])?.as_any(),
             )?,),
         )?;
-        frame.line(11);
         rt::builtins::print(
             py,
             (totals(

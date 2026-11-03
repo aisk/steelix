@@ -8,10 +8,7 @@ use steelix_runtime as rt;
 
 // mixed_future_annotations.py:4
 pub fn native<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "native", 4, |frame| {
-        frame.line(5);
-        Ok(x.str()?.into_any())
-    })
+    rt::frame!(m, "native", 4, |_| { Ok(x.str()?.into_any()) })
 }
 
 pub mod box_ {
@@ -20,9 +17,8 @@ pub mod box_ {
     // mixed_future_annotations.py:12
     /// The body of `class Box`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Box", 12, |frame| {
+        rt::frame!(ns, "Box", 12, |_| {
             ns.setup_annotations()?;
-            frame.line(13);
             ns.annotate("size", "Size")?;
             Ok(())
         })
@@ -31,7 +27,7 @@ pub mod box_ {
 
 /// Executes the body of `mixed_future_annotations.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
         m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
         rt::def!(m, native(x: "'int'") -> "'str'")?;
@@ -45,9 +41,7 @@ def kept(x: int) -> Iterator[str]:
     yield str(x)
 "#
         )?;
-        frame.line(12);
         m.set_global("Box", rt::class!(m, "Box"(), box_::body, line = 12)?)?;
-        frame.line(16);
         rt::builtins::print(
             m.py(),
             (

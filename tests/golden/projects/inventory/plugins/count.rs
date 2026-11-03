@@ -3,8 +3,7 @@ use steelix_runtime as rt;
 
 // plugins/count.py:4
 pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "run", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "run", 4, |_| {
         Ok(rt::int(
             m.py(),
             m.global("greet")?.call_method0("run")?.len()?,

@@ -11,29 +11,18 @@ pub fn py_make_scanner<'py>(
     m: &rt::Module<'py>,
     context: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "py_make_scanner", 18, |frame| {
+    rt::frame!(m, "py_make_scanner", 18, |_| {
         let _scan_once = rt::Cell::empty(m.py(), "_scan_once")?;
-        frame.line(19);
         let parse_object = context.getattr("parse_object")?;
-        frame.line(20);
         let parse_array = context.getattr("parse_array")?;
-        frame.line(21);
         let parse_string = context.getattr("parse_string")?;
-        frame.line(22);
         let match_number = m.global("NUMBER_RE")?.getattr("match")?;
-        frame.line(23);
         let strict = context.getattr("strict")?;
-        frame.line(24);
         let parse_float = context.getattr("parse_float")?;
-        frame.line(25);
         let parse_int = context.getattr("parse_int")?;
-        frame.line(26);
         let parse_constant = context.getattr("parse_constant")?;
-        frame.line(27);
         let object_hook = context.getattr("object_hook")?;
-        frame.line(28);
         let object_pairs_hook = context.getattr("object_pairs_hook")?;
-        frame.line(29);
         let memo = context.getattr("memo")?;
         // json/scanner.py:31
         fn _scan_once_<'py>(
@@ -59,12 +48,10 @@ pub fn py_make_scanner<'py>(
                 let frac: Bound<'py, PyAny>;
                 let exp: Bound<'py, PyAny>;
                 let res: Bound<'py, PyAny>;
-                frame.line(33);
                 let nextchar = match string.get_item(idx) {
                     Ok(value) => value,
                     Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                         let _handling = rt::Handling::new(&frame.catch(err));
-                        frame.line(35);
                         return Err(frame.raise_from(
                             PyStopIteration::new_err((idx.clone().unbind(),)),
                             py.None(),
@@ -72,81 +59,43 @@ pub fn py_make_scanner<'py>(
                     }
                     Err(err) => return Err(err),
                 };
-                frame.line(37);
                 if nextchar.eq("\"")? {
-                    frame.line(38);
                     return parse_string.call1((string, idx.add(1)?, strict));
-                } else {
-                    frame.line(39);
-                    if nextchar.eq("{")? {
-                        frame.line(40);
-                        return parse_object.call1((
-                            PyTuple::new(py, [string, &idx.add(1)?])?,
-                            strict,
-                            _scan_once.get()?,
-                            object_hook,
-                            object_pairs_hook,
-                            memo,
-                        ));
-                    } else {
-                        frame.line(42);
-                        if nextchar.eq("[")? {
-                            frame.line(43);
-                            return parse_array.call1((
-                                PyTuple::new(py, [string, &idx.add(1)?])?,
-                                _scan_once.get()?,
-                            ));
-                        } else {
-                            frame.line(44);
-                            if nextchar.eq("n")?
-                                && string
-                                    .get_item(rt::slice(py, idx, idx.add(4)?)?)?
-                                    .eq("null")?
-                            {
-                                frame.line(45);
-                                return Ok(
-                                    PyTuple::new(py, [&rt::none(py), &idx.add(4)?])?.into_any()
-                                );
-                            } else {
-                                frame.line(46);
-                                if nextchar.eq("t")?
-                                    && string
-                                        .get_item(rt::slice(py, idx, idx.add(4)?)?)?
-                                        .eq("true")?
-                                {
-                                    frame.line(47);
-                                    return Ok(PyTuple::new(
-                                        py,
-                                        [&rt::bool(py, true), &idx.add(4)?],
-                                    )?
-                                    .into_any());
-                                } else {
-                                    frame.line(48);
-                                    if nextchar.eq("f")?
-                                        && string
-                                            .get_item(rt::slice(py, idx, idx.add(5)?)?)?
-                                            .eq("false")?
-                                    {
-                                        frame.line(49);
-                                        return Ok(PyTuple::new(
-                                            py,
-                                            [&rt::bool(py, false), &idx.add(5)?],
-                                        )?
-                                        .into_any());
-                                    }
-                                }
-                            }
-                        }
-                    }
+                } else if nextchar.eq("{")? {
+                    return parse_object.call1((
+                        PyTuple::new(py, [string, &idx.add(1)?])?,
+                        strict,
+                        _scan_once.get()?,
+                        object_hook,
+                        object_pairs_hook,
+                        memo,
+                    ));
+                } else if nextchar.eq("[")? {
+                    return parse_array
+                        .call1((PyTuple::new(py, [string, &idx.add(1)?])?, _scan_once.get()?));
+                } else if nextchar.eq("n")?
+                    && string
+                        .get_item(rt::slice(py, idx, idx.add(4)?)?)?
+                        .eq("null")?
+                {
+                    return Ok(PyTuple::new(py, [&rt::none(py), &idx.add(4)?])?.into_any());
+                } else if nextchar.eq("t")?
+                    && string
+                        .get_item(rt::slice(py, idx, idx.add(4)?)?)?
+                        .eq("true")?
+                {
+                    return Ok(PyTuple::new(py, [&rt::bool(py, true), &idx.add(4)?])?.into_any());
+                } else if nextchar.eq("f")?
+                    && string
+                        .get_item(rt::slice(py, idx, idx.add(5)?)?)?
+                        .eq("false")?
+                {
+                    return Ok(PyTuple::new(py, [&rt::bool(py, false), &idx.add(5)?])?.into_any());
                 }
-                frame.line(51);
                 let m = match_number.call1((string, idx))?;
                 if !m.is_none() {
-                    frame.line(53);
                     [integer, frac, exp] = rt::unpack(&m.call_method0("groups")?)?;
-                    frame.line(54);
                     if frac.is_truthy()? || exp.is_truthy()? {
-                        frame.line(55);
                         res = parse_float.call1((integer
                             .add(if frac.is_truthy()? {
                                 frac.clone()
@@ -159,59 +108,41 @@ pub fn py_make_scanner<'py>(
                                 rt::str(py, "")
                             })?,))?;
                     } else {
-                        frame.line(57);
                         res = parse_int.call1((&integer,))?;
                     }
-                    frame.line(58);
                     Ok(PyTuple::new(py, [&res, &m.call_method0("end")?])?.into_any())
+                } else if nextchar.eq("N")?
+                    && string
+                        .get_item(rt::slice(py, idx, idx.add(3)?)?)?
+                        .eq("NaN")?
+                {
+                    Ok(
+                        PyTuple::new(py, [&parse_constant.call1(("NaN",))?, &idx.add(3)?])?
+                            .into_any(),
+                    )
+                } else if nextchar.eq("I")?
+                    && string
+                        .get_item(rt::slice(py, idx, idx.add(8)?)?)?
+                        .eq("Infinity")?
+                {
+                    Ok(
+                        PyTuple::new(py, [&parse_constant.call1(("Infinity",))?, &idx.add(8)?])?
+                            .into_any(),
+                    )
+                } else if nextchar.eq("-")?
+                    && string
+                        .get_item(rt::slice(py, idx, idx.add(9)?)?)?
+                        .eq("-Infinity")?
+                {
+                    Ok(
+                        PyTuple::new(py, [&parse_constant.call1(("-Infinity",))?, &idx.add(9)?])?
+                            .into_any(),
+                    )
                 } else {
-                    frame.line(59);
-                    if nextchar.eq("N")?
-                        && string
-                            .get_item(rt::slice(py, idx, idx.add(3)?)?)?
-                            .eq("NaN")?
-                    {
-                        frame.line(60);
-                        Ok(
-                            PyTuple::new(py, [&parse_constant.call1(("NaN",))?, &idx.add(3)?])?
-                                .into_any(),
-                        )
-                    } else {
-                        frame.line(61);
-                        if nextchar.eq("I")?
-                            && string
-                                .get_item(rt::slice(py, idx, idx.add(8)?)?)?
-                                .eq("Infinity")?
-                        {
-                            frame.line(62);
-                            Ok(PyTuple::new(
-                                py,
-                                [&parse_constant.call1(("Infinity",))?, &idx.add(8)?],
-                            )?
-                            .into_any())
-                        } else {
-                            frame.line(63);
-                            if nextchar.eq("-")?
-                                && string
-                                    .get_item(rt::slice(py, idx, idx.add(9)?)?)?
-                                    .eq("-Infinity")?
-                            {
-                                frame.line(64);
-                                Ok(PyTuple::new(
-                                    py,
-                                    [&parse_constant.call1(("-Infinity",))?, &idx.add(9)?],
-                                )?
-                                .into_any())
-                            } else {
-                                frame.line(66);
-                                Err(frame.raise(PyStopIteration::new_err((idx.clone().unbind(),))))
-                            }
-                        }
-                    }
+                    Err(frame.raise(PyStopIteration::new_err((idx.clone().unbind(),))))
                 }
             })
         }
-        frame.line(31);
         _scan_once.set(rt::function!(
     m,
     _scan_once_[parse_string, strict, parse_object, &_scan_once, object_hook, object_pairs_hook, memo, parse_array, match_number, parse_float, parse_int, parse_constant](string, idx),
@@ -226,12 +157,10 @@ pub fn py_make_scanner<'py>(
             idx: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(m, "py_make_scanner.<locals>.scan_once", 68, |frame| {
-                let result = (|| -> PyResult<Bound<'py, PyAny>> {
-                    frame.line(70);
-                    _scan_once.get()?.call1((string, idx))
-                })();
+                let result =
+                    (|| -> PyResult<Bound<'py, PyAny>> { _scan_once.get()?.call1((string, idx)) })(
+                    );
                 let finally = frame.finally(result);
-                frame.line(72);
                 memo.call_method0("clear")?;
                 finally.resume()
             })
@@ -253,10 +182,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // Copied unmodified (below this header) from Lib/json/scanner.py of CPython 3.14.9,
         // licensed under the PSF License Agreement. A steelix test project:
         // tests/test_projects.py runs it transpiled and with CPython and compares.
-        frame.line(6);
         m.set_global("re", rt::import(m, "re")?)?;
         match (|| -> PyResult<()> {
-            frame.line(8);
             let _json = rt::import_names(m, "_json", &["make_scanner"])?;
             m.set_global("c_make_scanner", rt::import_from(&_json, "make_scanner")?)?;
             Ok(())
@@ -264,14 +191,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
-                frame.line(10);
                 m.set_global("c_make_scanner", py.None())?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(12);
         m.set_global("__all__", PyList::new(py, ["make_scanner"])?)?;
-        frame.line(14);
         m.set_global(
             "NUMBER_RE",
             m.global("re")?.getattr("compile")?.call1((
@@ -283,7 +207,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ))?,
         )?;
         rt::def!(m, py_make_scanner(context))?;
-        frame.line(76);
         {
             let c_make_scanner = m.global("c_make_scanner")?;
             m.set_global(

@@ -59,6 +59,9 @@ class StmtLowering(HandlingLowering):
         self.closures: list = []
         """The closure regions being lowered (`handling.Closure`), innermost last."""
         self.exprs.line = line
+        self.frame_line = line
+        """The line of the frame header (`rt::frame!(m, "f", line, ..)`), which
+        stays the traceback line without `--traceback-lines`."""
         self.line = line
         """The traceback line of the frame at this point of the generated
         code, if known: `frame.line(n)` only goes where it changes."""
@@ -68,12 +71,16 @@ class StmtLowering(HandlingLowering):
     # --- traceback lines ---
 
     def at_line(self, line: int) -> list[rs.Stmt]:
-        """`frame.line(line);`, unless the frame is known to be there."""
+        """`frame.line(line);`, unless the frame is known to be there.
+
+        Without `--traceback-lines` the marker is left out but the
+        bookkeeping is the same, so the code around it does not change.
+        """
         if self.line == line:
             return []
         self.line = line
         self.markers += 1
-        return [line_marker(line)]
+        return [line_marker(line)] if self.ctx.module.traceback_lines else []
 
     def mark(self, line: int, rust: list[rs.Stmt]) -> list[rs.Stmt]:
         """`at_line` for code on `line` that may raise."""

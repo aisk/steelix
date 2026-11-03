@@ -100,10 +100,14 @@ CASES = [
 BY_NAME = {case.name: case for case in CASES}
 
 
-def generate(case: Case, out: Path) -> Project:
+def generate(
+    case: Case, out: Path, *, traceback_lines: bool = False, name: str | None = None
+) -> Project:
     project = case.project()
-    options = CrateOptions(mode=Mode.BIN, runtime_path=RUNTIME, standalone=False)
-    emit_project(project, out, options, name=case.name)
+    options = CrateOptions(
+        mode=Mode.BIN, runtime_path=RUNTIME, standalone=False, traceback_lines=traceback_lines
+    )
+    emit_project(project, out, options, name=name or case.name)
     return project
 
 
@@ -150,9 +154,14 @@ def projects_workspace() -> Workspace:
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
+    crates = []
     for case in CASES:
-        generate(case, root / case.name)
-    members = ", ".join(f'"{case.name}"' for case in CASES)
+        # With the line markers: tracebacks are compared with CPython's exactly.
+        generate(case, root / case.name, traceback_lines=True)
+        # The default output, as in the goldens: only built and linted.
+        generate(case, root / f"{case.name}_default", name=f"{case.name}_default")
+        crates += [f'"{case.name}"', f'"{case.name}_default"']
+    members = ", ".join(crates)
     manifest = f'[workspace]\nresolver = "3"\nmembers = [{members}]\n\n{DEV_PROFILE}'
     (root / "Cargo.toml").write_text(manifest)
     shutil.copyfile(ROOT / "Cargo.lock", root / "Cargo.lock")

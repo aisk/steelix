@@ -9,8 +9,7 @@ pub fn describe<'py>(
     width: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "describe", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "describe", 4, |_| {
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -18,7 +17,6 @@ pub fn describe<'py>(
                 (rt::format(name, "")?, ": ", rt::format(value, "")?),
             )?,),
         )?;
-        frame.line(6);
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -35,7 +33,6 @@ pub fn describe<'py>(
                 ),
             )?,),
         )?;
-        frame.line(7);
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -53,7 +50,6 @@ pub fn describe<'py>(
                 ),
             )?,),
         )?;
-        frame.line(8);
         rt::builtins::print(
             py,
             (rt::format(
@@ -74,7 +70,6 @@ pub fn describe<'py>(
                 )?,
             )?,),
         )?;
-        frame.line(9);
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -82,9 +77,7 @@ pub fn describe<'py>(
                 ("{literal} ", rt::format(name, "")?, rt::format(name, "")?),
             )?,),
         )?;
-        frame.line(10);
         rt::builtins::print(py, (rt::ascii(&rt::str(py, "é"))?, "", "plain"))?;
-        frame.line(11);
         rt::fstring(
             py,
             (
@@ -99,13 +92,12 @@ pub fn describe<'py>(
 /// Executes the body of `fstrings.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "f-strings with format specs, conversions and nested fields.",
         )?;
         rt::def!(m, describe(name, value, width))?;
-        frame.line(14);
         rt::builtins::print(
             py,
             (describe(
@@ -115,7 +107,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 &rt::int(py, 10),
             )?,),
         )?;
-        frame.line(15);
         rt::builtins::print(
             py,
             (describe(
@@ -125,9 +116,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 &rt::int(py, 6),
             )?,),
         )?;
-        frame.line(16);
         m.set_global("n", 255)?;
-        frame.line(17);
         rt::builtins::print(
             py,
             (

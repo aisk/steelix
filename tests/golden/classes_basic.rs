@@ -14,14 +14,10 @@ pub mod vector {
     // classes_basic.py:6
     /// The body of `class Vector`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Vector", 6, |frame| {
-            frame.line(7);
+        rt::frame!(ns, "Vector", 6, |_| {
             ns.set("__doc__", "A 2D vector.")?;
-            frame.line(9);
             ns.set("scale", 2)?;
-            frame.line(10);
             ns.set("instances", 0)?;
-            frame.line(12);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -30,7 +26,6 @@ pub mod vector {
                     qualname = "Vector.__init__"
                 )?,
             )?;
-            frame.line(17);
             ns.set(
                 "__repr__",
                 rt::function!(
@@ -39,7 +34,6 @@ pub mod vector {
                     qualname = "Vector.__repr__"
                 )?,
             )?;
-            frame.line(20);
             ns.set(
                 "__eq__",
                 rt::function!(
@@ -48,7 +42,6 @@ pub mod vector {
                     qualname = "Vector.__eq__"
                 )?,
             )?;
-            frame.line(25);
             ns.set(
                 "__hash__",
                 rt::function!(
@@ -57,7 +50,6 @@ pub mod vector {
                     qualname = "Vector.__hash__"
                 )?,
             )?;
-            frame.line(28);
             ns.set(
                 "__add__",
                 rt::function!(
@@ -66,12 +58,10 @@ pub mod vector {
                     qualname = "Vector.__add__"
                 )?,
             )?;
-            frame.line(31);
             ns.set(
                 "scaled",
                 rt::function!(ns, scaled(slf as "self"), qualname = "Vector.scaled")?,
             )?;
-            frame.line(36);
             ns.set(
                 "class_scaled",
                 rt::function!(
@@ -80,20 +70,17 @@ pub mod vector {
                     qualname = "Vector.class_scaled"
                 )?,
             )?;
-            frame.line(40);
             {
                 let decorator = ns.get("property")?;
                 let function =
                     rt::function!(ns, length(slf as "self"), qualname = "Vector.length")?;
                 ns.set("length", decorator.call1((function,))?)?;
             }
-            frame.line(44);
             {
                 let decorator = ns.get("property")?;
                 let function = rt::function!(ns, label(slf as "self"), qualname = "Vector.label")?;
                 ns.set("label", decorator.call1((function,))?)?;
             }
-            frame.line(48);
             {
                 let decorator = ns.get("label")?.getattr("setter")?;
                 let function = rt::function!(
@@ -103,31 +90,26 @@ pub mod vector {
                 )?;
                 ns.set("label", decorator.call1((function,))?)?;
             }
-            frame.line(53);
             {
                 let decorator = ns.get("label")?.getattr("deleter")?;
                 let function =
                     rt::function!(ns, label__(slf as "self"), qualname = "Vector.label")?;
                 ns.set("label", decorator.call1((function,))?)?;
             }
-            frame.line(58);
             {
                 let decorator = ns.get("classmethod")?;
                 let function = rt::function!(ns, zero(cls), qualname = "Vector.zero")?;
                 ns.set("zero", decorator.call1((function,))?)?;
             }
-            frame.line(62);
             {
                 let decorator = ns.get("staticmethod")?;
                 let function = rt::function!(ns, dot(a, b), qualname = "Vector.dot")?;
                 ns.set("dot", decorator.call1((function,))?)?;
             }
-            frame.line(65);
             ns.set(
                 "__len__",
                 rt::function!(ns, __len__(slf as "self"), qualname = "Vector.__len__")?,
             )?;
-            frame.line(68);
             ns.set(
                 "__iter__",
                 rt::function!(
@@ -136,7 +118,6 @@ pub mod vector {
                     qualname = "Vector.__iter__"
                 )?,
             )?;
-            frame.line(72);
             ns.set(
                 "__getitem__",
                 rt::function!(
@@ -145,7 +126,6 @@ pub mod vector {
                     qualname = "Vector.__getitem__"
                 )?,
             )?;
-            frame.line(75);
             ns.set(
                 "__bool__",
                 rt::function!(
@@ -165,12 +145,9 @@ pub mod vector {
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.__init__", 12, |frame| {
-            frame.line(13);
+        rt::frame!(m, "Vector.__init__", 12, |_| {
             slf.setattr("x", x)?;
-            frame.line(14);
             slf.setattr("y", y)?;
-            frame.line(15);
             {
                 let Vector = m.global("Vector")?;
                 Vector.setattr("instances", rt::iadd(&Vector.getattr("instances")?, 1)?)?;
@@ -184,8 +161,7 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.__repr__", 17, |frame| {
-            frame.line(18);
+        rt::frame!(m, "Vector.__repr__", 17, |_| {
             rt::fstring(
                 m.py(),
                 (
@@ -206,13 +182,10 @@ pub mod vector {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Vector.__eq__", 20, |frame| {
-            frame.line(21);
+        rt::frame!(m, "Vector.__eq__", 20, |_| {
             if !other.is_instance(&m.global("Vector")?)? {
-                frame.line(22);
                 return rt::builtin(py, "NotImplemented");
             }
-            frame.line(23);
             PyTuple::new(py, [&slf.getattr("x")?, &slf.getattr("y")?])?.rich_compare(
                 PyTuple::new(py, [&other.getattr("x")?, &other.getattr("y")?])?,
                 CompareOp::Eq,
@@ -226,8 +199,7 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Vector.__hash__", 25, |frame| {
-            frame.line(26);
+        rt::frame!(m, "Vector.__hash__", 25, |_| {
             rt::builtin(py, "hash")?
                 .call1((PyTuple::new(py, [&slf.getattr("x")?, &slf.getattr("y")?])?,))
         })
@@ -239,8 +211,7 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.__add__", 28, |frame| {
-            frame.line(29);
+        rt::frame!(m, "Vector.__add__", 28, |_| {
             m.global("Vector")?.call1((
                 slf.getattr("x")?.add(other.getattr("x")?)?,
                 slf.getattr("y")?.add(other.getattr("y")?)?,
@@ -253,10 +224,9 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.scaled", 31, |frame| {
+        rt::frame!(m, "Vector.scaled", 31, |_| {
             // The global `scale`, not the class attribute: class scope is not
             // visible in methods.
-            frame.line(34);
             m.global("Vector")?.call1((
                 slf.getattr("x")?.mul(m.global("scale")?)?,
                 slf.getattr("y")?.mul(m.global("scale")?)?,
@@ -269,8 +239,7 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.class_scaled", 36, |frame| {
-            frame.line(37);
+        rt::frame!(m, "Vector.class_scaled", 36, |_| {
             m.global("Vector")?.call1((
                 slf.getattr("x")?.mul(slf.getattr("scale")?)?,
                 slf.getattr("y")?.mul(slf.get_type().getattr("scale")?)?,
@@ -284,8 +253,7 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Vector.length", 39, |frame| {
-            frame.line(41);
+        rt::frame!(m, "Vector.length", 39, |_| {
             slf.getattr("x")?
                 .pow(2, py.None())?
                 .add(slf.getattr("y")?.pow(2, py.None())?)?
@@ -295,10 +263,7 @@ pub mod vector {
 
     // classes_basic.py:44
     pub fn label<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.label", 43, |frame| {
-            frame.line(45);
-            slf.getattr("_label")
-        })
+        rt::frame!(m, "Vector.label", 43, |_| { slf.getattr("_label") })
     }
 
     // classes_basic.py:48
@@ -308,10 +273,8 @@ pub mod vector {
         value: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Vector.label", 47, |frame| {
-            frame.line(49);
+        rt::frame!(m, "Vector.label", 47, |_| {
             rt::builtins::print(py, ("setting label", value))?;
-            frame.line(50);
             slf.setattr("_label", value)?;
             Ok(rt::none(py))
         })
@@ -323,10 +286,8 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Vector.label", 52, |frame| {
-            frame.line(54);
+        rt::frame!(m, "Vector.label", 52, |_| {
             rt::builtins::print(py, ("deleting label",))?;
-            frame.line(55);
             slf.delattr("_label")?;
             Ok(rt::none(py))
         })
@@ -334,10 +295,7 @@ pub mod vector {
 
     // classes_basic.py:58
     pub fn zero<'py>(m: &rt::Module<'py>, cls: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.zero", 57, |frame| {
-            frame.line(59);
-            cls.call1((0, 0))
-        })
+        rt::frame!(m, "Vector.zero", 57, |_| { cls.call1((0, 0)) })
     }
 
     // classes_basic.py:62
@@ -346,8 +304,7 @@ pub mod vector {
         a: &Bound<'py, PyAny>,
         b: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.dot", 61, |frame| {
-            frame.line(63);
+        rt::frame!(m, "Vector.dot", 61, |_| {
             a.getattr("x")?
                 .mul(b.getattr("x")?)?
                 .add(a.getattr("y")?.mul(b.getattr("y")?)?)
@@ -367,11 +324,9 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.__iter__", 68, |frame| {
-            frame.line(69);
+        rt::frame!(m, "Vector.__iter__", 68, |_| {
             let yield_values =
                 PyList::new(m.py(), [&slf.getattr("x")?, &slf.getattr("y")?])?.into_any();
-            frame.line(70);
             Ok(yield_values.try_iter()?.into_any())
         })
     }
@@ -382,8 +337,7 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
         index: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.__getitem__", 72, |frame| {
-            frame.line(73);
+        rt::frame!(m, "Vector.__getitem__", 72, |_| {
             PyTuple::new(m.py(), [&slf.getattr("x")?, &slf.getattr("y")?])?
                 .as_any()
                 .get_item(index)
@@ -395,8 +349,7 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.__bool__", 75, |frame| {
-            frame.line(76);
+        rt::frame!(m, "Vector.__bool__", 75, |_| {
             let x = slf.getattr("x")?;
             Ok(rt::bool(
                 m.py(),
@@ -412,10 +365,8 @@ pub mod counter {
     // classes_basic.py:98
     /// The body of `class Counter`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Counter", 98, |frame| {
-            frame.line(99);
+        rt::frame!(ns, "Counter", 98, |_| {
             ns.set("count", 0)?;
-            frame.line(101);
             ns.set(
                 "increment",
                 rt::function!(
@@ -424,7 +375,6 @@ pub mod counter {
                     qualname = "Counter.increment"
                 )?,
             )?;
-            frame.line(105);
             ns.set(
                 "__call__",
                 rt::function!(
@@ -433,7 +383,6 @@ pub mod counter {
                     qualname = "Counter.__call__"
                 )?,
             )?;
-            frame.line(108);
             ns.set(
                 "__str__",
                 rt::function!(
@@ -452,8 +401,7 @@ pub mod counter {
         slf: &Bound<'py, PyAny>,
         by: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Counter.increment", 101, |frame| {
-            frame.line(102);
+        rt::frame!(m, "Counter.increment", 101, |_| {
             slf.setattr("count", rt::iadd(&slf.getattr("count")?, by)?)?;
             Ok(slf.clone())
         })
@@ -466,8 +414,7 @@ pub mod counter {
         args: &Bound<'py, PyTuple>,
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Counter.__call__", 105, |frame| {
-            frame.line(106);
+        rt::frame!(m, "Counter.__call__", 105, |_| {
             Ok(PyTuple::new(m.py(), [args.as_any(), kwargs.as_any()])?.into_any())
         })
     }
@@ -477,8 +424,7 @@ pub mod counter {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Counter.__str__", 108, |frame| {
-            frame.line(109);
+        rt::frame!(m, "Counter.__str__", 108, |_| {
             rt::str(m.py(), "Counter(%d)").rem(slf.getattr("count")?)
         })
     }
@@ -497,14 +443,12 @@ pub mod empty {
 /// Executes the body of `classes_basic.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Methods, properties, class and static methods, special methods.",
         )?;
-        frame.line(3);
         m.set_global("scale", 10)?;
-        frame.line(6);
         m.set_global(
             "Vector",
             rt::class!(
@@ -515,11 +459,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["_label", "x", "y"]
             )?,
         )?;
-        frame.line(79);
         m.set_global("v", m.global("Vector")?.call1((3, 4))?)?;
-        frame.line(80);
         m.set_global("w", m.global("Vector")?.call1((1,))?)?;
-        frame.line(81);
         rt::builtins::print(
             py,
             (
@@ -532,7 +473,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("v")?.rich_compare(3, CompareOp::Eq)?,
             ),
         )?;
-        frame.line(82);
         rt::builtins::print(
             py,
             (
@@ -553,7 +493,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .len(),
             ),
         )?;
-        frame.line(83);
         rt::builtins::print(
             py,
             (
@@ -566,13 +505,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .call1((m.global("v")?, m.global("w")?))?,
             ),
         )?;
-        frame.line(84);
         m.global("v")?.setattr("label", "a")?;
-        frame.line(85);
         rt::builtins::print(py, (m.global("v")?.getattr("label")?,))?;
-        frame.line(86);
         m.global("v")?.delattr("label")?;
-        frame.line(87);
         rt::builtins::print(
             py,
             (
@@ -584,7 +519,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Vector")?.call_method0("zero")?.is_truthy()?,
             ),
         )?;
-        frame.line(88);
         rt::builtins::print(
             py,
             (
@@ -595,7 +529,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Vector")?.getattr("__module__")?,
             ),
         )?;
-        frame.line(89);
         rt::builtins::print(
             py,
             (
@@ -610,7 +543,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .getattr("__defaults__")?,
             ),
         )?;
-        frame.line(90);
         rt::builtins::print(
             py,
             (
@@ -626,7 +558,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .getattr("__name__")?,
             ),
         )?;
-        frame.line(91);
         rt::builtins::print(
             py,
             (
@@ -650,7 +581,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Ok(None)
             })
         }
-        frame.line(92);
         rt::builtins::print(
             py,
             (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
@@ -658,7 +588,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 genexpr(m.global("Vector")?.getattr("__dict__")?.try_iter()?)
             )?,))?,),
         )?;
-        frame.line(93);
         rt::builtins::print(
             py,
             (
@@ -666,9 +595,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtin(py, "vars")?.call1((m.global("w")?,))?,
             ),
         )?;
-        frame.line(94);
         m.set_global("bound", m.global("v")?.getattr("scaled")?)?;
-        frame.line(95);
         rt::builtins::print(
             py,
             (
@@ -679,12 +606,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("bound")?.call0()?,
             ),
         )?;
-        frame.line(98);
         m.set_global(
             "Counter",
             rt::class!(m, "Counter"(), counter::body, line = 98)?,
         )?;
-        frame.line(112);
         m.set_global(
             "c",
             m.global("Counter")?
@@ -692,7 +617,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .call_method0("increment")?
                 .call_method1("increment", (5,))?,
         )?;
-        frame.line(113);
         rt::builtins::print(
             py,
             (
@@ -706,13 +630,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .get_item(rt::slice(py, py.None(), 8)?)?,
             ),
         )?;
-        frame.line(116);
         m.set_global("Empty", rt::class!(m, "Empty"(), empty::body, line = 116)?)?;
-        frame.line(120);
         m.set_global("e", m.global("Empty")?.call0()?)?;
-        frame.line(121);
         m.global("e")?.setattr("attr", 1)?;
-        frame.line(122);
         rt::builtins::print(
             py,
             (

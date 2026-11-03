@@ -255,7 +255,7 @@ def test_py_is_bound_once_or_spelled_in_place() -> None:
     )
     assert "pub fn once<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {" in out
     assert "Ok(rt::none(m.py()))" in out
-    assert 'let py = m.py();\n    rt::frame!(m, "twice", 5, |frame| {' in out
+    assert 'let py = m.py();\n    rt::frame!(m, "twice", 5, |_| {' in out
     assert "Ok(PyList::new(py, [x, &rt::int(py, 1)" in out
 
 
@@ -486,3 +486,45 @@ def test_exec_without_namespace_gets_the_module_globals() -> None:
     call = 'm.global("exec")?\n            .call1(("y = 1", m.globals().clone().into_any()))?;'
     assert call in out
     assert "// m.py:3, kept as Python: eval() without a namespace in a function at 4:12" in out
+
+
+TRACEBACK_SOURCE = """
+def total(values):
+    out = 0
+    for v in values:
+        out += v
+    return out
+
+def check(x):
+    if x < 0:
+        raise ValueError("negative")
+    return x
+"""
+
+
+def test_no_line_markers_by_default() -> None:
+    """Native frames report their `def` line (design §9): no `frame.line(n)`,
+    and `|_|` where the body does not use the frame."""
+    out = lower(TRACEBACK_SOURCE)
+    assert "frame.line(" not in out
+    assert 'rt::frame!(m, "total", 2, |_| {' in out
+    assert 'rt::frame!(m, "check", 8, |frame| {' in out
+    assert "frame.raise(PyValueError::new_err(" in out
+    assert 'rt::frame!(m, "<module>", 1, |_| {' in out
+
+
+def test_traceback_lines_marks_statements() -> None:
+    parsed = parse_source(textwrap.dedent(TRACEBACK_SOURCE), "m")
+    out = render_module(parsed, traceback_lines=True)
+    assert 'rt::frame!(m, "total", 2, |frame| {' in out
+    for line in (4, 5, 9, 10):
+        assert f"frame.line({line});" in out
+    # Without the markers the code is the same.
+    default = render_module(parse_source(textwrap.dedent(TRACEBACK_SOURCE), "m"))
+    stripped = "\n".join(line for line in out.splitlines() if "frame.line(" not in line)
+    assert stripped.replace("|frame|", "|_|") == default.replace("|frame|", "|_|").rstrip("\n")
+
+
+def test_single_expression_frame_keeps_braces() -> None:
+    out = lower("def double(x):\n    return x * 2\n")
+    assert 'rt::frame!(m, "double", 1, |_| { x.mul(2) })' in out

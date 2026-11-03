@@ -58,10 +58,8 @@ pub fn parse_line<'py>(
     line: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "parse_line", 28, |frame| {
-        frame.line(30);
+    rt::frame!(m, "parse_line", 28, |_| {
         let parts = line.call_method0("split")?;
-        frame.line(31);
         if parts.len()? < 10
             || !parts
                 .get_item(3)?
@@ -70,28 +68,22 @@ pub fn parse_line<'py>(
         {
             return Ok(rt::none(py));
         }
-        frame.line(33);
         let status = parts.get_item(8)?;
-        frame.line(34);
         if status.len()? != 3 || !status.call_method0("isdigit")?.is_truthy()? {
             return Ok(rt::none(py));
         }
-        frame.line(36);
         let size = parts.get_item(9)?;
         let mut millis = rt::none(py);
-        frame.line(38);
         if parts.len()? > 10
             && parts
                 .get_item(10)?
                 .call_method1("endswith", ("ms",))?
                 .is_truthy()?
         {
-            frame.line(39);
             millis = rt::builtin(py, "int")?.call1((parts
                 .get_item(10)?
                 .get_item(rt::slice(py, py.None(), -2)?)?,))?;
         }
-        frame.line(40);
         Ok([
             ("ip", &parts.get_item(0)?),
             // ... five more fields ...

@@ -6,17 +6,12 @@ use steelix_runtime as rt;
 // classes_exceptions.py:20
 pub fn load<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "load", 20, |frame| {
-        frame.line(21);
         if key.eq("missing")? {
-            frame.line(22);
             return Err(frame.raise(m.global("ConfigError")?.call1((key, "not found"))?));
         }
-        frame.line(23);
         if key.eq("busy")? {
-            frame.line(24);
             return Err(frame.raise(m.global("Retry")?.call1((1, 2))?));
         }
-        frame.line(25);
         key.call_method0("upper")
     })
 }
@@ -28,8 +23,7 @@ pub mod app_error {
     // classes_exceptions.py:4
     /// The body of `class AppError`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "AppError", 4, |frame| {
-            frame.line(5);
+        rt::frame!(ns, "AppError", 4, |_| {
             ns.set("__doc__", "Base error.")?;
             Ok(())
         })
@@ -42,9 +36,8 @@ pub mod config_error {
     // classes_exceptions.py:8
     /// The body of `class ConfigError`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "ConfigError", 8, |frame| {
+        rt::frame!(ns, "ConfigError", 8, |_| {
             let __class__ = ns.class_cell();
-            frame.line(9);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -66,17 +59,14 @@ pub mod config_error {
         problem: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "ConfigError.__init__", 9, |frame| {
-            frame.line(10);
+        rt::frame!(m, "ConfigError.__init__", 9, |_| {
             rt::super_(__class__, slf)?
                 .getattr("__init__")?
                 .call1((rt::fstring(
                     py,
                     (rt::format(key, "")?, ": ", rt::format(problem, "")?),
                 )?,))?;
-            frame.line(11);
             slf.setattr("key", key)?;
-            frame.line(12);
             slf.setattr("problem", problem)?;
             Ok(rt::none(py))
         })
@@ -89,8 +79,7 @@ pub mod retry {
     // classes_exceptions.py:15
     /// The body of `class Retry`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Retry", 15, |frame| {
-            frame.line(16);
+        rt::frame!(ns, "Retry", 15, |_| {
             ns.set(
                 "__str__",
                 rt::function!(ns, __str__(slf as "self"), qualname = "Retry.__str__")?,
@@ -105,8 +94,7 @@ pub mod retry {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Retry.__str__", 16, |frame| {
-            frame.line(17);
+        rt::frame!(m, "Retry.__str__", 16, |_| {
             rt::str(py, "retry ").add(rt::str(py, ", ").getattr("join")?.call1((
                 rt::builtin(py, "map")?.call1((rt::builtin(py, "str")?, slf.getattr("args")?))?,
             ))?)
@@ -120,8 +108,7 @@ pub mod kept {
     // classes_exceptions.py:42
     /// The body of `class Kept`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Kept", 42, |frame| {
-            frame.line(43);
+        rt::frame!(ns, "Kept", 42, |_| {
             ns.set(
                 "describe",
                 rt::function!(ns, describe(slf as "self"), qualname = "Kept.describe")?,
@@ -136,8 +123,7 @@ pub mod kept {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Kept.describe", 43, |frame| {
-            frame.line(44);
+        rt::frame!(m, "Kept.describe", 43, |_| {
             let list = PyList::empty(py);
             for a in PyList::new(py, [&slf.getattr("args")?])?.try_iter()? {
                 let a = a?;
@@ -155,8 +141,7 @@ pub mod broken {
     // classes_exceptions.py:53
     /// The body of `class Broken`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Broken", 53, |frame| {
-            frame.line(54);
+        rt::frame!(ns, "Broken", 53, |_| {
             ns.set(
                 "__init__",
                 rt::function!(
@@ -176,12 +161,9 @@ pub mod broken {
         value: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Broken.__init__", 54, |frame| {
-            frame.line(55);
             if value.lt(0)? {
-                frame.line(56);
                 return Err(frame.raise(PyValueError::new_err("negative")));
             }
-            frame.line(57);
             slf.setattr("value", value)?;
             Ok(rt::none(m.py()))
         })
@@ -194,8 +176,7 @@ pub mod grouped {
     // classes_exceptions.py:67
     /// The body of `class Grouped`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Grouped", 67, |frame| {
-            frame.line(68);
+        rt::frame!(ns, "Grouped", 67, |_| {
             ns.set(
                 "derive",
                 rt::function!(
@@ -214,8 +195,7 @@ pub mod grouped {
         slf: &Bound<'py, PyAny>,
         excs: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Grouped.derive", 68, |frame| {
-            frame.line(69);
+        rt::frame!(m, "Grouped.derive", 68, |_| {
             m.global("Grouped")?.call1((slf.getattr("message")?, excs))
         })
     }
@@ -229,7 +209,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "__doc__",
             "Custom exception classes raised and caught by native and kept code.",
         )?;
-        frame.line(4);
         m.set_global(
             "AppError",
             rt::class!(
@@ -239,7 +218,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 4
             )?,
         )?;
-        frame.line(8);
         m.set_global(
             "ConfigError",
             rt::class!(
@@ -250,23 +228,19 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["key", "problem"]
             )?,
         )?;
-        frame.line(15);
         m.set_global(
             "Retry",
             rt::class!(m, "Retry"(m.global("AppError")?), retry::body, line = 15)?,
         )?;
         rt::def!(m, load(key))?;
-        frame.line(28);
         for item in PyList::new(py, ["ok", "missing", "busy"])?.try_iter()? {
             m.set_global("key", item?)?;
-            frame.line(30);
             match (|| rt::builtins::print(py, (load(m, &m.global("key")?)?,)))() {
                 Ok(_) => {}
-                Err(err) if frame.matches(&err, 31, || m.global("ConfigError"))? => {
+                Err(err) if frame.matches(&err, 1, || m.global("ConfigError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(32);
                     rt::builtins::print(
                         py,
                         (
@@ -280,11 +254,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     )?;
                     m.unbind_global("err")?;
                 }
-                Err(err) if frame.matches(&err, 33, || m.global("AppError"))? => {
+                Err(err) if frame.matches(&err, 1, || m.global("AppError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    frame.line(34);
                     rt::builtins::print(
                         py,
                         (
@@ -303,21 +276,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) => return Err(err),
             }
             py.check_signals()?;
-            frame.line(28);
         }
         match (|| -> PyResult<()> {
-            frame.line(37);
             Err(frame.raise_from(
                 m.global("ConfigError")?.call1(("a", "b"))?,
                 rt::builtin(py, "KeyError")?.call1(("k",))?,
             ))
         })() {
             Ok(()) => unreachable!(),
-            Err(err) if frame.matches(&err, 38, || m.global("AppError"))? => {
+            Err(err) if frame.matches(&err, 1, || m.global("AppError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(39);
                 rt::builtins::print(
                     py,
                     (
@@ -329,7 +299,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        frame.line(42);
         m.set_global(
             "Kept",
             rt::class!(
@@ -339,16 +308,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 42
             )?,
         )?;
-        match (|| -> PyResult<()> {
-            frame.line(48);
-            Err(frame.raise(m.global("Kept")?.call1(("x", "y"))?))
-        })() {
+        match (|| -> PyResult<()> { Err(frame.raise(m.global("Kept")?.call1(("x", "y"))?)) })() {
             Ok(()) => unreachable!(),
-            Err(err) if frame.matches(&err, 49, || m.global("Kept"))? => {
+            Err(err) if frame.matches(&err, 1, || m.global("Kept"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(50);
                 rt::builtins::print(
                     py,
                     (
@@ -360,7 +325,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        frame.line(53);
         m.set_global(
             "Broken",
             rt::class!(
@@ -371,22 +335,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["value"]
             )?,
         )?;
-        frame.line(61);
         match (|| m.global("Broken")?.call1((-1,)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(63);
                 rt::builtins::print(py, ("ValueError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(64);
         rt::builtins::print(py, (m.global("Broken")?.call1((2,))?.getattr("value")?,))?;
-        frame.line(67);
         m.set_global(
             "Grouped",
             rt::class!(
@@ -396,7 +356,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 67
             )?,
         )?;
-        frame.line(72);
         m.set_global(
             "g",
             m.global("Grouped")?.call1((
@@ -410,7 +369,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             ))?,
         )?;
-        frame.line(73);
         let [match_, rest] = rt::unpack(
             &m.global("g")?
                 .getattr("split")?
@@ -418,7 +376,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         m.set_global("match_", match_)?;
         m.set_global("rest", rest)?;
-        frame.line(74);
         rt::builtins::print(
             py,
             (

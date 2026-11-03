@@ -80,6 +80,9 @@ class CrateOptions:
     fallback: bool = True
     """Mixed mode: keep unsupported statements as Python source (design §13).
     `False` makes them an error instead."""
+    traceback_lines: bool = False
+    """Emit `frame.line(n)` markers so tracebacks show statement lines
+    instead of the `def` line (design §9)."""
 
 
 def rust_module_name(name: str) -> str:
@@ -93,10 +96,15 @@ def rust_module_name(name: str) -> str:
 
 
 def render_module(
-    parsed: ParsedModule, *, fallback: bool = True, role: ModuleRole | None = None
+    parsed: ParsedModule,
+    *,
+    fallback: bool = True,
+    role: ModuleRole | None = None,
+    traceback_lines: bool = False,
 ) -> str:
     """The formatted Rust source for one Python module."""
-    return render(lower_module(parsed, fallback=fallback, role=role))
+    lowered = lower_module(parsed, fallback=fallback, role=role, traceback_lines=traceback_lines)
+    return render(lowered)
 
 
 def render(lowered: LoweredModule) -> str:
@@ -112,7 +120,9 @@ def render(lowered: LoweredModule) -> str:
 
 def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> LoweredModule:
     """Write the crate; the result tells which statements stayed Python."""
-    lowered = lower_module(parsed, fallback=options.fallback)
+    lowered = lower_module(
+        parsed, fallback=options.fallback, traceback_lines=options.traceback_lines
+    )
     module_rs = render(lowered)
     rust_mod = rust_module_name(parsed.name)
     src = out_dir / "src"
@@ -253,7 +263,12 @@ def emit_project(
             submodules=rust.children,
             rust_name=rust.path[-1].removeprefix("r#"),
         )
-        lowered = lower_module(parsed, fallback=options.fallback, role=role)
+        lowered = lower_module(
+            parsed,
+            fallback=options.fallback,
+            role=role,
+            traceback_lines=options.traceback_lines,
+        )
         target = src / rust.file
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render(lowered))

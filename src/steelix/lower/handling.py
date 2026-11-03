@@ -487,8 +487,12 @@ class HandlingLowering:
         else:
             classes = value.result()
         closure = rs.Closure((), rs.Block(tuple(prelude), classes))
-        line = rs.IntLit(handler.lineno)
-        return rs.Try(_frame("matches", rs.Ref(err), line, closure))
+        line = handler.lineno
+        if not self.ctx.module.traceback_lines and self.frame_line is not None:
+            # Without line markers the traceback line stays the def line, also
+            # after the test: an `except` line there would be stale.
+            line = self.frame_line
+        return rs.Try(_frame("matches", rs.Ref(err), rs.IntLit(line), closure))
 
     def builtin_exception(self: StmtLowering, expr: ast.expr) -> str | None:
         """The name of the builtin exception class `expr` refers to, if it

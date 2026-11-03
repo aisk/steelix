@@ -11,14 +11,11 @@ pub fn local_import<'py>(
     text: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "local_import", 12, |frame| {
-        frame.line(13);
+    rt::frame!(m, "local_import", 12, |_| {
         let textwrap = rt::import(m, "textwrap")?;
-        frame.line(14);
         let math = rt::import_names(m, "math", &["pi", "sqrt"])?;
         let PI = rt::import_from(&math, "pi")?;
         let sqrt = rt::import_from(&math, "sqrt")?;
-        frame.line(15);
         Ok(PyTuple::new(
             py,
             [
@@ -34,30 +31,22 @@ pub fn local_import<'py>(
 /// Executes the body of `imports.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Imports of standard library and third-party modules, and script metadata.",
         )?;
-        frame.line(3);
         m.set_global("os", rt::import(m, "os")?)?;
-        frame.line(4);
         m.set_global("os", rt::import(m, "os.path")?)?;
-        frame.line(5);
         m.set_global("cabc", rt::import_module(m, "collections.abc")?)?;
-        frame.line(6);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        frame.line(7);
         let json = rt::import_names(m, "json", &["dumps", "loads"])?;
         m.set_global("dumps", rt::import_from(&json, "dumps")?)?;
         m.set_global("parse", rt::import_from(&json, "loads")?)?;
-        frame.line(8);
         let version = rt::import_names(m, "packaging.version", &["Version"])?;
         m.set_global("Version", rt::import_from(&version, "Version")?)?;
-        frame.line(9);
         m.set_global("packaging", rt::import(m, "packaging.version")?)?;
         rt::def!(m, local_import(text))?;
-        frame.line(18);
         rt::builtins::print(
             py,
             (
@@ -67,7 +56,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("os")?.getattr("sep")?,
             ),
         )?;
-        frame.line(19);
         rt::builtins::print(
             py,
             (
@@ -77,7 +65,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("parse")?.call1(("[3]",))?,
             ),
         )?;
-        frame.line(20);
         rt::builtins::print(
             py,
             (
@@ -89,12 +76,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .call_method1("Version", ("2.0",))?,
             ),
         )?;
-        frame.line(21);
         rt::builtins::print(
             py,
             (local_import(m, &rt::str(py, "hello transpiled world"))?,),
         )?;
-        frame.line(22);
         rt::builtins::print(
             py,
             (
@@ -109,7 +94,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("__name__")?,
             ),
         )?;
-        frame.line(23);
         rt::builtins::print(
             py,
             (m.global("sys")?
@@ -127,7 +111,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     CompareOp::Eq,
                 )?,),
         )?;
-        frame.line(24);
         rt::builtins::print(
             py,
             (

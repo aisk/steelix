@@ -67,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="fail on unsupported constructs instead of keeping them as Python source",
     )
     transpile.add_argument(
+        "--traceback-lines",
+        action="store_true",
+        help="mark the line of every statement that may raise, so tracebacks of native "
+        "frames show statement lines instead of the def line (more verbose Rust)",
+    )
+    transpile.add_argument(
         "--report",
         type=Path,
         default=None,
@@ -164,6 +170,7 @@ def transpile(args: argparse.Namespace) -> int:
         mode=Mode(args.mode),
         runtime_path=runtime.resolve() if runtime else None,
         fallback=args.fallback,
+        traceback_lines=args.traceback_lines,
     )
     try:
         project = find_project(

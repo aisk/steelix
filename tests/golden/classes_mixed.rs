@@ -29,13 +29,11 @@ pub mod base {
     // classes_mixed.py:6
     /// The body of `class Base`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Base", 6, |frame| {
-            frame.line(7);
+        rt::frame!(ns, "Base", 6, |_| {
             ns.set(
                 "greet",
                 rt::function!(ns, greet(slf as "self"), qualname = "Base.greet")?,
             )?;
-            frame.line(10);
             ns.set(
                 "items",
                 rt::function!(ns, items(slf as "self"), qualname = "Base.items")?,
@@ -51,8 +49,7 @@ pub mod base {
 
     // classes_mixed.py:10
     pub fn items<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Base.items", 10, |frame| {
-            frame.line(11);
+        rt::frame!(m, "Base.items", 10, |_| {
             Ok(PyList::new(m.py(), [1, 2, 3])?.into_any())
         })
     }
@@ -64,9 +61,8 @@ pub mod mixed {
     // classes_mixed.py:14
     /// The body of `class Mixed`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Mixed", 14, |frame| {
+        rt::frame!(ns, "Mixed", 14, |_| {
             let __class__ = ns.class_cell();
-            frame.line(15);
             ns.set("native_before", 1)?;
             // classes_mixed.py:16, kept as Python: generator expression with several for clauses at 16:19
             rt::exec_python!(
@@ -76,9 +72,7 @@ pub mod mixed {
     squares = list(i * j for i in range(4) for j in [i])
 "#
             )?;
-            frame.line(17);
             ns.set("native_after", ns.get("squares")?.get_item(-1)?)?;
-            frame.line(19);
             ns.set(
                 "greet",
                 rt::function!(
@@ -116,7 +110,6 @@ pub mod mixed {
         return next(s for s in ("private",) for _ in "1")
 "#
             )?;
-            frame.line(33);
             ns.set(
                 "call_private",
                 rt::function!(
@@ -134,7 +127,6 @@ pub mod mixed {
         return "async"
 "#
             )?;
-            frame.line(39);
             ns.set(
                 "uses_kept",
                 rt::function!(
@@ -170,8 +162,7 @@ pub mod mixed {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Mixed.greet", 19, |frame| {
-            frame.line(20);
+        rt::frame!(m, "Mixed.greet", 19, |_| {
             rt::str(m.py(), "native:").add(rt::super_(__class__, slf)?.call_method0("greet")?)
         })
     }
@@ -181,8 +172,7 @@ pub mod mixed {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Mixed.call_private", 33, |frame| {
-            frame.line(34);
+        rt::frame!(m, "Mixed.call_private", 33, |_| {
             slf.call_method0("_Mixed__private")
         })
     }
@@ -192,8 +182,7 @@ pub mod mixed {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Mixed.uses_kept", 39, |frame| {
-            frame.line(40);
+        rt::frame!(m, "Mixed.uses_kept", 39, |_| {
             slf.call_method0("kept_greet")?
                 .add("|")?
                 .add(slf.call_method1("kept_static", (4,))?.str()?)
@@ -228,9 +217,8 @@ pub mod native_sub {
     // classes_mixed.py:67
     /// The body of `class NativeSub`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "NativeSub", 67, |frame| {
+        rt::frame!(ns, "NativeSub", 67, |_| {
             let __class__ = ns.class_cell();
-            frame.line(68);
             ns.set(
                 "greet",
                 rt::function!(
@@ -249,8 +237,7 @@ pub mod native_sub {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "NativeSub.greet", 68, |frame| {
-            frame.line(69);
+        rt::frame!(m, "NativeSub.greet", 68, |_| {
             rt::str(m.py(), "nsub:").add(rt::super_(__class__, slf)?.call_method0("greet")?)
         })
     }
@@ -262,8 +249,7 @@ pub mod outer {
     // classes_mixed.py:75
     /// The body of `class Outer`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Outer", 75, |frame| {
-            frame.line(76);
+        rt::frame!(ns, "Outer", 75, |_| {
             ns.set(
                 "Inner",
                 rt::class!(
@@ -284,7 +270,7 @@ pub mod outer {
         // classes_mixed.py:76
         /// The body of `class Outer.Inner`, run in its namespace `ns`.
         pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-            rt::frame!(ns, "Outer.Inner", 76, |frame| {
+            rt::frame!(ns, "Outer.Inner", 76, |_| {
                 // classes_mixed.py:77, kept as Python: generator expression with several for clauses at 78:24
                 rt::exec_python!(
                     ns,
@@ -294,7 +280,6 @@ pub mod outer {
             return next(s for s in [type(self).__qualname__] for _ in "1") + ":" + __class__.__qualname__
 "#
                 )?;
-                frame.line(80);
                 ns.set(
                     "_Inner__hidden",
                     rt::function!(
@@ -352,16 +337,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
         m.set_global("__doc__", "Method level mixed mode: methods and class body statements that can not\nbe lowered stay Python, in the class namespace, and still see `super()`,\n`__class__` and the class's private names.")?;
-        frame.line(6);
         m.set_global("Base", rt::class!(m, "Base"(), base::body, line = 6)?)?;
-        frame.line(14);
         m.set_global(
             "Mixed",
             rt::class!(m, "Mixed"(m.global("Base")?), mixed::body, line = 14)?,
         )?;
-        frame.line(48);
         m.set_global("m", m.global("Mixed")?.call0()?)?;
-        frame.line(49);
         rt::builtins::print(
             py,
             (
@@ -371,7 +352,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("m")?.call_method0("call_private")?,
             ),
         )?;
-        frame.line(50);
         rt::builtins::print(
             py,
             (
@@ -381,7 +361,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Mixed")?.call_method1("kept_static", (5,))?,
             ),
         )?;
-        frame.line(51);
         rt::builtins::print(
             py,
             (
@@ -394,7 +373,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .getattr("co_firstlineno")?,
             ),
         )?;
-        frame.line(52);
         rt::builtins::print(
             py,
             (
@@ -406,7 +384,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Mixed")?.getattr("__static_attributes__")?,
             ),
         )?;
-        frame.line(53);
         rt::builtins::print(
             py,
             (
@@ -431,7 +408,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Ok(None)
             })
         }
-        frame.line(54);
         rt::builtins::print(
             py,
             (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
@@ -439,27 +415,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 genexpr(m.global("Mixed")?.getattr("__dict__")?.try_iter()?)
             )?,))?,),
         )?;
-        frame.line(55);
         m.set_global("coro", m.global("m")?.call_method0("kept_async")?)?;
-        frame.line(57);
         match (|| m.global("coro")?.call_method1("send", (py.None(),)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("stop", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(59);
                 rt::builtins::print(py, (m.global("stop")?.getattr("value")?,))?;
                 m.unbind_global("stop")?;
             }
             Err(err) => return Err(err),
         }
-        frame.line(62);
         m.set_global(
             "KeptSub",
             rt::class!(m, "KeptSub"(m.global("Mixed")?), kept_sub::body, line = 62)?,
         )?;
-        frame.line(67);
         m.set_global(
             "NativeSub",
             rt::class!(
@@ -469,7 +440,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 67
             )?,
         )?;
-        frame.line(72);
         rt::builtins::print(
             py,
             (
@@ -480,9 +450,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtin(py, "issubclass")?.call1((m.global("KeptSub")?, m.global("Base")?))?,
             ),
         )?;
-        frame.line(75);
         m.set_global("Outer", rt::class!(m, "Outer"(), outer::body, line = 75)?)?;
-        frame.line(87);
         rt::builtins::print(
             py,
             (
@@ -512,15 +480,11 @@ def decorate(cls):
 "#
         )?;
         {
-            frame.line(98);
             let decorate = m.global("decorate")?;
-            frame.line(99);
             let decorated = rt::class!(m, "Decorated"(), decorated::body, line = 98)?;
-            frame.line(98);
             let decorated = decorate.call1((decorated,))?;
             m.set_global("Decorated", decorated)?;
         }
-        frame.line(104);
         rt::builtins::print(
             py,
             (
@@ -542,7 +506,6 @@ class WholeKept:
         conditional: int = 1
 "#
         )?;
-        frame.line(112);
         rt::builtins::print(
             py,
             (
@@ -550,23 +513,19 @@ class WholeKept:
                 m.global("WholeKept")?.getattr("__annotations__")?,
             ),
         )?;
-        frame.line(115);
         match (|| m.global("m")?.call_method0("failing"))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                frame.line(117);
                 m.set_global("traceback", rt::import(m, "traceback")?)?;
-                frame.line(119);
                 m.set_global(
                     "tb",
                     m.global("traceback")?
                         .getattr("extract_tb")?
                         .call1((m.global("err")?.getattr("__traceback__")?,))?,
                 )?;
-                frame.line(120);
                 let list = PyList::empty(py);
                 for f in m.global("tb")?.try_iter()? {
                     let f = f?;

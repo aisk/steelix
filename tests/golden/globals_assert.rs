@@ -5,22 +5,17 @@ use steelix_runtime as rt;
 
 // globals_assert.py:9
 pub fn bump<'py>(m: &rt::Module<'py>, step: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "bump", 9, |frame| {
-        frame.line(11);
+    rt::frame!(m, "bump", 9, |_| {
         m.set_global("counter", m.global("counter")?.add(step)?)?;
-        frame.line(12);
         m.set_global("counter", rt::iadd(&m.global("counter")?, 1)?)?;
-        frame.line(13);
         m.global("counter")
     })
 }
 
 // globals_assert.py:16
 pub fn remember<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "remember", 16, |frame| {
-        frame.line(17);
+    rt::frame!(m, "remember", 16, |_| {
         m.global("names")?.call_method1("append", (name,))?;
-        frame.line(18);
         Ok(rt::int(m.py(), m.global("names")?.len()?))
     })
 }
@@ -28,12 +23,9 @@ pub fn remember<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<
 // globals_assert.py:21
 pub fn reset<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "reset", 21, |frame| {
-        frame.line(23);
+    rt::frame!(m, "reset", 21, |_| {
         m.set_global("counter", 0)?;
-        frame.line(24);
         m.set_global("names", PyList::empty(py))?;
-        frame.line(25);
         m.del_global("counter")?;
         Ok(rt::none(py))
     })
@@ -43,15 +35,12 @@ pub fn reset<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn check<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "check", 28, |frame| {
-        frame.line(29);
         if !x.gt(0)? {
             return Err(frame.raise(PyAssertionError::new_err(())));
         }
-        frame.line(30);
         if !x.lt(100)? {
             return Err(frame.raise(PyAssertionError::new_err("too big")));
         }
-        frame.line(31);
         if !x.is_instance(&rt::builtin(py, "int")?)? {
             return Err(frame.raise(PyAssertionError::new_err((rt::fstring(
                 py,
@@ -65,8 +54,7 @@ pub fn check<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<
 
 // globals_assert.py:36
 pub fn define<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "define", 36, |frame| {
-        frame.line(38);
+    rt::frame!(m, "define", 36, |_| {
         m.set_global("late", "defined late")?;
         Ok(rt::none(m.py()))
     })
@@ -75,23 +63,19 @@ pub fn define<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 /// Executes the body of `globals_assert.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "The global statement, module globals used from functions, pass and assert.",
         )?;
-        frame.line(3);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        frame.line(5);
         m.set_global("counter", 0)?;
-        frame.line(6);
         m.set_global("names", PyList::empty(py))?;
         rt::def!(m, bump(step))?;
         rt::def!(m, remember(name))?;
         rt::def!(m, reset())?;
         rt::def!(m, check(x))?;
         rt::def!(m, define())?;
-        frame.line(41);
         rt::builtins::print(
             py,
             (
@@ -100,7 +84,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("counter")?,
             ),
         )?;
-        frame.line(42);
         rt::builtins::print(
             py,
             (
@@ -109,9 +92,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("names")?,
             ),
         )?;
-        frame.line(43);
         reset(m)?;
-        frame.line(44);
         rt::builtins::print(
             py,
             (
@@ -124,13 +105,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("names")?,
             ),
         )?;
-        frame.line(45);
         define(m)?;
-        frame.line(46);
         rt::builtins::print(py, (m.global("late")?,))?;
-        frame.line(47);
         rt::builtins::print(py, (check(m, &rt::int(py, 5))?,))?;
-        frame.line(48);
         check(m, &rt::int(py, 500))?;
         Ok(())
     })

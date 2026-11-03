@@ -87,7 +87,7 @@ class ComprehensionLowering:
             return []
         self.line = line
         self.markers += 1
-        return [line_marker(line)]
+        return [line_marker(line)] if self.ctx.module.traceback_lines else []
 
     def comprehension_variable(self: ExprLowering, name: str) -> ComprehensionVariable | None:
         for variables in reversed(self.comprehensions):

@@ -10,6 +10,7 @@ the file.
 
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import signal
@@ -111,7 +112,8 @@ def run_interrupted(args: list[str], cwd: Path) -> Outcome:
 
 @pytest.fixture(scope="session")
 def bin_workspace() -> Workspace:
-    workspace = make_workspace("bin", CASES, Mode.BIN, from_golden=False)
+    # With the line markers: tracebacks are compared with CPython's exactly.
+    workspace = make_workspace("bin", CASES, Mode.BIN, from_golden=False, traceback_lines=True)
     result = workspace.cargo("build", "--workspace")
     assert result.returncode == 0, result.stderr
     return workspace
@@ -246,3 +248,87 @@ def test_ext_module_matches_python(tmp_path: Path) -> None:
     expected = run([str(PYTHON), str(CASES_DIR / "fib.py")], tmp_path)
     actual = run([str(PYTHON), "-c", "import fib"], tmp_path)
     assert (actual.stdout, actual.returncode) == (expected.stdout, expected.returncode)
+
+
+# Built without `--traceback-lines`, the default: native frames report the
+# line of their `def` (design §9). Its own workspace, with the crates renamed
+# so that the binaries do not replace those of `bin_workspace`.
+DEFAULT_LINES_CASES = [
+    "uncaught",
+    "tracebacks",
+    "exceptions_uncaught",
+    "with_stmt",
+    "except_custom_line",
+]
+DEFAULT_SUFFIX = "_default_lines"
+# Prints line numbers of traceback entries, which are the def lines here.
+PRINTS_LINES = {"tracebacks"}
+FRAME = re.compile(r'^  File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<name>.+)$')
+
+
+@pytest.fixture(scope="module")
+def default_lines_workspace() -> Workspace:
+    workspace = make_workspace(
+        "bin-default-lines", DEFAULT_LINES_CASES, Mode.BIN, from_golden=False
+    )
+    for case in DEFAULT_LINES_CASES:
+        manifest = workspace.root / case / "Cargo.toml"
+        text = manifest.read_text()
+        text = text.replace(f'name = "{case}"', f'name = "{case}{DEFAULT_SUFFIX}"')
+        text = text.replace(f'name = "{case.replace("_", "-")}"', f'name = "{case}-default-lines"')
+        manifest.write_text(text)
+    result = workspace.cargo("build", "--workspace")
+    assert result.returncode == 0, result.stderr
+    return workspace
+
+
+def frame_lines(stderr: str) -> list[tuple[str, str, int]]:
+    """(file, function, line) of each frame of the tracebacks in `stderr`."""
+    frames = []
+    for line in stderr.splitlines():
+        match = FRAME.match(line)
+        if match is not None:
+            frames.append((match["file"], match["name"], int(match["line"])))
+    return frames
+
+
+def native_lines(source: Path) -> dict[str, set[int]]:
+    """The lines a native frame of each function may report without the
+    markers: its `def` line (the first decorator's, if any), 1 for the
+    module."""
+    tree = ast.parse(source.read_text())
+    lines: dict[str, set[int]] = {"<module>": {1}}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.ClassDef):
+            first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+            lines.setdefault(node.name, set()).add(first)
+    return lines
+
+
+@pytest.mark.parametrize("case", DEFAULT_LINES_CASES)
+def test_default_tracebacks_report_def_lines(
+    case: str, default_lines_workspace: Workspace, tmp_path: Path
+) -> None:
+    """Without the markers the program behaves the same and its tracebacks
+    have CPython's frames in the same order. Native frames report the line
+    of their `def` instead of the line of the statement."""
+    source = CASES_DIR / f"{case}.py"
+    expected = run([str(PYTHON), str(source)], tmp_path)
+    actual = run([str(E2E_DIR / "target" / "debug" / f"{case}{DEFAULT_SUFFIX}")], tmp_path)
+    if case in PRINTS_LINES:
+        assert len(actual.stdout.splitlines()) == len(expected.stdout.splitlines())
+    else:
+        assert actual.stdout == expected.stdout
+    assert actual.returncode == expected.returncode
+    assert actual.last_stderr_line == expected.last_stderr_line
+    expected_frames = frame_lines(expected.stderr)
+    actual_frames = frame_lines(actual.stderr)
+    assert [f[:2] for f in actual_frames] == [f[:2] for f in expected_frames]
+    allowed = native_lines(source)
+    moved = 0
+    for (_, name, cpython), (_, _, line) in zip(expected_frames, actual_frames, strict=True):
+        if line != cpython:
+            assert line in allowed.get(name, set()), (name, line, cpython)
+            moved += 1
+    if expected_frames:
+        assert moved, "no native frame reported its def line"

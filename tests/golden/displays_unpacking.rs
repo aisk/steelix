@@ -15,8 +15,7 @@ pub fn trace<'py>(
     label: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "trace", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "trace", 4, |_| {
         rt::builtins::print(m.py(), ("eval", label))?;
         Ok(value.clone())
     })
@@ -29,10 +28,8 @@ pub fn lists<'py>(
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "lists", 46, |frame| {
-        frame.line(47);
+    rt::frame!(m, "lists", 46, |_| {
         let first = rt::list!(py, *a, b)?.into_any();
-        frame.line(48);
         let second = rt::list!(
             py,
             trace(m, &rt::str(py, "x"), &rt::int(py, 0))?,
@@ -41,7 +38,6 @@ pub fn lists<'py>(
             *m.global("Noisy")?.call1(("c", "cd"))?
         )?
         .into_any();
-        frame.line(49);
         let nested = rt::list!(
             py,
             *rt::list!(py, *a)?,
@@ -50,7 +46,6 @@ pub fn lists<'py>(
         )?
         .into_any();
         // The comprehension needs statements first: they run after `Noisy` is iterated.
-        frame.line(51);
         let lazy = rt::list!(
             py,
             *m.global("Noisy")?.call1(("g", "g"))?,
@@ -74,9 +69,7 @@ pub fn lists<'py>(
             }
         )?
         .into_any();
-        frame.line(52);
         rt::builtins::print(py, (&first, &second, &nested, &lazy))?;
-        frame.line(53);
         Ok(rt::list!(py, *a)?.into_any())
     })
 }
@@ -84,10 +77,8 @@ pub fn lists<'py>(
 // displays_unpacking.py:56
 pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "tuples", 56, |frame| {
-        frame.line(57);
+    rt::frame!(m, "tuples", 56, |_| {
         let one = rt::tuple!(py, *a)?.into_any();
-        frame.line(58);
         rt::builtins::print(
             py,
             (
@@ -103,8 +94,7 @@ pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound
 // displays_unpacking.py:61
 pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "sets", 61, |frame| {
-        frame.line(62);
+    rt::frame!(m, "sets", 61, |_| {
         let s = rt::set!(
             py,
             trace(m, &rt::str(py, "k1"), &m.global("Key")?.call1(("k1",))?)?,
@@ -129,7 +119,6 @@ pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'
                 Ok(None)
             })
         }
-        frame.line(63);
         rt::builtins::print(
             py,
             (
@@ -154,10 +143,8 @@ pub fn dicts<'py>(
     v: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "dicts", 66, |frame| {
-        frame.line(67);
+    rt::frame!(m, "dicts", 66, |_| {
         let merged = rt::dict!(py, **d, ("k", v))?.into_any();
-        frame.line(68);
         let order = rt::dict!(
             py,
             ("a", 1),
@@ -166,7 +153,6 @@ pub fn dicts<'py>(
             ("b", 5)
         )?
         .into_any();
-        frame.line(69);
         let keys = rt::dict!(
             py,
             (
@@ -180,7 +166,6 @@ pub fn dicts<'py>(
             **d
         )?
         .into_any();
-        frame.line(70);
         rt::builtins::print(
             py,
             (
@@ -190,7 +175,6 @@ pub fn dicts<'py>(
                 &keys,
             ),
         )?;
-        frame.line(71);
         rt::builtins::print(
             py,
             (
@@ -207,64 +191,54 @@ pub fn dicts<'py>(
 pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "errors", 74, |frame| {
-        frame.line(75);
         // displays_unpacking.py:76
         fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(m, "errors.<locals>.<lambda>", 76, |_| Ok(rt::list!(
-                py,
-                *rt::int(py, 1)
-            )?
-            .into_any()))
+            rt::frame!(m, "errors.<locals>.<lambda>", 76, |_| {
+                Ok(rt::list!(py, *rt::int(py, 1))?.into_any())
+            })
         }
         // displays_unpacking.py:77
         fn lambda2<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(m, "errors.<locals>.<lambda>", 77, |_| Ok(rt::tuple!(
-                py,
-                *rt::none(py)
-            )?
-            .into_any()))
+            rt::frame!(m, "errors.<locals>.<lambda>", 77, |_| {
+                Ok(rt::tuple!(py, *rt::none(py))?.into_any())
+            })
         }
         // displays_unpacking.py:78
         fn lambda3<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(m, "errors.<locals>.<lambda>", 78, |_| Ok(rt::set!(
-                py,
-                *rt::float(py, 3.5)
-            )?
-            .into_any()))
+            rt::frame!(m, "errors.<locals>.<lambda>", 78, |_| {
+                Ok(rt::set!(py, *rt::float(py, 3.5))?.into_any())
+            })
         }
         // displays_unpacking.py:79
         fn lambda4<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(m, "errors.<locals>.<lambda>", 79, |_| Ok(rt::dict!(
-                py,
-                **rt::int(py, 1)
-            )?
-            .into_any()))
+            rt::frame!(m, "errors.<locals>.<lambda>", 79, |_| {
+                Ok(rt::dict!(py, **rt::int(py, 1))?.into_any())
+            })
         }
         // displays_unpacking.py:80
         fn lambda5<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
-            rt::frame!(m, "errors.<locals>.<lambda>", 80, |_| Ok(rt::dict!(
-                py,
-                ("a", 1),
-                **PyList::new(
+            rt::frame!(m, "errors.<locals>.<lambda>", 80, |_| {
+                Ok(rt::dict!(
                     py,
-                    [PyTuple::new(py, [&rt::str(py, "b"), &rt::int(py, 2)])?.as_any()]
+                    ("a", 1),
+                    **PyList::new(
+                        py,
+                        [PyTuple::new(py, [&rt::str(py, "b"), &rt::int(py, 2)])?.as_any()]
+                    )?
                 )?
-            )?
-            .into_any()))
+                .into_any())
+            })
         }
         // displays_unpacking.py:81
         fn lambda6<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "errors.<locals>.<lambda>", 81, |_| Ok(rt::list!(
-                m.py(),
-                0,
-                *m.global("Noisy")?.call1(("bad", 5))?
-            )?
-            .into_any()))
+            rt::frame!(m, "errors.<locals>.<lambda>", 81, |_| {
+                Ok(rt::list!(m.py(), 0, *m.global("Noisy")?.call1(("bad", 5))?)?.into_any())
+            })
         }
         for build in PyTuple::new(
             py,
@@ -280,19 +254,16 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .try_iter()?
         {
             let build = build?;
-            frame.line(84);
             match build.call0() {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
-                    frame.line(86);
                     rt::builtins::print(py, (e.get_type().getattr("__name__")?, &e))?;
                 }
                 Err(err) => return Err(err),
             }
             py.check_signals()?;
-            frame.line(75);
         }
         Ok(rt::none(py))
     })
@@ -305,10 +276,8 @@ pub mod noisy {
     // displays_unpacking.py:9
     /// The body of `class Noisy`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Noisy", 9, |frame| {
-            frame.line(10);
+        rt::frame!(ns, "Noisy", 9, |_| {
             ns.set("__doc__", "An iterable that reports when it is iterated.")?;
-            frame.line(12);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -317,7 +286,6 @@ pub mod noisy {
                     qualname = "Noisy.__init__"
                 )?,
             )?;
-            frame.line(16);
             ns.set(
                 "__iter__",
                 rt::function!(
@@ -337,10 +305,8 @@ pub mod noisy {
         label: &Bound<'py, PyAny>,
         items: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Noisy.__init__", 12, |frame| {
-            frame.line(13);
+        rt::frame!(m, "Noisy.__init__", 12, |_| {
             slf.setattr("label", label)?;
-            frame.line(14);
             slf.setattr("items", items)?;
             Ok(rt::none(m.py()))
         })
@@ -351,10 +317,8 @@ pub mod noisy {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Noisy.__iter__", 16, |frame| {
-            frame.line(17);
+        rt::frame!(m, "Noisy.__iter__", 16, |_| {
             rt::builtins::print(m.py(), ("iter", slf.getattr("label")?))?;
-            frame.line(18);
             Ok(slf.getattr("items")?.try_iter()?.into_any())
         })
     }
@@ -367,10 +331,8 @@ pub mod key {
     // displays_unpacking.py:21
     /// The body of `class Key`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Key", 21, |frame| {
-            frame.line(22);
+        rt::frame!(ns, "Key", 21, |_| {
             ns.set("__doc__", "A key that reports when it is hashed.")?;
-            frame.line(24);
             ns.set(
                 "__init__",
                 rt::function!(
@@ -379,12 +341,10 @@ pub mod key {
                     qualname = "Key.__init__"
                 )?,
             )?;
-            frame.line(27);
             ns.set(
                 "__hash__",
                 rt::function!(ns, __hash__(slf as "self"), qualname = "Key.__hash__")?,
             )?;
-            frame.line(31);
             ns.set(
                 "__eq__",
                 rt::function!(
@@ -393,7 +353,6 @@ pub mod key {
                     qualname = "Key.__eq__"
                 )?,
             )?;
-            frame.line(34);
             ns.set(
                 "__repr__",
                 rt::function!(ns, __repr__(slf as "self"), qualname = "Key.__repr__")?,
@@ -408,8 +367,7 @@ pub mod key {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Key.__init__", 24, |frame| {
-            frame.line(25);
+        rt::frame!(m, "Key.__init__", 24, |_| {
             slf.setattr("name", name)?;
             Ok(rt::none(m.py()))
         })
@@ -421,10 +379,8 @@ pub mod key {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Key.__hash__", 27, |frame| {
-            frame.line(28);
+        rt::frame!(m, "Key.__hash__", 27, |_| {
             rt::builtins::print(py, ("hash", slf.getattr("name")?))?;
-            frame.line(29);
             rt::builtin(py, "hash")?.call1((slf.getattr("name")?,))
         })
     }
@@ -435,8 +391,7 @@ pub mod key {
         slf: &Bound<'py, PyAny>,
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Key.__eq__", 31, |frame| {
-            frame.line(32);
+        rt::frame!(m, "Key.__eq__", 31, |_| {
             Ok(if other.is_instance(&m.global("Key")?)? {
                 other
                     .getattr("name")?
@@ -452,8 +407,7 @@ pub mod key {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Key.__repr__", 34, |frame| {
-            frame.line(35);
+        rt::frame!(m, "Key.__repr__", 34, |_| {
             rt::fstring(m.py(), ("Key(", slf.getattr("name")?.repr()?, ")"))
         })
     }
@@ -465,13 +419,11 @@ pub mod mapping {
     // displays_unpacking.py:38
     /// The body of `class Mapping`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Mapping", 38, |frame| {
-            frame.line(39);
+        rt::frame!(ns, "Mapping", 38, |_| {
             ns.set(
                 "keys",
                 rt::function!(ns, keys(slf as "self"), qualname = "Mapping.keys")?,
             )?;
-            frame.line(42);
             ns.set(
                 "__getitem__",
                 rt::function!(
@@ -486,8 +438,7 @@ pub mod mapping {
 
     // displays_unpacking.py:39
     pub fn keys<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Mapping.keys", 39, |frame| {
-            frame.line(40);
+        rt::frame!(m, "Mapping.keys", 39, |_| {
             Ok(PyList::new(m.py(), ["m1", "m2"])?.into_any())
         })
     }
@@ -498,8 +449,7 @@ pub mod mapping {
         slf: &Bound<'py, PyAny>,
         key: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Mapping.__getitem__", 42, |frame| {
-            frame.line(43);
+        rt::frame!(m, "Mapping.__getitem__", 42, |_| {
             key.call_method0("upper")
         })
     }
@@ -508,9 +458,8 @@ pub mod mapping {
 /// Executes the body of `displays_unpacking.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         rt::def!(m, trace(label, value))?;
-        frame.line(9);
         m.set_global(
             "Noisy",
             rt::class!(
@@ -521,12 +470,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 attributes = ["items", "label"]
             )?,
         )?;
-        frame.line(21);
         m.set_global(
             "Key",
             rt::class!(m, "Key"(), key::body, line = 21, attributes = ["name"])?,
         )?;
-        frame.line(38);
         m.set_global(
             "Mapping",
             rt::class!(m, "Mapping"(), mapping::body, line = 38)?,
@@ -536,24 +483,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, sets(a))?;
         rt::def!(m, dicts(d, v))?;
         rt::def!(m, errors())?;
-        frame.line(89);
         lists(m, PyList::new(py, [1, 2])?.as_any(), &rt::int(py, 3))?;
-        frame.line(90);
         tuples(m, &rt::str(py, "ab"))?;
-        frame.line(91);
         sets(m, PyList::new(py, [1, 2])?.as_any())?;
-        frame.line(92);
         dicts(m, [("x", 1)].into_py_dict(py)?.as_any(), &rt::int(py, 2))?;
-        frame.line(93);
         errors(m)?;
-        frame.line(94);
         rt::call!(
             rt::builtin(py, "print")?,
             *PyList::new(py, [1, 2])?,
             *rt::str(py, "ab"),
             sep = "-"
         )?;
-        frame.line(95);
         m.set_global(
             "values",
             rt::list!(
@@ -562,7 +502,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 *rt::str(py, "xy")
             )?,
         )?;
-        frame.line(96);
         rt::builtins::print(
             py,
             (

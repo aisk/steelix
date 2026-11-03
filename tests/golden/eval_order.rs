@@ -12,8 +12,7 @@ pub fn trace<'py>(
     label: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "trace", 4, |frame| {
-        frame.line(5);
+    rt::frame!(m, "trace", 4, |_| {
         rt::builtins::print(m.py(), ("eval", label))?;
         Ok(value.clone())
     })
@@ -21,12 +20,9 @@ pub fn trace<'py>(
 
 // eval_order.py:9
 pub fn make_box<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "make_box", 9, |frame| {
-        frame.line(10);
+    rt::frame!(m, "make_box", 9, |_| {
         let types = rt::import(m, "types")?;
-        frame.line(11);
         let r#box = types.call_method0("SimpleNamespace")?;
-        frame.line(12);
         r#box.setattr("x", 10)?;
         Ok(r#box)
     })
@@ -35,19 +31,14 @@ pub fn make_box<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:16
 pub fn subscripts<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "subscripts", 16, |frame| {
-        frame.line(17);
+    rt::frame!(m, "subscripts", 16, |_| {
         let data = PyList::new(py, [0, 0, 0])?.into_any();
-        frame.line(18);
         let value = trace(m, &rt::str(py, "value"), &rt::int(py, 5))?;
         data.set_item(trace(m, &rt::str(py, "index"), &rt::int(py, 1))?, value)?;
-        frame.line(19);
         let value = trace(m, &rt::str(py, "value"), &rt::int(py, 7))?;
         trace(m, &rt::str(py, "target"), &data)?
             .set_item(trace(m, &rt::str(py, "index"), &rt::int(py, 2))?, value)?;
-        frame.line(20);
         rt::builtins::print(py, (&data,))?;
-        frame.line(21);
         rt::builtins::print(
             py,
             (trace(m, &rt::str(py, "container"), &data)?.get_item(trace(
@@ -63,15 +54,11 @@ pub fn subscripts<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:24
 pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "attributes", 24, |frame| {
-        frame.line(25);
+    rt::frame!(m, "attributes", 24, |_| {
         let r#box = make_box(m)?;
-        frame.line(26);
         let value = trace(m, &rt::str(py, "value"), &rt::int(py, 20))?;
         trace(m, &rt::str(py, "object"), &r#box)?.setattr("x", value)?;
-        frame.line(27);
         rt::builtins::print(py, (r#box.getattr("x")?,))?;
-        frame.line(28);
         {
             let target = trace(m, &rt::str(py, "object"), &r#box)?;
             target.setattr(
@@ -82,7 +69,6 @@ pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 )?,
             )?;
         }
-        frame.line(29);
         rt::builtins::print(py, (r#box.getattr("x")?,))?;
         Ok(rt::none(py))
     })
@@ -91,10 +77,8 @@ pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:32
 pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "augmented", 32, |frame| {
-        frame.line(33);
+    rt::frame!(m, "augmented", 32, |_| {
         let data = PyList::new(py, [10, 20])?.into_any();
-        frame.line(34);
         {
             let target = trace(m, &rt::str(py, "target"), &data)?;
             let index = trace(m, &rt::str(py, "index"), &rt::int(py, 0))?;
@@ -106,20 +90,13 @@ pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 )?,
             )?;
         }
-        frame.line(35);
         rt::builtins::print(py, (&data,))?;
-        frame.line(36);
         let mut total = trace(m, &rt::str(py, "start"), &rt::int(py, 1))?;
-        frame.line(37);
         total = rt::iadd(&total, trace(m, &rt::str(py, "step"), &rt::int(py, 2))?)?;
-        frame.line(38);
         rt::builtins::print(py, (&total,))?;
-        frame.line(39);
         let mut items = PyList::new(py, [1])?.into_any();
         let alias = items.clone();
-        frame.line(41);
         items = rt::iadd(&items, PyList::new(py, [2])?)?;
-        frame.line(42);
         rt::builtins::print(py, (&alias, items.is(&alias)))?;
         Ok(rt::none(py))
     })
@@ -128,8 +105,7 @@ pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:45
 pub fn membership<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "membership", 45, |frame| {
-        frame.line(46);
+    rt::frame!(m, "membership", 45, |_| {
         let item = trace(m, &rt::str(py, "item"), &rt::int(py, 2))?;
         rt::builtins::print(
             py,
@@ -140,7 +116,6 @@ pub fn membership<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?
             .contains(item)?,),
         )?;
-        frame.line(47);
         let item = trace(m, &rt::str(py, "item"), &rt::int(py, 5))?;
         rt::builtins::print(
             py,
@@ -151,10 +126,8 @@ pub fn membership<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?
             .contains(item)?,),
         )?;
-        frame.line(48);
         let item = trace(m, &rt::str(py, "needle"), &rt::str(py, "b"))?;
         if trace(m, &rt::str(py, "haystack"), &rt::str(py, "abc"))?.contains(item)? {
-            frame.line(49);
             rt::builtins::print(py, ("contained",))?;
         }
         Ok(rt::none(py))
@@ -164,8 +137,7 @@ pub fn membership<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:52
 pub fn comparisons<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "comparisons", 52, |frame| {
-        frame.line(53);
+    rt::frame!(m, "comparisons", 52, |_| {
         {
             let lhs = trace(m, &rt::str(py, "a"), &rt::int(py, 1))?;
             let rhs = trace(m, &rt::str(py, "b"), &rt::int(py, 2))?;
@@ -179,7 +151,6 @@ pub fn comparisons<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 },),
             )?;
         }
-        frame.line(54);
         {
             let lhs = trace(m, &rt::str(py, "a"), &rt::int(py, 3))?;
             let rhs = trace(m, &rt::str(py, "b"), &rt::int(py, 2))?;
@@ -194,15 +165,12 @@ pub fn comparisons<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?;
         }
         {
-            frame.line(55);
             let lhs = trace(m, &rt::str(py, "low"), &rt::int(py, 0))?;
             let rhs = trace(m, &rt::str(py, "mid"), &rt::int(py, 5))?;
             if lhs.le(&rhs)? && rhs.le(trace(m, &rt::str(py, "high"), &rt::int(py, 10))?)? {
-                frame.line(56);
                 rt::builtins::print(py, ("in range",))?;
             }
         }
-        frame.line(57);
         rt::builtins::print(
             py,
             (trace(m, &rt::str(py, "x"), &rt::int(py, 1))?.rich_compare(
@@ -217,16 +185,14 @@ pub fn comparisons<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:60
 pub fn calls<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "calls", 60, |frame| {
+    rt::frame!(m, "calls", 60, |_| {
         let s = rt::str(py, "a,b");
-        frame.line(62);
         rt::builtins::print(
             py,
             (trace(m, &rt::str(py, "receiver"), &s)?
                 .getattr("split")?
                 .call1((trace(m, &rt::str(py, "separator"), &rt::str(py, ","))?,))?,),
         )?;
-        frame.line(63);
         rt::builtins::print(
             py,
             (
@@ -237,7 +203,6 @@ pub fn calls<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 ))?,
             ),
         )?;
-        frame.line(64);
         rt::builtins::print(
             py,
             (
@@ -255,7 +220,6 @@ pub fn calls<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 .into_py_dict(py)?,
             ),
         )?;
-        frame.line(65);
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -283,8 +247,7 @@ pub fn calls<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:68
 pub fn boolean<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "boolean", 68, |frame| {
-        frame.line(69);
+    rt::frame!(m, "boolean", 68, |_| {
         {
             let value = trace(m, &rt::str(py, "left"), &rt::int(py, 0))?;
             rt::builtins::print(
@@ -296,7 +259,6 @@ pub fn boolean<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 },),
             )?;
         }
-        frame.line(70);
         {
             let value = trace(m, &rt::str(py, "left"), &rt::int(py, 1))?;
             rt::builtins::print(
@@ -308,7 +270,6 @@ pub fn boolean<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 },),
             )?;
         }
-        frame.line(71);
         {
             let value = trace(m, &rt::str(py, "cond"), &rt::bool(py, true))?;
             let value2 = if value.is_truthy()? {
@@ -325,7 +286,6 @@ pub fn boolean<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 },),
             )?;
         }
-        frame.line(72);
         rt::builtins::print(
             py,
             (
@@ -343,10 +303,8 @@ pub fn boolean<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // eval_order.py:75
 pub fn unpacking<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "unpacking", 75, |frame| {
-        frame.line(76);
+    rt::frame!(m, "unpacking", 75, |_| {
         let data = PyList::new(py, [0, 0])?.into_any();
-        frame.line(77);
         let [item, item2] = rt::unpack(&trace(
             m,
             &rt::str(py, "pair"),
@@ -354,7 +312,6 @@ pub fn unpacking<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         )?)?;
         data.set_item(trace(m, &rt::str(py, "i"), &rt::int(py, 0))?, item)?;
         data.set_item(trace(m, &rt::str(py, "j"), &rt::int(py, 1))?, item2)?;
-        frame.line(78);
         rt::builtins::print(py, (&data,))?;
         Ok(rt::none(py))
     })
@@ -364,11 +321,9 @@ pub fn unpacking<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "tricky", 81, |frame| {
-        frame.line(82);
         let data = [("k", PyList::new(py, [0, 0])?.as_any())]
             .into_py_dict(py)?
             .into_any();
-        frame.line(83);
         {
             let split = trace(m, &rt::str(py, "obj"), &rt::str(py, "a-b"))?.getattr("split")?;
             let item2 = trace(m, &rt::str(py, "sep"), &rt::str(py, "-"))?;
@@ -379,7 +334,6 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 ))?,),
             )?;
         }
-        frame.line(84);
         {
             let value = trace(m, &rt::str(py, "first"), &rt::int(py, 1))?;
             let item2 = trace(m, &rt::str(py, "x"), &rt::int(py, 1))?;
@@ -398,7 +352,6 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 )?,),
             )?;
         }
-        frame.line(85);
         {
             let value = trace(m, &rt::str(py, "left"), &rt::int(py, 0))?;
             let value2 = if value.is_truthy()? {
@@ -408,13 +361,10 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             };
             data.set_item(trace(m, &rt::str(py, "key"), &rt::str(py, "k"))?, value2)?;
         }
-        frame.line(86);
         let value = trace(m, &rt::str(py, "value"), &rt::int(py, 7))?;
         data.get_item(trace(m, &rt::str(py, "outer"), &rt::str(py, "k"))?)?
             .set_item(trace(m, &rt::str(py, "inner"), &rt::int(py, 0))?, value)?;
-        frame.line(87);
         rt::builtins::print(py, (&data,))?;
-        frame.line(88);
         let result = {
             let lhs = trace(m, &rt::str(py, "a"), &rt::int(py, 1))?;
             let rhs = trace(m, &rt::str(py, "b"), &rt::int(py, 2))?;
@@ -425,7 +375,6 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 result2
             }
         };
-        frame.line(89);
         let item2 = trace(m, &rt::str(py, "x"), &rt::int(py, 2))?;
         rt::builtins::print(
             py,
@@ -438,7 +387,6 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 },
             ),
         )?;
-        frame.line(90);
         let value = rt::format(&trace(m, &rt::str(py, "p1"), &rt::int(py, 1))?, "")?;
         let item2 = trace(m, &rt::str(py, "needle"), &rt::int(py, 2))?;
         rt::builtins::print(
@@ -458,7 +406,6 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 ),
             )?,),
         )?;
-        frame.line(91);
         {
             let target = data.get_item(trace(m, &rt::str(py, "key"), &rt::str(py, "k"))?)?;
             let index = trace(m, &rt::str(py, "index"), &rt::int(py, 1))?;
@@ -473,11 +420,9 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 )?,
             )?;
         }
-        frame.line(92);
         rt::builtins::print(py, (&data,))?;
         let mut n = rt::int(py, 0);
         loop {
-            frame.line(94);
             let item2 = trace(m, &rt::str(py, "n"), &n)?;
             if !trace(
                 m,
@@ -488,24 +433,18 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             {
                 break;
             }
-            frame.line(95);
             n = n.add(1)?;
             py.check_signals()?;
         }
-        frame.line(96);
         let item3 = trace(m, &rt::str(py, "x"), &rt::int(py, 0))?;
         if trace(m, &rt::str(py, "xs"), PyList::empty(py).as_any())?.contains(item3)? {
-            frame.line(97);
             rt::builtins::print(py, ("first",))?;
         } else {
-            frame.line(98);
             let item4 = trace(m, &rt::str(py, "y"), &rt::int(py, 1))?;
             if trace(m, &rt::str(py, "ys"), PyList::new(py, [1])?.as_any())?.contains(item4)? {
-                frame.line(99);
                 rt::builtins::print(py, ("second",))?;
             }
         }
-        frame.line(100);
         let item3 = trace(m, &rt::str(py, "x"), &rt::int(py, 1))?;
         if !trace(m, &rt::str(py, "xs"), PyList::new(py, [1])?.as_any())?.contains(item3)? {
             return Err(frame.raise(PyAssertionError::new_err((trace(
@@ -515,13 +454,10 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?
             .unbind(),))));
         }
-        frame.line(101);
         data.get_item(trace(m, &rt::str(py, "del key"), &rt::str(py, "k"))?)?
             .del_item(trace(m, &rt::str(py, "del index"), &rt::int(py, 0))?)?;
         data.del_item(trace(m, &rt::str(py, "again"), &rt::str(py, "k"))?)?;
-        frame.line(102);
         rt::builtins::print(py, (&data, &n))?;
-        frame.line(103);
         for item in trace(
             m,
             &rt::str(py, "iterable"),
@@ -530,10 +466,8 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .try_iter()?
         {
             let item = item?;
-            frame.line(104);
             rt::builtins::print(py, ("item", &item))?;
             py.check_signals()?;
-            frame.line(103);
         }
         Ok(rt::none(py))
     })
@@ -541,8 +475,7 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // eval_order.py:107
 pub fn bump<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "bump", 107, |frame| {
-        frame.line(109);
+    rt::frame!(m, "bump", 107, |_| {
         m.set_global("counter", 100)?;
         Ok(rt::int(m.py(), 1))
     })
@@ -551,7 +484,7 @@ pub fn bump<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 /// Executes the body of `eval_order.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
             "Side effects must happen in Python's evaluation order.",
@@ -568,33 +501,19 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, unpacking())?;
         rt::def!(m, tricky())?;
         rt::def!(m, bump())?;
-        frame.line(113);
         subscripts(m)?;
-        frame.line(114);
         attributes(m)?;
-        frame.line(115);
         augmented(m)?;
-        frame.line(116);
         membership(m)?;
-        frame.line(117);
         comparisons(m)?;
-        frame.line(118);
         calls(m)?;
-        frame.line(119);
         boolean(m)?;
-        frame.line(120);
         unpacking(m)?;
-        frame.line(121);
         tricky(m)?;
-        frame.line(122);
         m.set_global("counter", 5)?;
-        frame.line(123);
         m.set_global("counter", rt::iadd(&m.global("counter")?, bump(m)?)?)?;
-        frame.line(124);
         rt::builtins::print(py, (m.global("counter")?,))?;
-        frame.line(125);
         m.set_global("counter", PyList::new(py, [0])?)?;
-        frame.line(126);
         {
             let counter = m.global("counter")?;
             let index = trace(m, &rt::str(py, "module index"), &rt::int(py, 0))?;
@@ -606,7 +525,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             )?;
         }
-        frame.line(127);
         rt::builtins::print(py, (m.global("counter")?,))?;
         Ok(())
     })

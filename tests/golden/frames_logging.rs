@@ -10,11 +10,9 @@ use steelix_runtime as rt;
 
 // frames_logging.py:15
 pub fn step<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "step", 15, |frame| {
-        frame.line(16);
+    rt::frame!(m, "step", 15, |_| {
         m.global("logging")?
             .call_method1("warning", ("native step %d", n))?;
-        frame.line(17);
         n.add(1)
     })
 }
@@ -30,8 +28,7 @@ pub fn show_warning<'py>(
     line: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "show_warning", 27, |frame| {
-        frame.line(28);
+    rt::frame!(m, "show_warning", 27, |_| {
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -59,8 +56,7 @@ pub fn warn_native<'py>(
     m: &rt::Module<'py>,
     message: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "warn_native", 35, |frame| {
-        frame.line(36);
+    rt::frame!(m, "warn_native", 35, |_| {
         m.global("warnings")?.call_method1("warn", (message,))?;
         Ok(rt::none(m.py()))
     })
@@ -69,18 +65,14 @@ pub fn warn_native<'py>(
 /// Executes the body of `frames_logging.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |frame| {
+    rt::frame!(m, "<module>", 1, |_| {
         // Native functions get a traceback frame only when an exception passes, so
         // logging and warnings attribute their records to the nearest Python frame
         // (design §12): logging's own frame, the frame of kept code calling the
         // native function, or none. `KNOWN_DIFFERENCES` in tests/test_e2e.py has it.
-        frame.line(5);
         m.set_global("logging", rt::import(m, "logging")?)?;
-        frame.line(6);
         m.set_global("sys", rt::import(m, "sys")?)?;
-        frame.line(7);
         m.set_global("warnings", rt::import(m, "warnings")?)?;
-        frame.line(9);
         rt::call!(
             m.global("logging")?.getattr("basicConfig")?,
             stream = m.global("sys")?.getattr("stdout")?,
@@ -110,11 +102,9 @@ def kept_step(n):
                 line = py.None()
             )
         )?;
-        frame.line(31);
         let show_warning2 = m.global("show_warning")?;
         m.global("warnings")?
             .setattr("showwarning", show_warning2)?;
-        frame.line(32);
         m.global("warnings")?
             .call_method1("simplefilter", ("always",))?;
         rt::def!(m, warn_native(message))?;
@@ -140,15 +130,10 @@ def kept_calls_native():
             warn_native("from native code, called by kept code")
 "#
         )?;
-        frame.line(51);
         step(m, &rt::int(py, 1))?;
-        frame.line(52);
         m.global("kept_step")?.call1((2,))?;
-        frame.line(53);
         warn_native(m, &rt::str(py, "from native code"))?;
-        frame.line(54);
         m.global("warn_kept")?.call0()?;
-        frame.line(55);
         m.global("kept_calls_native")?.call0()?;
         Ok(())
     })
