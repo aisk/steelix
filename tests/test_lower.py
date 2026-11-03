@@ -43,7 +43,22 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
         ("x: int = 1\n", "annotated assignment at module level", 1, 1),
         ("def f(a):\n    a.b: int\n", "annotated assignment", 2, 5),
         ("from os import *\n", "star import", 1, 1),
-        ("async def f():\n    pass\n", "async function", 1, 1),
+        ("async def f():\n    yield 1\n", "asynchronous generator", 1, 1),
+        ("async def f(xs):\n    return [await x for x in xs]\n", "await in a comprehension", 2, 13),
+        ("def f():\n    return lambda: (yield)\n", "yield in a lambda", 2, 21),
+        ("@types.coroutine\ndef f():\n    yield\n", "types.coroutine generator", 2, 1),
+        (
+            "async def f():\n    try:\n        pass\n    except await g():\n        pass\n",
+            "await in an except clause",
+            4,
+            12,
+        ),
+        (
+            "async def f():\n    def g(x=await h()):\n        pass\n",
+            "await in a decorator or default",
+            2,
+            13,
+        ),
         ("match x:\n    case 1:\n        pass\n", "match statement", 1, 1),
         ("def f():\n    class A:\n        pass\n", "class definition in a function", 2, 5),
         ("class A[T]:\n    pass\n", "type parameters", 1, 1),
@@ -302,7 +317,7 @@ def test_assigned_defaults_are_read_from_the_function() -> None:
 def test_python_kept_def_is_called_through_globals() -> None:
     out = lower(
         """
-        def gen(n):
+        async def gen(n):
             yield n
 
         def use():
@@ -311,7 +326,7 @@ def test_python_kept_def_is_called_through_globals() -> None:
     )
     assert "pub fn gen" not in out
     assert 'm.global("gen")?.call1((1,))' in out
-    assert "// m.py:2, kept as Python: yield at 3:5\n" in out
+    assert "// m.py:2, kept as Python: asynchronous generator at 2:1\n" in out
     assert "line = 2,\n" in out
 
 
@@ -327,7 +342,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
             pass
         ys = (i for i in x for j in x)  # squares
         zs = t"{ys}"
-        def gen():
+        async def gen():
             yield 1
         print(x)
         """
@@ -341,7 +356,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
     assert f'"\n{simple}"' in out
     reasons = "generator expression with several for clauses at 7:6, t-string at 8:6"
     assert f"// m.py:7, kept as Python: {reasons}\n" in out
-    assert "// m.py:9, kept as Python: yield at 10:5\n" in out
+    assert "// m.py:9, kept as Python: asynchronous generator at 9:1\n" in out
 
 
 def test_python_statement_after_semicolon() -> None:
@@ -393,7 +408,7 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
         import sys
         if len(sys.argv) > 1:
             x = 1
-            def f():
+            async def f():
                 yield x
         else:
             ys = [t'']
@@ -404,7 +419,7 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
     assert 'm.set_global("x", 1)?;' in out
     assert 'rt::builtins::print(m.py(), (m.global("ys")?,))?;' in out
     # Indented as in the file.
-    assert 'r#"\n    def f():\n        yield x\n"#' in out
+    assert 'r#"\n    async def f():\n        yield x\n"#' in out
     assert "r#\"\n    ys = [t'']\n\"#" in out
 
 
@@ -528,3 +543,35 @@ def test_traceback_lines_marks_statements() -> None:
 def test_single_expression_frame_keeps_braces() -> None:
     out = lower("def double(x):\n    return x * 2\n")
     assert 'rt::frame!(m, "double", 1, |_| { x.mul(2) })' in out
+
+
+def test_coroutines_are_awaited_in_place_only_by_await() -> None:
+    out = lower(
+        """
+        import asyncio
+        async def f(x):
+            await asyncio.sleep(0)
+            return await f(x)
+        def g():
+            yield 1
+        async def use():
+            coro = f(1)
+            yield_from = g()
+            return await f(2), await coro
+        def gen():
+            yield from g()
+            return list(g())
+        """
+    )
+    assert "pub async fn f<'py>(" in out
+    # Bound first: `m.global("asyncio")?` would live across the await.
+    assert 'let sleep = m.global("asyncio")?.method1("sleep", (0,))?;\n' in out
+    assert "rt::await_(sleep).await?;" in out
+    assert "Box::pin(f(m, x)).await" in out
+    assert 'let coro = m.global("f")?.call1((1,))?;' in out
+    assert 'm.global("g")?.call0()?' in out
+    assert "f(m, &rt::int(py, 2)).await?" in out
+    assert "rt::await_(&coro).await?" in out
+    assert "g(m).await?;" in out
+    assert "rt::def!(m, async f(x))?;" in out
+    assert "rt::def!(m, gen g())?;" in out

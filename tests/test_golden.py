@@ -16,7 +16,14 @@ from steelix.emit.crate import render_module
 from steelix.frontend.parse import parse_file
 
 TRACEBACK_LINES_DIR = GOLDEN_DIR / "traceback_lines"
-TRACEBACK_LINES_CASES = ["fib", "control_flow", "try_except", "classes_basic"]
+TRACEBACK_LINES_CASES = [
+    "fib",
+    "control_flow",
+    "try_except",
+    "classes_basic",
+    "async_with_for",
+    "generators",
+]
 
 
 def check_golden(actual: str, golden: Path, update_golden: bool) -> None:

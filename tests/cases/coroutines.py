@@ -1,6 +1,5 @@
-"""Native coroutines and generators (PoC, design §8): every function in the
-first half is hand-written as native Rust in `src/coroutines.rs`, the way
-steelix would generate it; the drivers in the second half stay Python."""
+"""Native coroutines and generators (design §8): the program the M13 PoC
+wrote by hand in Rust, driven by asyncio, by hand and by the GC."""
 
 import asyncio
 import collections.abc
@@ -278,9 +277,11 @@ async def recovered(tag):
         print("recovered finally", tag)
 
 
-# --- kept as Python ---
+# --- CPython's own, mixed with the native ones ---
 
 
+exec(
+    """
 async def py_awaits(awaitable):
     return await awaitable
 
@@ -302,6 +303,8 @@ def py_inner():
     finally:
         print("inner finally")
     return "inner result"
+"""
+)
 
 
 class Manager:
@@ -423,10 +426,15 @@ try:
 except TypeError as e:
     print("TypeError:", e)
 
-try:
-    echo().send(1)
-except TypeError as e:
-    print("TypeError:", e)
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    try:
+        echo().send(1)
+    except TypeError as e:
+        print("TypeError:", e)
+    gc.collect()
+    for w in caught:
+        print("warning", w.category.__name__, w.message)
 
 c = echo()
 try:
@@ -459,7 +467,8 @@ with warnings.catch_warnings(record=True) as caught:
     c.close()
     del c
     for w in caught:
-        print("warning", w.category.__name__, w.message, w.lineno)
+        # The line is 0 for a warning without a Python frame (design §12).
+        print("warning", w.category.__name__, w.message)
 with warnings.catch_warnings():
     warnings.simplefilter("error")
     c = add_later(1, 2)

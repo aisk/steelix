@@ -20,6 +20,7 @@ import ast
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+from steelix.frontend.desugar import AsyncFor, AsyncWith
 from steelix.frontend.scope import walk_scope
 
 
@@ -49,6 +50,16 @@ class Region:
                         parts.append(item.optional_vars)
                 return parts + list(body)
         raise AssertionError(f"bad region {self!r}")
+
+
+_SUSPENDING = (ast.Await, ast.Yield, ast.YieldFrom, AsyncFor, AsyncWith)
+
+
+def suspends(nodes: list[ast.AST]) -> bool:
+    """Whether code of `nodes` (not of functions defined there) can
+    suspend a coroutine or generator: `await`, `yield`, `async for` or
+    `async with`. In a region that does, the closure is `async` (design §8)."""
+    return any(isinstance(n, _SUSPENDING) for node in nodes for n in walk_scope(node))
 
 
 def expression_body(stmt: ast.Try) -> ast.expr | None:

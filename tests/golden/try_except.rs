@@ -1,7 +1,6 @@
 //! Parts of `try_except.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 196, `def gen`: yield
 //! - line 222, `def groups`: try/except*
 //! - line 232, `def name_after_handler`: except-as name used outside its handler
 
@@ -463,6 +462,14 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     })
 }
 
+// try_except.py:196
+pub async fn r#gen<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "gen", 196, async |frame| {
+        rt::yield_(rt::int(m.py(), 1)).await?;
+        Err(frame.raise(m.global("ValueError")?.call1(("from generator",))?))
+    })
+}
+
 // try_except.py:201
 pub fn generator_into_native<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
@@ -577,16 +584,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, bare_except_catches_everything(exc))?;
         rt::def!(m, exceptions_in_else_and_handlers())?;
         rt::def!(m, stop_iteration())?;
-        // try_except.py:196, kept as Python: yield at 197:5
-        rt::exec_python!(
-            m,
-            line = 196,
-            r#"
-def gen():
-    yield 1
-    raise ValueError("from generator")
-"#
-        )?;
+        rt::def!(m, gen r#gen())?;
         rt::def!(m, generator_into_native())?;
         rt::def!(m, loop_with_try(items))?;
         // try_except.py:222, kept as Python: try/except* at 224:5

@@ -5,7 +5,6 @@
 //! - line 22, `def kept_greet`: generator expression with several for clauses
 //! - line 26, `def kept_static`: generator expression with several for clauses
 //! - line 30, `def __private`: generator expression with several for clauses
-//! - line 36, `def kept_async`: async function
 //! - line 42, `assign` statement: generator expression with several for clauses
 //! - line 44, `def failing`: generator expression with several for clauses
 //! - line 63, `def greet`: generator expression with several for clauses
@@ -99,15 +98,7 @@ pub mod mixed {
 "#
             )?;
             rt::def!(ns, call_private(slf as "self"))?;
-            // classes_mixed.py:36, kept as Python: async function at 36:5
-            rt::exec_python!(
-                ns,
-                line = 36,
-                r#"
-    async def kept_async(self):
-        return "async"
-"#
-            )?;
+            rt::def!(ns, async kept_async(slf as "self"))?;
             rt::def!(ns, uses_kept(slf as "self"))?;
             // classes_mixed.py:42, kept as Python: generator expression with several for clauses at 42:18
             rt::exec_python!(
@@ -148,6 +139,16 @@ pub mod mixed {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Mixed.call_private", 33, |_| {
             slf.method0("_Mixed__private")
+        })
+    }
+
+    // classes_mixed.py:36
+    pub async fn kept_async<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Mixed.kept_async", 36, async |_| {
+            Ok(rt::str(m.py(), "async"))
         })
     }
 

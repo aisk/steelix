@@ -1,8 +1,5 @@
-//! Parts of `json/encoder.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 268, `def _make_iterencode`: yield, yield from
-
+use pyo3::exceptions::PyBaseException;
+use pyo3::exceptions::PyGeneratorExit;
 use pyo3::exceptions::PyImportError;
 use pyo3::exceptions::PyKeyError;
 use pyo3::exceptions::PyTypeError;
@@ -97,6 +94,479 @@ pub fn py_encode_basestring_ascii<'py>(
         rt::str(m.py(), "\"")
             .add(m.global("ESCAPE_ASCII")?.method1("sub", (&replace, s))?)?
             .add("\"")
+    })
+}
+
+// # HACK: hand-optimized bytecode; turn globals into locals
+// json/encoder.py:268
+pub fn _make_iterencode<'py>(
+    m: &rt::Module<'py>,
+    markers: &Bound<'py, PyAny>,
+    _default: &Bound<'py, PyAny>,
+    _encoder: &Bound<'py, PyAny>,
+    _indent: &Bound<'py, PyAny>,
+    _floatstr: &Bound<'py, PyAny>,
+    _key_separator: &Bound<'py, PyAny>,
+    _item_separator: &Bound<'py, PyAny>,
+    _sort_keys: &Bound<'py, PyAny>,
+    _skipkeys: &Bound<'py, PyAny>,
+    _one_shot: &Bound<'py, PyAny>,
+    ValueError: &Bound<'py, PyAny>,
+    dict: &Bound<'py, PyAny>,
+    float: &Bound<'py, PyAny>,
+    id: &Bound<'py, PyAny>,
+    int: &Bound<'py, PyAny>,
+    isinstance: &Bound<'py, PyAny>,
+    list: &Bound<'py, PyAny>,
+    str: &Bound<'py, PyAny>,
+    tuple: &Bound<'py, PyAny>,
+    _intstr: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "_make_iterencode", 268, |_| {
+        let _iterencode_list = rt::Cell::empty(py, "_iterencode_list")?;
+        let _iterencode_dict = rt::Cell::empty(py, "_iterencode_dict")?;
+        let _iterencode = rt::Cell::empty(py, "_iterencode")?;
+        // json/encoder.py:283
+        async fn _iterencode_list_<'py>(
+            m: &rt::Module<'py>,
+            markers: &Bound<'py, PyAny>,
+            id: &Bound<'py, PyAny>,
+            ValueError: &Bound<'py, PyAny>,
+            _indent: &Bound<'py, PyAny>,
+            _item_separator: &Bound<'py, PyAny>,
+            isinstance: &Bound<'py, PyAny>,
+            str: &Bound<'py, PyAny>,
+            _encoder: &Bound<'py, PyAny>,
+            int: &Bound<'py, PyAny>,
+            _intstr: &Bound<'py, PyAny>,
+            float: &Bound<'py, PyAny>,
+            _floatstr: &Bound<'py, PyAny>,
+            list: &Bound<'py, PyAny>,
+            tuple: &Bound<'py, PyAny>,
+            _iterencode_list: &rt::Cell<'py>,
+            dict: &Bound<'py, PyAny>,
+            _iterencode_dict: &rt::Cell<'py>,
+            _iterencode: &rt::Cell<'py>,
+            lst: &Bound<'py, PyAny>,
+            _current_indent_level: &Bound<'py, PyAny>,
+        ) -> PyResult<Bound<'py, PyAny>> {
+            let py = m.py();
+            rt::frame!(
+                m,
+                "_make_iterencode.<locals>._iterencode_list",
+                283,
+                async |frame| {
+                    let mut _current_indent_level = _current_indent_level.clone();
+                    if !lst.is_truthy()? {
+                        rt::yield_(rt::str(py, "[]")).await?;
+                        return Ok(rt::none(py));
+                    }
+                    let mut markerid: Option<Bound<'py, PyAny>> = None;
+                    if !markers.is_none() {
+                        markerid = Some(id.call1((lst,))?);
+                        if markers.contains(rt::local(&markerid, "markerid")?)? {
+                            return Err(
+                                frame.raise(ValueError.call1(("Circular reference detected",))?)
+                            );
+                        }
+                        markers.set_item(rt::local(&markerid, "markerid")?, lst)?;
+                    }
+                    let mut buf = rt::str(py, "[");
+                    let newline_indent: Bound<'py, PyAny>;
+                    let separator: Bound<'py, PyAny>;
+                    if !_indent.is_none() {
+                        _current_indent_level = rt::iadd(&_current_indent_level, 1)?;
+                        newline_indent =
+                            rt::str(py, "\n").add(_indent.mul(&_current_indent_level)?)?;
+                        separator = _item_separator.add(&newline_indent)?;
+                        buf = rt::iadd(&buf, &newline_indent)?;
+                    } else {
+                        newline_indent = rt::none(py);
+                        separator = _item_separator.clone();
+                    }
+                    for item in rt::builtin(py, "enumerate")?.call1((lst,))?.try_iter()? {
+                        let [i, value] = rt::unpack(&item?)?;
+                        if i.is_truthy()? {
+                            buf = separator.clone();
+                        }
+                        let result: PyResult<()> = async {
+                            let chunks: Bound<'py, PyAny>;
+                            if isinstance.call1((&value, str))?.is_truthy()? {
+                                rt::yield_(buf.add(_encoder.call1((&value,))?)?).await?;
+                            } else if value.is_none() {
+                                rt::yield_(buf.add("null")?).await?;
+                            } else if value.is(rt::bool(py, true)) {
+                                rt::yield_(buf.add("true")?).await?;
+                            } else if value.is(rt::bool(py, false)) {
+                                rt::yield_(buf.add("false")?).await?;
+                            } else if isinstance.call1((&value, int))?.is_truthy()? {
+                                // Subclasses of int/float may override __repr__, but we still
+                                // want to encode them as integers/floats in JSON. One example
+                                // within the standard library is IntEnum.
+                                rt::yield_(buf.add(_intstr.call1((&value,))?)?).await?;
+                            } else if isinstance.call1((&value, float))?.is_truthy()? {
+                                // see comment above for int
+                                rt::yield_(buf.add(_floatstr.call1((&value,))?)?).await?;
+                            } else {
+                                rt::yield_(&buf).await?;
+                                if isinstance
+                                    .call1((&value, PyTuple::new(py, [list, tuple])?))?
+                                    .is_truthy()?
+                                {
+                                    chunks = _iterencode_list
+                                        .get()?
+                                        .call1((&value, &_current_indent_level))?;
+                                } else if isinstance.call1((&value, dict))?.is_truthy()? {
+                                    chunks = _iterencode_dict
+                                        .get()?
+                                        .call1((&value, &_current_indent_level))?;
+                                } else {
+                                    chunks = _iterencode
+                                        .get()?
+                                        .call1((&value, &_current_indent_level))?;
+                                }
+                                rt::yield_from(&chunks).await?;
+                            }
+                            Ok(())
+                        }
+                        .await;
+                        match result {
+                            Ok(()) => {}
+                            Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
+                                let _handling = rt::Handling::new(&frame.catch(err));
+                                return Err(frame.reraise());
+                            }
+                            Err(err) if err.is_instance_of::<PyBaseException>(py) => {
+                                let exc = frame.catch(err);
+                                let _handling = rt::Handling::new(&exc);
+                                exc.attr("add_note")?.call1((rt::fstring(
+                                    py,
+                                    (
+                                        "when serializing ",
+                                        rt::format(&lst.get_type().attr("__name__")?, "")?,
+                                        " item ",
+                                        rt::format(&i, "")?,
+                                    ),
+                                )?,))?;
+                                return Err(frame.reraise());
+                            }
+                            Err(err) => return Err(err),
+                        }
+                        py.check_signals()?;
+                    }
+                    if !newline_indent.is_none() {
+                        _current_indent_level = rt::isub(&_current_indent_level, 1)?;
+                        let value2 = rt::str(py, "\n").add(_indent.mul(&_current_indent_level)?)?;
+                        rt::yield_(value2).await?;
+                    }
+                    rt::yield_(rt::str(py, "]")).await?;
+                    if !markers.is_none() {
+                        markers.del_item(rt::local(&markerid, "markerid")?)?;
+                    }
+                    Ok(rt::none(py))
+                }
+            )
+        }
+        _iterencode_list.set(rt::function!(
+            m,
+            gen _iterencode_list_[markers, id, ValueError, _indent, _item_separator, isinstance, str, _encoder, int, _intstr, float, _floatstr, list, tuple, &_iterencode_list, dict, &_iterencode_dict, &_iterencode](lst, _current_indent_level),
+            qualname = "_make_iterencode.<locals>._iterencode_list"
+        )?)?;
+        // json/encoder.py:342
+        async fn _iterencode_dict_<'py>(
+            m: &rt::Module<'py>,
+            markers: &Bound<'py, PyAny>,
+            id: &Bound<'py, PyAny>,
+            ValueError: &Bound<'py, PyAny>,
+            _indent: &Bound<'py, PyAny>,
+            _item_separator: &Bound<'py, PyAny>,
+            _sort_keys: &Bound<'py, PyAny>,
+            isinstance: &Bound<'py, PyAny>,
+            str: &Bound<'py, PyAny>,
+            float: &Bound<'py, PyAny>,
+            _floatstr: &Bound<'py, PyAny>,
+            int: &Bound<'py, PyAny>,
+            _intstr: &Bound<'py, PyAny>,
+            _skipkeys: &Bound<'py, PyAny>,
+            _encoder: &Bound<'py, PyAny>,
+            _key_separator: &Bound<'py, PyAny>,
+            list: &Bound<'py, PyAny>,
+            tuple: &Bound<'py, PyAny>,
+            _iterencode_list: &rt::Cell<'py>,
+            dict: &Bound<'py, PyAny>,
+            _iterencode_dict: &rt::Cell<'py>,
+            _iterencode: &rt::Cell<'py>,
+            dct: &Bound<'py, PyAny>,
+            _current_indent_level: &Bound<'py, PyAny>,
+        ) -> PyResult<Bound<'py, PyAny>> {
+            let py = m.py();
+            rt::frame!(
+                m,
+                "_make_iterencode.<locals>._iterencode_dict",
+                342,
+                async |frame| {
+                    let mut _current_indent_level = _current_indent_level.clone();
+                    if !dct.is_truthy()? {
+                        rt::yield_(rt::str(py, "{}")).await?;
+                        return Ok(rt::none(py));
+                    }
+                    let mut markerid: Option<Bound<'py, PyAny>> = None;
+                    if !markers.is_none() {
+                        markerid = Some(id.call1((dct,))?);
+                        if markers.contains(rt::local(&markerid, "markerid")?)? {
+                            return Err(
+                                frame.raise(ValueError.call1(("Circular reference detected",))?)
+                            );
+                        }
+                        markers.set_item(rt::local(&markerid, "markerid")?, dct)?;
+                    }
+                    rt::yield_(rt::str(py, "{")).await?;
+                    let newline_indent: Bound<'py, PyAny>;
+                    let item_separator = if !_indent.is_none() {
+                        _current_indent_level = rt::iadd(&_current_indent_level, 1)?;
+                        newline_indent =
+                            rt::str(py, "\n").add(_indent.mul(&_current_indent_level)?)?;
+                        _item_separator.add(&newline_indent)?
+                    } else {
+                        newline_indent = rt::none(py);
+                        _item_separator.clone()
+                    };
+                    let mut first = true;
+                    let items = if _sort_keys.is_truthy()? {
+                        rt::builtin(py, "sorted")?.call1((dct.method0("items")?,))?
+                    } else {
+                        dct.method0("items")?
+                    };
+                    let mut key: Bound<'py, PyAny>;
+                    let mut value: Bound<'py, PyAny>;
+                    for item in items.try_iter()? {
+                        [key, value] = rt::unpack(&item?)?;
+                        if isinstance.call1((&key, str))?.is_truthy()? {
+                        } else {
+                            // JavaScript is weakly typed for these, so it makes sense to
+                            // also allow them.  Many encoders seem to do something like this.
+                            if isinstance.call1((&key, float))?.is_truthy()? {
+                                // see comment for int/float in _make_iterencode
+                                key = _floatstr.call1((&key,))?;
+                            } else if key.is(rt::bool(py, true)) {
+                                key = rt::str(py, "true");
+                            } else if key.is(rt::bool(py, false)) {
+                                key = rt::str(py, "false");
+                            } else if key.is_none() {
+                                key = rt::str(py, "null");
+                            } else if isinstance.call1((&key, int))?.is_truthy()? {
+                                // see comment for int/float in _make_iterencode
+                                key = _intstr.call1((&key,))?;
+                            } else if _skipkeys.is_truthy()? {
+                                py.check_signals()?;
+                                continue;
+                            } else {
+                                return Err(frame.raise(PyTypeError::new_err((rt::fstring(
+                                    py,
+                                    (
+                                        "keys must be str, int, float, bool or None, not ",
+                                        rt::format(&key.attr("__class__")?.attr("__name__")?, "")?,
+                                    ),
+                                )?
+                                .unbind(),))));
+                            }
+                        }
+                        if first {
+                            first = false;
+                            if !newline_indent.is_none() {
+                                rt::yield_(&newline_indent).await?;
+                            }
+                        } else {
+                            rt::yield_(&item_separator).await?;
+                        }
+                        rt::yield_(_encoder.call1((&key,))?).await?;
+                        rt::yield_(_key_separator).await?;
+                        let result: PyResult<()> = async {
+                            let chunks: Bound<'py, PyAny>;
+                            if isinstance.call1((&value, str))?.is_truthy()? {
+                                rt::yield_(_encoder.call1((&value,))?).await?;
+                            } else if value.is_none() {
+                                rt::yield_(rt::str(py, "null")).await?;
+                            } else if value.is(rt::bool(py, true)) {
+                                rt::yield_(rt::str(py, "true")).await?;
+                            } else if value.is(rt::bool(py, false)) {
+                                rt::yield_(rt::str(py, "false")).await?;
+                            } else if isinstance.call1((&value, int))?.is_truthy()? {
+                                // see comment for int/float in _make_iterencode
+                                rt::yield_(_intstr.call1((&value,))?).await?;
+                            } else if isinstance.call1((&value, float))?.is_truthy()? {
+                                // see comment for int/float in _make_iterencode
+                                rt::yield_(_floatstr.call1((&value,))?).await?;
+                            } else {
+                                if isinstance
+                                    .call1((&value, PyTuple::new(py, [list, tuple])?))?
+                                    .is_truthy()?
+                                {
+                                    chunks = _iterencode_list
+                                        .get()?
+                                        .call1((&value, &_current_indent_level))?;
+                                } else if isinstance.call1((&value, dict))?.is_truthy()? {
+                                    chunks = _iterencode_dict
+                                        .get()?
+                                        .call1((&value, &_current_indent_level))?;
+                                } else {
+                                    chunks = _iterencode
+                                        .get()?
+                                        .call1((&value, &_current_indent_level))?;
+                                }
+                                rt::yield_from(&chunks).await?;
+                            }
+                            Ok(())
+                        }
+                        .await;
+                        match result {
+                            Ok(()) => {}
+                            Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
+                                let _handling = rt::Handling::new(&frame.catch(err));
+                                return Err(frame.reraise());
+                            }
+                            Err(err) if err.is_instance_of::<PyBaseException>(py) => {
+                                let exc = frame.catch(err);
+                                let _handling = rt::Handling::new(&exc);
+                                exc.attr("add_note")?.call1((rt::fstring(
+                                    py,
+                                    (
+                                        "when serializing ",
+                                        rt::format(&dct.get_type().attr("__name__")?, "")?,
+                                        " item ",
+                                        key.repr()?,
+                                    ),
+                                )?,))?;
+                                return Err(frame.reraise());
+                            }
+                            Err(err) => return Err(err),
+                        }
+                        py.check_signals()?;
+                    }
+                    if !first && !newline_indent.is_none() {
+                        _current_indent_level = rt::isub(&_current_indent_level, 1)?;
+                        let value2 = rt::str(py, "\n").add(_indent.mul(&_current_indent_level)?)?;
+                        rt::yield_(value2).await?;
+                    }
+                    rt::yield_(rt::str(py, "}")).await?;
+                    if !markers.is_none() {
+                        markers.del_item(rt::local(&markerid, "markerid")?)?;
+                    }
+                    Ok(rt::none(py))
+                }
+            )
+        }
+        _iterencode_dict.set(rt::function!(
+            m,
+            gen _iterencode_dict_[markers, id, ValueError, _indent, _item_separator, _sort_keys, isinstance, str, float, _floatstr, int, _intstr, _skipkeys, _encoder, _key_separator, list, tuple, &_iterencode_list, dict, &_iterencode_dict, &_iterencode](dct, _current_indent_level),
+            qualname = "_make_iterencode.<locals>._iterencode_dict"
+        )?)?;
+        // json/encoder.py:429
+        async fn _iterencode_<'py>(
+            m: &rt::Module<'py>,
+            isinstance: &Bound<'py, PyAny>,
+            str: &Bound<'py, PyAny>,
+            _encoder: &Bound<'py, PyAny>,
+            int: &Bound<'py, PyAny>,
+            _intstr: &Bound<'py, PyAny>,
+            float: &Bound<'py, PyAny>,
+            _floatstr: &Bound<'py, PyAny>,
+            list: &Bound<'py, PyAny>,
+            tuple: &Bound<'py, PyAny>,
+            _iterencode_list: &rt::Cell<'py>,
+            dict: &Bound<'py, PyAny>,
+            _iterencode_dict: &rt::Cell<'py>,
+            markers: &Bound<'py, PyAny>,
+            id: &Bound<'py, PyAny>,
+            ValueError: &Bound<'py, PyAny>,
+            _default: &Bound<'py, PyAny>,
+            _iterencode: &rt::Cell<'py>,
+            o: &Bound<'py, PyAny>,
+            _current_indent_level: &Bound<'py, PyAny>,
+        ) -> PyResult<Bound<'py, PyAny>> {
+            let py = m.py();
+            rt::frame!(
+                m,
+                "_make_iterencode.<locals>._iterencode",
+                429,
+                async |frame| {
+                    let mut markerid: Option<Bound<'py, PyAny>> = None;
+                    let newobj: Bound<'py, PyAny>;
+                    if isinstance.call1((o, str))?.is_truthy()? {
+                        rt::yield_(_encoder.call1((o,))?).await?;
+                    } else if o.is_none() {
+                        rt::yield_(rt::str(py, "null")).await?;
+                    } else if o.is(rt::bool(py, true)) {
+                        rt::yield_(rt::str(py, "true")).await?;
+                    } else if o.is(rt::bool(py, false)) {
+                        rt::yield_(rt::str(py, "false")).await?;
+                    } else if isinstance.call1((o, int))?.is_truthy()? {
+                        // see comment for int/float in _make_iterencode
+                        rt::yield_(_intstr.call1((o,))?).await?;
+                    } else if isinstance.call1((o, float))?.is_truthy()? {
+                        // see comment for int/float in _make_iterencode
+                        rt::yield_(_floatstr.call1((o,))?).await?;
+                    } else if isinstance
+                        .call1((o, PyTuple::new(py, [list, tuple])?))?
+                        .is_truthy()?
+                    {
+                        let iterable = _iterencode_list.get()?.call1((o, _current_indent_level))?;
+                        rt::yield_from(iterable).await?;
+                    } else if isinstance.call1((o, dict))?.is_truthy()? {
+                        let iterable = _iterencode_dict.get()?.call1((o, _current_indent_level))?;
+                        rt::yield_from(iterable).await?;
+                    } else {
+                        if !markers.is_none() {
+                            markerid = Some(id.call1((o,))?);
+                            if markers.contains(rt::local(&markerid, "markerid")?)? {
+                                return Err(frame
+                                    .raise(ValueError.call1(("Circular reference detected",))?));
+                            }
+                            markers.set_item(rt::local(&markerid, "markerid")?, o)?;
+                        }
+                        newobj = _default.call1((o,))?;
+                        match async {
+                            let iterable =
+                                _iterencode.get()?.call1((&newobj, _current_indent_level))?;
+                            rt::yield_from(iterable).await
+                        }
+                        .await
+                        {
+                            Ok(_) => {}
+                            Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
+                                let _handling = rt::Handling::new(&frame.catch(err));
+                                return Err(frame.reraise());
+                            }
+                            Err(err) if err.is_instance_of::<PyBaseException>(py) => {
+                                let exc = frame.catch(err);
+                                let _handling = rt::Handling::new(&exc);
+                                exc.attr("add_note")?.call1((rt::fstring(
+                                    py,
+                                    (
+                                        "when serializing ",
+                                        rt::format(&o.get_type().attr("__name__")?, "")?,
+                                        " object",
+                                    ),
+                                )?,))?;
+                                return Err(frame.reraise());
+                            }
+                            Err(err) => return Err(err),
+                        }
+                        if !markers.is_none() {
+                            markers.del_item(rt::local(&markerid, "markerid")?)?;
+                        }
+                    }
+                    Ok(rt::none(py))
+                }
+            )
+        }
+        _iterencode.set(rt::function!(
+            m,
+            gen _iterencode_[isinstance, str, _encoder, int, _intstr, float, _floatstr, list, tuple, &_iterencode_list, dict, &_iterencode_dict, markers, id, ValueError, _default, &_iterencode](o, _current_indent_level),
+            qualname = "_make_iterencode.<locals>._iterencode"
+        )?)?;
+        _iterencode.get()
     })
 }
 
@@ -500,18 +970,29 @@ pub mod json_encoder {
                     slf.attr("allow_nan")?,
                 ))?
             } else {
-                m.global("_make_iterencode")?.call1((
+                _make_iterencode(
+                    m,
                     &markers,
-                    slf.attr("default")?,
+                    &slf.attr("default")?,
                     &_encoder,
                     &indent,
                     &floatstr,
-                    slf.attr("key_separator")?,
-                    slf.attr("item_separator")?,
-                    slf.attr("sort_keys")?,
-                    slf.attr("skipkeys")?,
+                    &slf.attr("key_separator")?,
+                    &slf.attr("item_separator")?,
+                    &slf.attr("sort_keys")?,
+                    &slf.attr("skipkeys")?,
                     _one_shot,
-                ))?
+                    &m.default("_make_iterencode", "ValueError")?,
+                    &m.default("_make_iterencode", "dict")?,
+                    &m.default("_make_iterencode", "float")?,
+                    &m.default("_make_iterencode", "id")?,
+                    &m.default("_make_iterencode", "int")?,
+                    &m.default("_make_iterencode", "isinstance")?,
+                    &m.default("_make_iterencode", "list")?,
+                    &m.default("_make_iterencode", "str")?,
+                    &m.default("_make_iterencode", "tuple")?,
+                    &m.default("_make_iterencode", "_intstr")?,
+                )?
             };
             _iterencode.call1((o, 0))
         })
@@ -666,209 +1147,30 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ]
             )?,
         )?;
-        // json/encoder.py:268, kept as Python: yield at 285:13, yield from at 329:21
-        rt::exec_python!(
+        rt::def!(
             m,
-            line = 268,
-            r#"
-def _make_iterencode(markers, _default, _encoder, _indent, _floatstr,
-        _key_separator, _item_separator, _sort_keys, _skipkeys, _one_shot,
-        ## HACK: hand-optimized bytecode; turn globals into locals
-        ValueError=ValueError,
-        dict=dict,
-        float=float,
-        id=id,
-        int=int,
-        isinstance=isinstance,
-        list=list,
-        str=str,
-        tuple=tuple,
-        _intstr=int.__repr__,
-    ):
-
-    def _iterencode_list(lst, _current_indent_level):
-        if not lst:
-            yield '[]'
-            return
-        if markers is not None:
-            markerid = id(lst)
-            if markerid in markers:
-                raise ValueError("Circular reference detected")
-            markers[markerid] = lst
-        buf = '['
-        if _indent is not None:
-            _current_indent_level += 1
-            newline_indent = '\n' + _indent * _current_indent_level
-            separator = _item_separator + newline_indent
-            buf += newline_indent
-        else:
-            newline_indent = None
-            separator = _item_separator
-        for i, value in enumerate(lst):
-            if i:
-                buf = separator
-            try:
-                if isinstance(value, str):
-                    yield buf + _encoder(value)
-                elif value is None:
-                    yield buf + 'null'
-                elif value is True:
-                    yield buf + 'true'
-                elif value is False:
-                    yield buf + 'false'
-                elif isinstance(value, int):
-                    # Subclasses of int/float may override __repr__, but we still
-                    # want to encode them as integers/floats in JSON. One example
-                    # within the standard library is IntEnum.
-                    yield buf + _intstr(value)
-                elif isinstance(value, float):
-                    # see comment above for int
-                    yield buf + _floatstr(value)
-                else:
-                    yield buf
-                    if isinstance(value, (list, tuple)):
-                        chunks = _iterencode_list(value, _current_indent_level)
-                    elif isinstance(value, dict):
-                        chunks = _iterencode_dict(value, _current_indent_level)
-                    else:
-                        chunks = _iterencode(value, _current_indent_level)
-                    yield from chunks
-            except GeneratorExit:
-                raise
-            except BaseException as exc:
-                exc.add_note(f'when serializing {type(lst).__name__} item {i}')
-                raise
-        if newline_indent is not None:
-            _current_indent_level -= 1
-            yield '\n' + _indent * _current_indent_level
-        yield ']'
-        if markers is not None:
-            del markers[markerid]
-
-    def _iterencode_dict(dct, _current_indent_level):
-        if not dct:
-            yield '{}'
-            return
-        if markers is not None:
-            markerid = id(dct)
-            if markerid in markers:
-                raise ValueError("Circular reference detected")
-            markers[markerid] = dct
-        yield '{'
-        if _indent is not None:
-            _current_indent_level += 1
-            newline_indent = '\n' + _indent * _current_indent_level
-            item_separator = _item_separator + newline_indent
-        else:
-            newline_indent = None
-            item_separator = _item_separator
-        first = True
-        if _sort_keys:
-            items = sorted(dct.items())
-        else:
-            items = dct.items()
-        for key, value in items:
-            if isinstance(key, str):
-                pass
-            # JavaScript is weakly typed for these, so it makes sense to
-            # also allow them.  Many encoders seem to do something like this.
-            elif isinstance(key, float):
-                # see comment for int/float in _make_iterencode
-                key = _floatstr(key)
-            elif key is True:
-                key = 'true'
-            elif key is False:
-                key = 'false'
-            elif key is None:
-                key = 'null'
-            elif isinstance(key, int):
-                # see comment for int/float in _make_iterencode
-                key = _intstr(key)
-            elif _skipkeys:
-                continue
-            else:
-                raise TypeError(f'keys must be str, int, float, bool or None, '
-                                f'not {key.__class__.__name__}')
-            if first:
-                first = False
-                if newline_indent is not None:
-                    yield newline_indent
-            else:
-                yield item_separator
-            yield _encoder(key)
-            yield _key_separator
-            try:
-                if isinstance(value, str):
-                    yield _encoder(value)
-                elif value is None:
-                    yield 'null'
-                elif value is True:
-                    yield 'true'
-                elif value is False:
-                    yield 'false'
-                elif isinstance(value, int):
-                    # see comment for int/float in _make_iterencode
-                    yield _intstr(value)
-                elif isinstance(value, float):
-                    # see comment for int/float in _make_iterencode
-                    yield _floatstr(value)
-                else:
-                    if isinstance(value, (list, tuple)):
-                        chunks = _iterencode_list(value, _current_indent_level)
-                    elif isinstance(value, dict):
-                        chunks = _iterencode_dict(value, _current_indent_level)
-                    else:
-                        chunks = _iterencode(value, _current_indent_level)
-                    yield from chunks
-            except GeneratorExit:
-                raise
-            except BaseException as exc:
-                exc.add_note(f'when serializing {type(dct).__name__} item {key!r}')
-                raise
-        if not first and newline_indent is not None:
-            _current_indent_level -= 1
-            yield '\n' + _indent * _current_indent_level
-        yield '}'
-        if markers is not None:
-            del markers[markerid]
-
-    def _iterencode(o, _current_indent_level):
-        if isinstance(o, str):
-            yield _encoder(o)
-        elif o is None:
-            yield 'null'
-        elif o is True:
-            yield 'true'
-        elif o is False:
-            yield 'false'
-        elif isinstance(o, int):
-            # see comment for int/float in _make_iterencode
-            yield _intstr(o)
-        elif isinstance(o, float):
-            # see comment for int/float in _make_iterencode
-            yield _floatstr(o)
-        elif isinstance(o, (list, tuple)):
-            yield from _iterencode_list(o, _current_indent_level)
-        elif isinstance(o, dict):
-            yield from _iterencode_dict(o, _current_indent_level)
-        else:
-            if markers is not None:
-                markerid = id(o)
-                if markerid in markers:
-                    raise ValueError("Circular reference detected")
-                markers[markerid] = o
-            newobj = _default(o)
-            try:
-                yield from _iterencode(newobj, _current_indent_level)
-            except GeneratorExit:
-                raise
-            except BaseException as exc:
-                exc.add_note(f'when serializing {type(o).__name__} object')
-                raise
-            if markers is not None:
-                del markers[markerid]
-    return _iterencode
-"#
+            _make_iterencode(
+                markers,
+                _default,
+                _encoder,
+                _indent,
+                _floatstr,
+                _key_separator,
+                _item_separator,
+                _sort_keys,
+                _skipkeys,
+                _one_shot,
+                ValueError = rt::builtin(py, "ValueError")?,
+                dict = rt::builtin(py, "dict")?,
+                float = rt::builtin(py, "float")?,
+                id = rt::builtin(py, "id")?,
+                int = rt::builtin(py, "int")?,
+                isinstance = rt::builtin(py, "isinstance")?,
+                list = rt::builtin(py, "list")?,
+                str = rt::builtin(py, "str")?,
+                tuple = rt::builtin(py, "tuple")?,
+                _intstr = rt::builtin(py, "int")?.attr("__repr__")?
+            )
         )?;
         Ok(())
     })

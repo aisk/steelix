@@ -13,16 +13,14 @@ import ast
 from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
-from steelix.frontend.scope import comprehension_variables
+from steelix.frontend.desugar import AsyncFor, AsyncWith
+from steelix.frontend.scope import comprehension_variables, function_kind
 
 # Human readable names for the error message, by AST node type.
 _FEATURES: dict[type[ast.AST], str] = {
-    ast.AsyncFor: "async for",
     ast.AnnAssign: "annotated assignment",
     ast.TryStar: "try/except*",
-    ast.AsyncWith: "async with",
     ast.ClassDef: "class definition",
-    ast.AsyncFunctionDef: "async function",
     ast.Match: "match statement",
     ast.TypeAlias: "type alias",
     ast.Slice: "slice outside a subscript",
@@ -66,6 +64,11 @@ class SubsetChecker:
         """The enclosing functions, outermost first."""
         self.blocks: list[str] = []
         """`class` and `function` for each enclosing class body and function."""
+        self.kinds: list[str] = []
+        """What each enclosing function is (`function_kind`), `lambda` or
+        `comprehension` (the parts of one evaluated in its own scope), and
+        `header` for the decorators and defaults of a nested function:
+        whether `await` and `yield` can be lowered where they are."""
         self.issues: list[Issue] = []
 
     def fail(self, feature: str, node: ast.AST) -> None:
@@ -108,18 +111,60 @@ class SubsetChecker:
     def check_def(self, fn: FunctionLike) -> None:
         if fn.type_params:
             self.fail("type parameters", fn)
+        kind = function_kind(fn)
+        # In a coroutine, the decorators and defaults of a nested function
+        # are not where an `await` is lowered.
+        self.kinds.append("header")
         for decorator in fn.decorator_list:
             self.check_expr(decorator)
         # Annotations are kept as source and evaluated lazily by the runtime.
         self.check_defaults(fn.args)
+        self.kinds.pop()
         self.depth += 1
         self.functions.append(fn)
+        if kind == "async generator":
+            # `asend`, `athrow`, `aclose` and the asyncgen hooks (design §8).
+            self.fail("asynchronous generator", fn)
+        elif kind == "generator" and any(_is_types_coroutine(d) for d in fn.decorator_list):
+            # Its `yield from` delegates to coroutines, which `rt::yield_from`
+            # rejects like `yield from` in a plain generator does.
+            self.fail("types.coroutine generator", fn)
         self.blocks.append("function")
+        self.kinds.append(kind)
         for stmt in fn.body:
             self.check_stmt(stmt)
+        self.kinds.pop()
         self.blocks.pop()
         self.functions.pop()
         self.depth -= 1
+
+    def kind(self) -> str:
+        """What the innermost enclosing function is, `module` outside of
+        functions."""
+        return self.kinds[-1] if self.kinds else "module"
+
+    def suspension(self, node: ast.AST, allowed: str) -> bool:
+        """Whether `await` (in a coroutine) or `yield` (in a generator),
+        given by `allowed`, can be lowered where `node` is. Records why
+        not, except in an asynchronous generator (already recorded)."""
+        kind = self.kind()
+        if kind == allowed:
+            return True
+        name = _SUSPENSIONS[type(node)]
+        match kind:
+            case "async generator":
+                pass
+            case "comprehension":
+                self.fail(f"{name} in a comprehension", node)
+            case "lambda":
+                self.fail(f"{name} in a lambda", node)
+            case "header":
+                self.fail(f"{name} in a decorator or default", node)
+            case "handler":
+                self.fail(f"{name} in an except clause", node)
+            case _:
+                self.fail(name, node)
+        return False
 
     def in_class_body(self) -> bool:
         return bool(self.blocks) and self.blocks[-1] == "class"
@@ -135,6 +180,7 @@ class SubsetChecker:
             self.check_expr(keyword.value)
         self.depth += 1
         self.blocks.append("class")
+        self.kinds.append("class")
         for stmt in cls.body:
             match stmt:
                 case ast.AnnAssign(ast.Name(), _, value, simple=1):
@@ -146,6 +192,7 @@ class SubsetChecker:
                     self.descend(stmt)
                 case _:
                     self.check_stmt(stmt)
+        self.kinds.pop()
         self.blocks.pop()
         self.depth -= 1
 
@@ -182,6 +229,10 @@ class SubsetChecker:
                 self.check_expr(test)
                 self.check_body(body)
                 self.check_body(orelse)
+            case AsyncFor(target, iter_, body, orelse) if not self.suspension(stmt, "coroutine"):
+                self.descend(stmt)
+            case AsyncWith() if not self.suspension(stmt, "coroutine"):
+                self.descend(stmt)
             case ast.For(target, iter_, body, orelse):
                 self.check_target(target)
                 self.check_expr(iter_)
@@ -209,7 +260,11 @@ class SubsetChecker:
                 self.check_body(body)
                 for handler in handlers:
                     if handler.type is not None:
+                        # Evaluated in a closure (`frame.matches`), which
+                        # can not suspend.
+                        self.kinds.append("handler")
                         self.check_expr(handler.type)
+                        self.kinds.pop()
                     self.check_body(handler.body)
                 self.check_body(orelse)
                 self.check_body(finalbody)
@@ -226,9 +281,6 @@ class SubsetChecker:
                 self.fail("annotated assignment at module level", stmt)
                 self.descend(stmt)
             case ast.FunctionDef():
-                self.check_def(stmt)
-            case ast.AsyncFunctionDef():
-                self.fail("async function", stmt)
                 self.check_def(stmt)
             case ast.ClassDef() if self.functions:
                 # The methods are checked too: what else blocks them is worth
@@ -313,9 +365,13 @@ class SubsetChecker:
                 for keyword in keywords:
                     self.check_expr(keyword.value)
             case ast.Lambda(args, body):
+                self.kinds.append("header")
                 self.check_defaults(args)
+                self.kinds.pop()
                 self.depth += 1
+                self.kinds.append("lambda")
                 self.check_expr(body)
+                self.kinds.pop()
                 self.depth -= 1
             case ast.Attribute(value):
                 self.check_expr(value)
@@ -340,6 +396,16 @@ class SubsetChecker:
                 self.check_expr(value)
             case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
                 self.check_comprehension(expr)
+            case ast.Await(value):
+                if self.suspension(expr, "coroutine"):
+                    self.check_expr(value)
+                else:
+                    self.descend(expr)
+            case ast.Yield(value) | ast.YieldFrom(value):
+                if not self.suspension(expr, "generator"):
+                    self.descend(expr)
+                elif value is not None:
+                    self.check_expr(value)
             case _:
                 self.unsupported(expr)
 
@@ -361,6 +427,10 @@ class SubsetChecker:
             self.fail("generator expression variable captured by a nested function", node)
         if _used_before_bound(node):
             self.fail("comprehension variable used before it is bound", node)
+        # The whole comprehension, the first iterable too: an `await`
+        # anywhere in it makes it asynchronous in CPython (an inlined list
+        # comprehension) or is lowered inside its loop.
+        self.kinds.append("comprehension")
         for generator in node.generators:
             self.check_target(generator.target)
             self.check_expr(generator.iter)
@@ -371,6 +441,24 @@ class SubsetChecker:
             self.check_expr(node.value)
         else:
             self.check_expr(node.elt)
+        self.kinds.pop()
+
+
+_SUSPENSIONS: dict[type[ast.AST], str] = {
+    ast.Await: "await",
+    ast.Yield: "yield",
+    ast.YieldFrom: "yield from",
+    AsyncFor: "async for",
+    AsyncWith: "async with",
+}
+
+
+def _is_types_coroutine(decorator: ast.expr) -> bool:
+    """`@types.coroutine` or `@coroutine`."""
+    match decorator:
+        case ast.Attribute(_, "coroutine") | ast.Name("coroutine"):
+            return True
+    return False
 
 
 def _captured(node: ast.GeneratorExp, variables: frozenset[str]) -> bool:

@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12 ✅ → M13 PoC ✅（lowering 计划中）→ M14（计划）。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12 ✅ → M13 ✅ → M14（计划）。
 
 ## M0 项目骨架 ✅
 
@@ -296,9 +296,9 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 - [x] ext 模式下 `python -m pkg`（M6 遗留）：改写流程不再需要它，但发布的库也可能有 `__main__`。扩展模块安装成 `pkg/__init__.so` 时 import 之前就是包，`runpy` 能找到 `pkg.__main__`，`init_extension` 据此把项目目录提到包目录外面（§11）
 - [x] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程：§11、§15、README 改成用 bin 的解释器角色跑项目自己的测试
 
-## M13 协程和生成器（PoC）
+## M13 协程和生成器 ✅
 
-用 Rust 稳定版的 `async` 当状态机实现 Python 的协程和生成器函数，不用执行器，进展只来自 Python 调用 `send`/`throw`/`close`，生成的代码保持直线（§8 "generator 函数"的第 4 种做法和"协程和生成器"）。PoC 只做 runtime 和手写的"生成代码"，lowering 在后面。
+用 Rust 稳定版的 `async` 当状态机实现 Python 的协程和生成器函数，不用执行器，进展只来自 Python 调用 `send`/`throw`/`close`，生成的代码保持直线（§8 "generator 函数"的第 4 种做法和"协程和生成器"）。先做了 runtime 和手写的"生成代码"的 PoC，再做 lowering。
 
 - [x] runtime：`rt::Coroutine`（`coroutine`）和生成器对象，`send`/`throw`/`close`、`__await__`（`coroutine_wrapper`）、`__iter__`/`__next__`，CPython 的报错文字（重入、重用、未开始时 `send` 非 None、PEP 479、ignored GeneratorExit），`close()` 的返回值（3.13）
 - [x] `rt::await_`、`rt::yield_`、`rt::yield_from`：PEP 492 取 awaitable 的迭代器，PEP 380 的 `send`/`throw`/`close` 委托，通过 waker 找到这一次 poll 的通道
@@ -313,14 +313,16 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
   - [x] 递归深度：每次 poll `rt::frame!` 的函数体算一层 Python 递归（3.14 的 `py_recursion_remaining`），每次 poll 和 `send` 检查 C 栈，`yield from`、`await` 的链和 `Box::pin` 的递归在和 CPython 相同的深度抛 `RecursionError`
   - [x] 文档：future 的 `Send` 前提和改写时的规则、`join!`/`select!` 的限制（§15）
   - [x] 原生生成器之间满足直接调用条件的 `yield from g(x)` 可以直接 await 内层的 future
-- [ ] lowering：`async def` 和含 `yield` 的函数生成 `async fn`，`try` 的闭包换成 `async` 块，`with` 换成 `frame.with_async`，被 await 的表达式会留下临时值时先用 `let` 绑定（§8 "GC 看得到的东西"），golden 和 `tests/cases/` 的用例
-- [ ] 原生 `async def` 之间满足直接调用条件的 `await f(x)`、原生生成器之间的 `yield from g(x)` 直接 await，递归的加 `Box::pin`（递归深度已经按 poll 计数）
-- [ ] `async with`、`async for` 的 helper
-- [ ] 嵌套的 `async def`、生成器和 lambda 的捕获（宏已支持，没有测试）
+- [x] lowering：`async def` 和含 `yield` 的函数生成 `async fn`（`rt::frame!` 的 `async` 闭包，`rt::def!`/`rt::function!` 的 `async`、`gen`，方法、装饰器、嵌套函数），`await`、`yield`、`yield from`，会暂停的 `try` 区域换成 `async` 块（`let result: PyResult<..> = async { .. }.await;`），会暂停的 `with` 换成 `frame.with_async`，被 await 的表达式会留下临时值时先用 `let` 绑定（§8 "GC 看得到的东西"），`--traceback-lines` 照常工作
+- [x] 原生 `async def` 之间满足直接调用条件的 `await f(x)`、原生生成器之间的 `yield from g(x)` 直接 await，调用图里在同一个环上的加 `Box::pin`，别的调用经过函数对象
+- [x] `async with`、`async for` 的 helper：`frame.async_with`、`rt::aiter`、`rt::anext`，报错文字和 CPython 3.14 一样
+- [x] 嵌套的 `async def`、生成器和 lambda 的捕获，`nonlocal`（`async_basics`、`generators`）
+- [x] 保留为 Python，记入覆盖率报告的特性名：异步生成器、异步推导式、推导式里的 `await`、lambda 里的 `yield`、`types.coroutine` 的生成器、`except` 子句和嵌套函数的装饰器、默认值里的 `await`（`async_kept`）
+- [x] 用例：`coroutines`（PoC 的程序，现在由 lowering 生成，`tests/poc_async` 和 `tests/test_poc_async.py` 退役，§14）、`async_basics`、`async_with_for`、`async_uncaught`（也在默认行号下测）、`async_kept`、`generators`，`async_with_for`、`generators` 也有 `--traceback-lines` 的 golden
+- [x] 覆盖率（`coverage.md`）：标准库的函数 96.7% → 99.1%，6 个工具 93.3% → 100%；skime 374/374（`m10-skime.md`）
 - [ ] 改写后的代码 await Rust 生态 future 的桥接 helper（只在需要时）
-- 保留为 Python：异步生成器、异步推导式
 
-runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_` 等，`rt::Frame` 多了一个生命周期参数 `Frame<'a, 'py>`），下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
+runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_`、`rt::aiter`、`rt::anext`、`Frame::async_with` 等，`rt::Frame` 多了一个生命周期参数 `Frame<'a, 'py>`），生成的代码用到了这些，下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
 
 ## M14 match 语句（计划）
 

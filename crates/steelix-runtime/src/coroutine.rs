@@ -93,8 +93,8 @@ use std::sync::{Mutex, MutexGuard, Once, OnceLock};
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use pyo3::exceptions::{
-    PyDeprecationWarning, PyGeneratorExit, PyRuntimeError, PyRuntimeWarning, PyStopIteration,
-    PyTypeError, PyValueError,
+    PyDeprecationWarning, PyGeneratorExit, PyRuntimeError, PyRuntimeWarning, PyStopAsyncIteration,
+    PyStopIteration, PyTypeError, PyValueError,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
@@ -997,6 +997,86 @@ pub fn yield_from<'py>(iterable: impl AsRef<Bound<'py, PyAny>>) -> Await<'py> {
     }
 }
 
+/// `async for`: the asynchronous iterator of `iterable` (`GET_AITER`),
+/// which [`anext`] steps through.
+///
+/// ```ignore
+/// let iter = rt::aiter(&rows)?;
+/// while let Some(row) = rt::anext(&iter).await? {
+///     ..
+/// }
+/// ```
+pub fn aiter<'py>(iterable: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let Some(method) = crate::frame::lookup_special(iterable, "__aiter__")? else {
+        return Err(crate::raised(PyTypeError::new_err(format!(
+            "'async for' requires an object with __aiter__ method, got {}",
+            crate::type_name(iterable)
+        ))));
+    };
+    let iterator = method.call0()?;
+    if crate::frame::lookup_special(&iterator, "__anext__")?.is_none() {
+        return Err(crate::raised(PyTypeError::new_err(format!(
+            "'async for' received an object from __aiter__ that does not implement __anext__: {}",
+            crate::type_name(&iterator)
+        ))));
+    }
+    Ok(iterator)
+}
+
+/// The next item of an `async for` loop (`GET_ANEXT`): awaits what
+/// `iterator.__anext__()` returns, `None` once that raises
+/// `StopAsyncIteration`.
+pub async fn anext<'py>(iterator: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let py = iterator.py();
+    let next = async {
+        let Some(method) = crate::frame::lookup_special(iterator, "__anext__")? else {
+            return Err(crate::raised(PyTypeError::new_err(format!(
+                "'async for' requires an iterator with __anext__ method, got {}",
+                crate::type_name(iterator)
+            ))));
+        };
+        let awaitable = method.call0()?;
+        let iter = awaitable_iter(&awaitable).map_err(|cause| {
+            let err = PyTypeError::new_err(format!(
+                "'async for' received an invalid object from __anext__: {}",
+                crate::type_name(&awaitable)
+            ));
+            // `_PyErr_FormatFromCause`: the cause is the context too.
+            let value = err.value(py);
+            let cause = cause.into_value(py).into_bound(py);
+            // SAFETY: valid exception objects; both calls steal a reference.
+            unsafe {
+                ffi::PyException_SetContext(value.as_ptr(), cause.clone().into_ptr());
+                ffi::PyException_SetCause(value.as_ptr(), cause.into_ptr());
+            }
+            err
+        })?;
+        Await {
+            py,
+            state: AwaitState::Start(iter, Delegate::Iterator),
+        }
+        .await
+    };
+    match next.await {
+        Ok(item) => Ok(Some(item)),
+        Err(err) if err.is_instance_of::<PyStopAsyncIteration>(py) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Checks that `value`, which the `__aenter__` or `__aexit__` (`method`)
+/// of an `async with` returned, can be awaited, with CPython's message
+/// for one whose type has no `__await__`.
+pub(crate) fn check_async_with_awaitable(value: &Bound<'_, PyAny>, method: &str) -> PyResult<()> {
+    if is_coroutine(value)? || crate::frame::lookup_special(value, "__await__")?.is_some() {
+        return Ok(());
+    }
+    Err(crate::raised(PyTypeError::new_err(format!(
+        "'async with' received an object from {method} that does not implement __await__: {}",
+        crate::type_name(value)
+    ))))
+}
+
 /// The future of [`await_`] and [`yield_from`].
 pub struct Await<'py> {
     py: Python<'py>,
@@ -1015,6 +1095,8 @@ enum AwaitState<'py> {
 enum Delegate {
     Await,
     YieldFrom,
+    /// The iterator to delegate to, already taken from an awaitable.
+    Iterator,
 }
 
 impl<'py> Future for Await<'py> {
@@ -1029,6 +1111,7 @@ impl<'py> Future for Await<'py> {
                 let iter = match delegate {
                     Delegate::Await => awaitable_iter(&value),
                     Delegate::YieldFrom => yield_from_iter(&value),
+                    Delegate::Iterator => Ok(value),
                 };
                 let iter = match iter {
                     Ok(iter) => iter,

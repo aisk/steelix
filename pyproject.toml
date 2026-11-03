@@ -33,7 +33,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["tests/cases", "tests/apps", "tests/projects", "tests/poc_async", "tests/attrs"]
+extend-exclude = ["tests/cases", "tests/apps", "tests/projects", "tests/attrs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

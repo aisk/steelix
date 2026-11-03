@@ -20,6 +20,7 @@ from steelix.frontend.scope import (
     FunctionScope,
     annotations_of,
     comprehension_variables,
+    function_kind,
     walrus_targets,
 )
 from steelix.lower.context import NAMESPACE, Context, FunctionInfo, ModuleContext
@@ -81,13 +82,16 @@ def lower_function(
         by_value,
         _walrus_targets(fn, scope),
         bool_locals(fn, scope, locals_info, module.bindings),
+        function_kind(fn),
     )
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
     first_line = _first_line(fn)
     lowering = StmtLowering(ctx, line=first_line)
 
     guard: list[rs.Stmt] = []
-    if fn in module.callgraph.recursive:
+    # A coroutine or generator counts its depth in `rt::frame!` instead,
+    # each time it runs (design §8).
+    if fn in module.callgraph.recursive and not info.is_async:
         enter = rs.Call(rs.Path("rt::RecursionGuard::enter"), (rs.Path("py"),))
         guard.append(rs.Let("_guard", init=rs.Try(enter)))
     body: list[rs.Stmt] = []
@@ -168,7 +172,7 @@ def lower_function(
     order = [*varnames, *(n for n in [*scope.params, *locals_info.order] if n not in varnames)]
     ranks = {names[n]: i for i, n in enumerate(order) if n in names}
     lowered = declare_late(rs.Block(tuple(body), tail), ranks)
-    block = in_frame(ctx.context_name, scope.qualname, first_line, lowered)
+    block = in_frame(ctx.context_name, scope.qualname, first_line, lowered, info.is_async)
     return rs.Fn(
         name=rust_name,
         params=tuple(params),
@@ -178,6 +182,7 @@ def lower_function(
         public=public,
         doc=tuple(doc.splitlines()) if doc else (),
         comments=(*comments, f"{module.filename}:{fn.lineno}"),
+        is_async=info.is_async,
     )
 
 
@@ -188,19 +193,23 @@ def _first_line(fn: FunctionNode) -> int:
     return fn.lineno
 
 
-def in_frame(context: str, qualname: str, line: int, body: rs.Block) -> rs.Block:
+def in_frame(
+    context: str, qualname: str, line: int, body: rs.Block, is_async: bool = False
+) -> rs.Block:
     """`body` run in a traceback frame: `rt::frame!(m, "name", line, |frame| ..)`
-    (design §9). A body that can not raise needs none."""
+    (design §9). A body that can not raise needs none, except the body of a
+    coroutine or generator: `async |frame| ..` also counts its recursion
+    depth and raises what `throw()` sends before it starts (design §8)."""
     if body.tail is None:
         stmts, tail_expr = returns_as_tail(body.stmts)
         body = rs.Block(tuple(stmts), tail_expr)
     tail = [] if body.tail is None else [rs.Return(body.tail)]
-    if not fallible([*body.stmts, *tail]):
+    if not is_async and not fallible([*body.stmts, *tail]):
         return body
     param = "frame" if count_path(body, "frame") else "_"
     # Always a block: `|_| { expr }` reads better than an expression that
     # rustfmt breaks across the lines of the macro call.
-    closure = rs.Closure((param,), body, braces=True)
+    closure = rs.Closure((param,), body, braces=True, is_async=is_async)
     args = (rs.Path(context), rs.StrLit(qualname), rs.IntLit(line), closure)
     return rs.Block((), rs.MacroCall("rt::frame", args))
 
@@ -267,7 +276,11 @@ def signature_text(
                 source = ast.unparse(annotation)
             annotations[param] = string_literal(source)
 
-    out: list[str | rs.Expr] = [rs.Path(rust_name)]
+    out: list[str | rs.Expr] = []
+    kind = function_kind(node)
+    if kind != "function":
+        out.append("async " if kind == "coroutine" else "gen ")
+    out.append(rs.Path(rust_name))
     if isinstance(node, ast.FunctionDef) and not named:
         out.append(_as(rust_name, scope.name))
 

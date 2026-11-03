@@ -154,6 +154,23 @@ class Closure(Expr):
     ret: str | None = None
     braces: bool = False
     """Keep the braces around a body that is a single expression."""
+    is_async: bool = False
+    """`async |params| body`, an async closure (in coroutines and generators)."""
+
+
+@dataclass(frozen=True)
+class AsyncBlock(Expr):
+    """`async { .. }`: like an immediately called closure, a `return` or `?`
+    in it leaves the block, not the fn."""
+
+    body: Block
+
+
+@dataclass(frozen=True)
+class Await(Expr):
+    """`expr.await`."""
+
+    expr: Expr
 
 
 @dataclass(frozen=True)
@@ -241,6 +258,9 @@ class While(Stmt):
     cond: Expr
     body: Block
     label: str | None = None
+    pattern: str | None = None
+    """`while let pattern = cond`: the names the pattern binds are in scope
+    in `body`."""
 
 
 @dataclass(frozen=True)
@@ -322,6 +342,7 @@ class Fn(Item):
     attrs: tuple[str, ...] = ()
     doc: tuple[str, ...] = ()
     comments: tuple[str, ...] = ()
+    is_async: bool = False
 
 
 @dataclass(frozen=True)

@@ -1,8 +1,3 @@
-//! Parts of `mixed_future_annotations.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 8, `def kept`: yield
-
 use pyo3::prelude::*;
 use steelix_runtime as rt;
 use steelix_runtime::Attributes;
@@ -10,6 +5,14 @@ use steelix_runtime::Attributes;
 // mixed_future_annotations.py:4
 pub fn native<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "native", 4, |_| { Ok(x.str()?.into_any()) })
+}
+
+// mixed_future_annotations.py:8
+pub async fn kept<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "kept", 8, async |_| {
+        rt::yield_(x.str()?).await?;
+        Ok(rt::none(m.py()))
+    })
 }
 
 pub mod box_ {
@@ -32,16 +35,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
         m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
         rt::def!(m, native(x: "'int'") -> "'str'")?;
-        // mixed_future_annotations.py:8, kept as Python: yield at 9:5
-        rt::exec_python!(
-            m,
-            line = 8,
-            future_annotations,
-            r#"
-def kept(x: int) -> Iterator[str]:
-    yield str(x)
-"#
-        )?;
+        rt::def!(m, gen kept(x: "'int'") -> "'Iterator[str]'")?;
         m.set_global("Box", rt::class!(m, "Box"(), box_::body, line = 12)?)?;
         rt::builtins::print(
             m.py(),

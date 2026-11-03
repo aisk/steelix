@@ -1,6 +1,6 @@
 # 真实应用的转换覆盖率（M3c，M3d、M4、M5、M8 更新）
 
-数据截至 M8。之后只有 M10 支持了复数字面量，6 个工具里剩下的保留部分仍然只有 generator 和 `import *`；真实项目的数据见 `m10-skime.md`。
+数据截至 M13（最后一节）。真实项目的数据见 `m10-skime.md`。
 
 M3c 的最后一步是拿不是我们写的代码跑一遍混合模式（design.md §13），看哪些已经能原生转换、哪些还保留为 Python，再据此决定 M4、M5、M8 的先后。
 
@@ -217,3 +217,36 @@ M8 之后各个工具的函数：`stdlib_calendar` 66/72，`stdlib_base64` 28/28
 | exec() without a namespace in a function | 0 | 0 | 1 | 1 |
 
 只被 `yield` 或 `yield from` 挡住的函数，标准库里 129 个，6 个工具里 11 个，可行性分析见 design.md §8 的"generator 函数"，结论是暂时保留为 Python。剩下的最便宜的是容器字面量里的 `*`/`**` 展开（只被它挡住的 25 个函数，M5 之后是 16 个，多出来的函数原来同时被推导式挡住）。`except-as name used outside its handler`、`eval()`/`locals()` 这几项是 lowering 时才发现的（design.md §13），以前所在的函数先被推导式挡住，到不了 lowering，所以数字比 M5 时多。
+
+## M13 的变化
+
+M13 原生转换了生成器函数和 `async def`（design.md §8 "协程和生成器"），包括 `await`、`yield`、`yield from`、`async with`、`async for`。异步生成器、异步推导式、推导式里的 `await` 等少数写法仍然保留为 Python。"之前"是 M12 结束时的数字（M8 之后 M10 支持了复数字面量等，所以和上一节的 M8 略有不同）。
+
+| | 函数 | 顶层语句 | 行数 |
+|---|---|---|---|
+| 6 个工具，M12 | 153/164（93.3%） | 167/169（98.8%） | 2858/2992（95.5%） |
+| 6 个工具，M13 | 164/164（100%） | 167/169（98.8%） | 2990/2992（99.9%） |
+| 标准库，M12 | 6255/6466（96.7%） | 3488/3517（99.2%） | 115837/122951（94.2%） |
+| 标准库，M13 | 6406/6466（99.1%） | 3489/3517（99.2%） | 119229/122951（97.0%） |
+
+6 个工具的函数全部是原生的，剩下的两条顶层语句是 `import *`。标准库 154 个模块转换后 `cargo check` 和 `cargo clippy` 都没有错误，clippy 的警告和以前一样只有文档注释的缩进（docstring 原样变成 `///`）、几处 bool 赋值和单个分支的 `match`，没有出自协程和生成器的。33 组命令行的输出仍然全部与 CPython 一致。
+
+现在挡住函数的特性：
+
+| 特性 | 6 个工具 functions | only | 标准库 functions | only |
+|---|---|---|---|---|
+| match statement | 0 | 0 | 17 | 17 |
+| class definition in a function | 0 | 0 | 9 | 9 |
+| star import | 0 | 0 | 8 | 7 |
+| except-as name used outside its handler | 0 | 0 | 7 | 7 |
+| type parameters | 0 | 0 | 5 | 5 |
+| eval() without a namespace in a function | 0 | 0 | 4 | 4 |
+| generator expression with several for clauses | 0 | 0 | 3 | 3 |
+| locals() in a function | 0 | 0 | 3 | 3 |
+| call with more than 12 arguments | 0 | 0 | 2 | 2 |
+| asynchronous generator | 0 | 0 | 2 | 1 |
+| exec() without a namespace in a function | 0 | 0 | 1 | 1 |
+| yield in a lambda | 0 | 0 | 0 | 0 |
+
+M12 时 `yield`（121 个函数，只被它挡住的 102 个）、`async function`（29、10）、`yield from`（28、12）、`await`（12、0）、`async with`（1、0）这几项都没有了。`yield in a lambda` 只出现在 `_collections_abc` 的一条顶层语句里（`generator = type((lambda: (yield))())`），两个异步生成器也在 `_collections_abc` 和 `types` 里，都是为了取得类型对象。剩下最多的是 `match`（M14）。
+

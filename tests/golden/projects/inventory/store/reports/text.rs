@@ -1,12 +1,45 @@
-//! Parts of `store/reports/text.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 4, `def lines`: yield
-
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
 use steelix_runtime::Attributes;
+
+// store/reports/text.py:4
+pub async fn lines<'py>(
+    m: &rt::Module<'py>,
+    inventory: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "lines", 4, async |frame| {
+        // A generator function.
+        for item in inventory.attr("items")?.method0("values")?.try_iter()? {
+            let item = item?;
+            if item.attr("quantity")?.lt(0)? {
+                return Err(frame.raise(m.global("errors")?.attr("StoreError")?.call1((
+                    rt::fstring(
+                        py,
+                        (
+                            "negative quantity of ",
+                            rt::format(&item.attr("name")?, "")?,
+                        ),
+                    )?,
+                ))?));
+            }
+            let value = rt::fstring(
+                py,
+                (
+                    rt::format(&item.attr("name")?, ">6")?,
+                    " x",
+                    rt::format(&item.attr("quantity")?, "<3")?,
+                    " ",
+                    rt::format(&item.method0("value")?, ">4")?,
+                ),
+            )?;
+            rt::yield_(value).await?;
+            py.check_signals()?;
+        }
+        Ok(rt::none(py))
+    })
+}
 
 // store/reports/text.py:12
 pub fn render<'py>(
@@ -31,19 +64,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::frame!(m, "<module>", 1, |_| {
         let package = rt::import_names(m, "..", &["errors"])?;
         m.set_global("errors", rt::import_from(&package, "errors")?)?;
-        // store/reports/text.py:4, kept as Python: yield at 9:9
-        rt::exec_python!(
-            m,
-            line = 4,
-            r#"
-def lines(inventory):
-    # A generator: kept as Python source.
-    for item in inventory.items.values():
-        if item.quantity < 0:
-            raise errors.StoreError(f"negative quantity of {item.name}")
-        yield f"{item.name:>6} x{item.quantity:<3} {item.value():>4}"
-"#
-        )?;
+        rt::def!(m, gen lines(inventory))?;
         rt::def!(m, render(inventory))?;
         if m.global("__name__")?.eq("__main__")? {
             rt::builtins::print(py, ("store.reports.text: run as a script",))?;

@@ -30,7 +30,7 @@ from enum import Enum
 
 from steelix.frontend.bindings import is_immutable_constant
 from steelix.frontend.resolve import Direct, Lookup, resolve_call, resolve_global
-from steelix.frontend.scope import FunctionNode, default_of, params_of
+from steelix.frontend.scope import FunctionNode, default_of, function_kind, params_of
 from steelix.lower.comprehension import ComprehensionLowering, ComprehensionVariable
 from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.names import rust_ident
@@ -71,6 +71,9 @@ class Value:
     """Name for a temporary holding the value, if the expression suggests one."""
     temp: bool = False
     """A temporary of the generated code, which its single owned use may move."""
+    awaited: bool = False
+    """The result of a native coroutine or generator awaited in place,
+    `f(m, &x).await?` for `await f(x)` or `yield from f(x)`."""
 
     @property
     def is_pure(self) -> bool:
@@ -408,6 +411,12 @@ class ExprLowering(ComprehensionLowering):
                 return Value(_if_expr(cond, then, other), Kind.OWNED)
             case ast.Call(func, args, keywords):
                 return self.call(func, args, keywords, expr)
+            case ast.Await(operand):
+                return self.suspension("await_", operand, "awaitable")
+            case ast.Yield(operand):
+                return self.suspension("yield_", operand, "value")
+            case ast.YieldFrom(operand):
+                return self.suspension("yield_from", operand, "iterable")
             case ast.Lambda():
                 from steelix.lower.function import lower_nested
 
@@ -847,6 +856,51 @@ class ExprLowering(ComprehensionLowering):
         call = _rt("format", value.ref(), spec_value.arg())
         return Value(_try(call), Kind.OWNED)
 
+    # --- await and yield ---
+
+    def suspension(self, helper: str, operand: ast.expr | None, role: str) -> Value:
+        """`rt::await_(x).await?`, `rt::yield_(&x).await?` or
+        `rt::yield_from(x).await?` (design §8): the value is the result of
+        the awaitable, what `send()` sends, or the delegate's return value.
+
+        The future holds what the Rust statement holds when it suspends, and
+        the GC sees neither. CPython is done with the parts of the operand
+        once it suspends, so an operand whose Rust expression leaves
+        temporaries (`m.global("helper")?` in `m.global("helper")?.call0()?`)
+        is bound with `let` first: `let helper = ..; rt::await_(helper)`."""
+        if operand is None:
+            arg: rs.Expr = _rt("none", self.py())
+        else:
+            value = self.value(operand)
+            if value.awaited and helper != "yield_":
+                return replace(value, awaited=False)
+            arg = self.suspended_operand(value, role, operand)
+        future = rs.Await(_rt(helper, arg))
+        return Value(_try(future), Kind.OWNED)
+
+    def suspended_operand(self, value: Value, role: str, operand: ast.expr) -> rs.Expr:
+        """The argument of `rt::await_` and the like, which take an owned
+        or a borrowed `Bound`."""
+        match value.kind:
+            case Kind.LITERAL | Kind.BOOL | Kind.NATIVE:
+                assert value.owned_literal is not None
+                return value.owned_literal
+            case Kind.PLACE:
+                # A temporary of the prelude moves in.
+                return value.expr if value.temp else rs.Ref(value.expr)
+            case Kind.REF:
+                return value.expr
+        if not _leaves_temporaries(value.expr):
+            return value.expr
+        base = _suspension_base(operand)
+        name = self.ctx.temp(base or role)
+        if base is not None and name != base:
+            # `sleep2` says less than `awaitable`.
+            self.ctx.release(name)
+            name = self.ctx.temp(role)
+        self.prelude.append(rs.Let(name, init=value.expr))
+        return rs.Path(name)
+
     # --- calls ---
 
     def call(
@@ -1090,8 +1144,15 @@ class ExprLowering(ComprehensionLowering):
                     call_args.append(rs.Ref(self.dict_of(names, used)))
                 case _:
                     call_args.append(used[0].ref())
-        call = rs.Call(rs.Path(module.fn_names[fn.name]), tuple(call_args))
-        return Value(_try(call), Kind.OWNED)
+        call: rs.Expr = rs.Call(rs.Path(module.fn_names[fn.name]), tuple(call_args))
+        if function_kind(fn) == "function":
+            return Value(_try(call), Kind.OWNED)
+        # `await f(x)` or `yield from g(x)` runs the future in place.
+        caller = self.ctx.function
+        if caller is not None and module.callgraph.in_cycle(caller.node, fn):
+            # A recursive future would contain itself.
+            call = rs.Call(rs.Path("Box::pin"), (call,))
+        return Value(_try(rs.Await(call)), Kind.OWNED, awaited=True)
 
     def tuple_of(self, values: list[Value]) -> rs.Expr:
         self.use("pyo3::types::PyTuple")
@@ -1263,6 +1324,36 @@ def _keyword(name: str) -> str:
     if rust.removeprefix("r#") == name:
         return rust
     return string_literal(name)
+
+
+def _leaves_temporaries(expr: rs.Expr) -> bool:
+    """Whether evaluating `expr` leaves Rust temporaries that live until the
+    end of the statement: a method called on the result of a call, a borrow
+    of a value that is not a variable, anything a macro builds. A value
+    moved into a call or a tuple is no temporary."""
+    match expr:
+        case rs.Path() | rs.IntLit() | rs.FloatLit() | rs.StrLit() | rs.BoolLit() | rs.ByteStrLit():
+            return False
+        case rs.Try(inner):
+            return _leaves_temporaries(inner)
+        case rs.Ref(inner):
+            return not isinstance(inner, rs.Path)
+        case rs.MethodCall(receiver, _, args):
+            if not isinstance(receiver, rs.Path):
+                return True
+            return any(_leaves_temporaries(a) for a in args)
+        case rs.Call(_, args) | rs.Tuple(args) | rs.Array(args):
+            return any(_leaves_temporaries(a) for a in args)
+    return True
+
+
+def _suspension_base(operand: ast.expr) -> str | None:
+    """A name for the temporary holding what is awaited: the called
+    function's (`sleep` for `asyncio.sleep(1)`)."""
+    match operand:
+        case ast.Call(ast.Name(name) | ast.Attribute(attr=name)):
+            return name.lower()
+    return None
 
 
 def _expr_base(expr: ast.expr) -> str | None:

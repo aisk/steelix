@@ -69,7 +69,17 @@ def _move_last_use(stmts: list[rs.Stmt], name: str) -> tuple[list[rs.Stmt], bool
 
 
 # Nodes whose parts may not run, or run more than once.
-_CONDITIONAL = (rs.IfExpr, rs.If, rs.Closure, rs.BlockExpr, rs.Match, rs.For, rs.While, rs.Loop)
+_CONDITIONAL = (
+    rs.IfExpr,
+    rs.If,
+    rs.Closure,
+    rs.AsyncBlock,
+    rs.BlockExpr,
+    rs.Match,
+    rs.For,
+    rs.While,
+    rs.Loop,
+)
 
 
 def _uses(node: Any, name: str, conditional: bool) -> Iterator[tuple[str, bool]]:

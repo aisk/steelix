@@ -31,7 +31,7 @@ from steelix.rustast import nodes as rs
 from steelix.rustast.pyo3 import must_erase
 
 # Names in scope everywhere: the Rust prelude and crate roots.
-_PRELUDE = frozenset({"Ok", "Err", "Some", "None", "Option", "Vec", "String", "std", "core"})
+_PRELUDE = frozenset({"Ok", "Err", "Some", "None", "Option", "Vec", "String", "Box", "std", "core"})
 # What `use pyo3::prelude::*` brings in that generated code names.
 _PYO3_PRELUDE = frozenset({"Python", "Bound", "Py", "PyAny", "PyResult", "PyErr", "PyModule"})
 
@@ -198,9 +198,12 @@ class _Verifier:
                     self.stmt(orelse, scope)
                 elif orelse is not None:
                     self.block(orelse, scope)
-            case rs.While(cond, body, label):
+            case rs.While(cond, body, label, pattern):
                 self.expr(cond, scope)
-                self.loop(body, label, scope)
+                inner = _Scope(scope)
+                for name in _pattern_names(pattern or ""):
+                    inner.locals[name] = None
+                self.loop(body, label, inner)
             case rs.Loop(body, label):
                 self.loop(body, label, scope)
             case rs.For(pattern, iter_, body, label):
@@ -275,7 +278,7 @@ class _Verifier:
                 self.exprs(args, scope)
             case rs.Tokens(parts):
                 self.exprs(tuple(p for p in parts if not isinstance(p, str)), scope)
-            case rs.Try(inner) | rs.Ref(inner) | rs.Unary(_, inner):
+            case rs.Try(inner) | rs.Ref(inner) | rs.Unary(_, inner) | rs.Await(inner):
                 self.expr(inner, scope)
             case rs.Tuple(elems) | rs.Array(elems):
                 self.exprs(elems, scope)
@@ -300,6 +303,13 @@ class _Verifier:
                 saved = self.labels
                 self.labels = []
                 self.block(body, inner)
+                self.labels = saved
+            case rs.AsyncBlock(body):
+                # Like a closure: `return` and `?` leave the block, no label
+                # outside is a jump target.
+                saved = self.labels
+                self.labels = []
+                self.block(body, scope)
                 self.labels = saved
             case rs.Match(scrutinee, arms):
                 self.expr(scrutinee, scope)

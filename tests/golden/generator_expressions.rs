@@ -1,8 +1,3 @@
-//! Parts of `generator_expressions.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 79, `def closed_early`: yield
-
 use pyo3::exceptions::PyNameError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyStopIteration;
@@ -258,6 +253,86 @@ pub fn failing_condition<'py>(
             genexpr(xs.try_iter()?),
             qualname = "failing_condition.<locals>.<genexpr>"
         )?,))
+    })
+}
+
+// generator_expressions.py:79
+pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "closed_early", 79, |_| {
+        // generator_expressions.py:80
+        async fn source<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+            let py = m.py();
+            rt::frame!(m, "closed_early.<locals>.source", 80, async |frame| {
+                let result: PyResult<()> = async {
+                    rt::yield_(rt::int(py, 1)).await?;
+                    rt::yield_(rt::int(py, 2)).await?;
+                    rt::yield_(rt::int(py, 3)).await?;
+                    Ok(())
+                }
+                .await;
+                let finally = frame.finally(result);
+                rt::builtins::print(py, ("source closed",))?;
+                finally.resume()?;
+                Ok(rt::none(py))
+            })
+        }
+        let source = rt::function!(
+            m,
+            gen source(),
+            qualname = "closed_early.<locals>.source"
+        )?;
+        // generator_expressions.py:88
+        fn genexpr<'py>(
+            m: &rt::Module<'py>,
+            iter: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "closed_early.<locals>.<genexpr>", 88, |_| {
+                if let Some(x) = rt::next(iter)? {
+                    return Ok(Some(x.mul(2)?));
+                }
+                Ok(None)
+            })
+        }
+        let r#gen = rt::genexpr!(
+            m,
+            genexpr(source.call0()?.try_iter()?),
+            qualname = "closed_early.<locals>.<genexpr>"
+        )?;
+        for value in r#gen.try_iter()? {
+            let value = value?;
+            rt::builtins::print(py, ("got", &value))?;
+            break;
+        }
+        r#gen.method0("close")?;
+        rt::builtins::print(
+            py,
+            ("after close", rt::builtin(py, "list")?.call1((&r#gen,))?),
+        )?;
+        // generator_expressions.py:94
+        fn genexpr2<'py>(
+            m: &rt::Module<'py>,
+            iter: &Bound<'py, PyIterator>,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            rt::frame!(m, "closed_early.<locals>.<genexpr>", 94, |_| {
+                if let Some(x) = rt::next(iter)? {
+                    return Ok(Some(x));
+                }
+                Ok(None)
+            })
+        }
+        let mut other = Some(rt::genexpr!(
+            m,
+            genexpr2(source.call0()?.try_iter()?),
+            qualname = "closed_early.<locals>.<genexpr>"
+        )?);
+        rt::builtins::print(
+            py,
+            (rt::builtin(py, "next")?.call1((rt::local(&other, "other")?,))?,),
+        )?;
+        other = None;
+        rt::builtins::print(py, ("deleted",))?;
+        Ok(rt::none(py))
     })
 }
 
@@ -890,32 +965,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("Bad", rt::class!(m, "Bad"(), bad::body, line = 61)?)?;
         rt::def!(m, failing_iteration())?;
         rt::def!(m, failing_condition(xs))?;
-        // generator_expressions.py:79, kept as Python: yield at 82:13
-        rt::exec_python!(
-            m,
-            line = 79,
-            r#"
-def closed_early():
-    def source():
-        try:
-            yield 1
-            yield 2
-            yield 3
-        finally:
-            print("source closed")
-
-    gen = (x * 2 for x in source())
-    for value in gen:
-        print("got", value)
-        break
-    gen.close()
-    print("after close", list(gen))
-    other = (x for x in source())
-    print(next(other))
-    del other
-    print("deleted")
-"#
-        )?;
+        rt::def!(m, closed_early())?;
         rt::def!(m, stop_iteration())?;
         rt::def!(m, protocol())?;
         rt::def!(m, consumers(words))?;
@@ -966,7 +1016,7 @@ def closed_early():
             }
             Err(err) => return Err(err),
         }
-        m.global("closed_early")?.call0()?;
+        closed_early(m)?;
         stop_iteration(m)?;
         protocol(m)?;
         consumers(m, PyList::new(py, ["a", "bb", "abc"])?.as_any())?;

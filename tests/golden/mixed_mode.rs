@@ -1,10 +1,9 @@
 //! Parts of `mixed_mode.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 35, `def evens`: yield
-//! - line 48, `assign` statement: generator expression with several for clauses
-//! - line 74, `def twice`: function redefinition
-//! - line 96, `def chunks`: yield from
+//! - line 35, `def evens`: match statement
+//! - line 49, `assign` statement: generator expression with several for clauses
+//! - line 75, `def twice`: function redefinition
 
 use pyo3::exceptions::PyImportError;
 use pyo3::prelude::*;
@@ -27,12 +26,12 @@ pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound
     rt::frame!(m, "double", 31, |_| { x.mul(2) })
 }
 
-// mixed_mode.py:41
+// mixed_mode.py:42
 pub fn use_counter<'py>(
     m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "use_counter", 41, |_| {
+    rt::frame!(m, "use_counter", 42, |_| {
         // Native code calling the class and the Python generator through globals.
         let counter = m
             .global("Counter")?
@@ -45,22 +44,22 @@ pub fn use_counter<'py>(
     })
 }
 
-// mixed_mode.py:70
+// mixed_mode.py:71
 pub fn twice<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     Ok(rt::str(m.py(), "native"))
 }
 
-// mixed_mode.py:81
+// mixed_mode.py:82
 pub fn set_mode<'py>(m: &rt::Module<'py>, mode: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "set_mode", 81, |_| {
+    rt::frame!(m, "set_mode", 82, |_| {
         m.set_global("MODE", mode)?;
         Ok(rt::none(m.py()))
     })
 }
 
-// mixed_mode.py:91
+// mixed_mode.py:92
 pub fn trace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "trace", 91, |_| {
+    rt::frame!(m, "trace", 92, |_| {
         log(
             m,
             &rt::fstring(
@@ -69,6 +68,17 @@ pub fn trace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bou
             )?,
         )?;
         Ok(r#fn.clone())
+    })
+}
+
+// mixed_mode.py:98
+pub async fn chunks<'py>(
+    m: &rt::Module<'py>,
+    items: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "chunks", 97, async |_| {
+        rt::yield_from(items).await?;
+        Ok(rt::none(m.py()))
     })
 }
 
@@ -137,23 +147,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,
         )?;
         rt::def!(m, double(x))?;
-        // mixed_mode.py:35, kept as Python: yield at 38:13
+        // mixed_mode.py:35, kept as Python: match statement at 37:9
         rt::exec_python!(
             m,
             line = 35,
             r#"
 def evens(limit):
     for n in range(limit):
-        if n % 2 == 0:
-            yield n
+        match n % 2:
+            case 0:
+                yield n
 "#
         )?;
         rt::def!(m, use_counter(start))?;
         log(m, &rt::str(py, "native statement after the class"))?;
-        // mixed_mode.py:48, kept as Python: generator expression with several for clauses at 48:15
+        // mixed_mode.py:49, kept as Python: generator expression with several for clauses at 49:15
         rt::exec_python!(
             m,
-            line = 48,
+            line = 49,
             r#"
 squares = list(s for s in map(double, range(4)) for _ in "1")
 "#
@@ -207,13 +218,13 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
         )?;
         m.set_global("FLAG", true)?;
         if m.global("FLAG")?.is_truthy()? {
-            // mixed_mode.py:62
+            // mixed_mode.py:63
             fn pick<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "first"))
             }
             rt::def!(m, pick())?;
         } else {
-            // mixed_mode.py:65
+            // mixed_mode.py:66
             fn pick_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "second"))
             }
@@ -221,10 +232,10 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
         }
         rt::builtins::print(py, (m.global("pick")?.call0()?,))?;
         rt::def!(m, twice())?;
-        // mixed_mode.py:74, kept as Python: function redefinition at 74:1
+        // mixed_mode.py:75, kept as Python: function redefinition at 75:1
         rt::exec_python!(
             m,
-            line = 74,
+            line = 75,
             r#"
 def twice():
     return "redefined, kept as Python"
@@ -243,16 +254,7 @@ def twice():
         )?;
         rt::builtins::print(py, (m.global("MODES")?,))?;
         rt::def!(m, trace(r#fn))?;
-        // mixed_mode.py:96, kept as Python: yield from at 98:5
-        rt::exec_python!(
-            m,
-            line = 96,
-            r#"
-@trace
-def chunks(items):
-    yield from items
-"#
-        )?;
+        rt::def!(m, @trace gen chunks(items))?;
         rt::builtins::print(
             py,
             (rt::builtin(py, "list")?

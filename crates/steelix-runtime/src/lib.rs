@@ -64,7 +64,7 @@ pub use frame::{Flow, Frame, Handling, IntoException};
 pub use attr::Attributes;
 pub use cell::Cell;
 pub use class::{Namespace, super_};
-pub use coroutine::{Coroutine, await_, yield_, yield_from};
+pub use coroutine::{Coroutine, aiter, anext, await_, yield_, yield_from};
 pub use function::{Body, Function, FunctionDef, Signature};
 pub use generator::{Generator, next};
 pub use import::{import, import_from, import_module, import_names};

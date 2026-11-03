@@ -508,6 +508,55 @@ impl<'f, 'py> Frame<'f, 'py> {
         }
     }
 
+    /// `async with manager as value: body` in a coroutine: [`Frame::with`]
+    /// with `__aenter__` and `__aexit__`, whose results are awaited. The
+    /// body is an `async` closure.
+    ///
+    /// ```ignore
+    /// frame.async_with(&lock, async |_| {
+    ///     total.set(total.get()?.add(1)?)?;
+    ///     Ok(())
+    /// })
+    /// .await?;
+    /// ```
+    pub async fn async_with<T: Default>(
+        &self,
+        manager: &Bound<'py, PyAny>,
+        body: impl AsyncFnOnce(&Bound<'py, PyAny>) -> PyResult<T>,
+    ) -> PyResult<T> {
+        let py = self.py();
+        let line = self.line.get();
+        let exit = async_special_method(manager, "__aexit__")?;
+        let enter = async_special_method(manager, "__aenter__")?;
+        let entered = enter.call0()?;
+        crate::coroutine::check_async_with_awaitable(&entered, "__aenter__")?;
+        let value = crate::await_(entered).await?;
+        let result = body(&value).await;
+        match result {
+            Ok(result) => {
+                self.line(line);
+                let exited = exit.call1((py.None(), py.None(), py.None()))?;
+                crate::coroutine::check_async_with_awaitable(&exited, "__aexit__")?;
+                crate::await_(exited).await?;
+                Ok(result)
+            }
+            Err(err) => {
+                let exception = self.catch(err);
+                self.line(line);
+                let _handling = Handling::new(&exception);
+                let traceback = exception.getattr("__traceback__")?;
+                let exited = exit.call1((exception.get_type(), &exception, traceback))?;
+                crate::coroutine::check_async_with_awaitable(&exited, "__aexit__")?;
+                let suppress = crate::await_(exited).await?.is_truthy()?;
+                if suppress {
+                    Ok(T::default())
+                } else {
+                    Err(self.reraise_exception(exception))
+                }
+            }
+        }
+    }
+
     /// Adds this frame's traceback entry at the current line to `exception`.
     ///
     /// Adding the entry can only fail when Python itself is in trouble (no
@@ -835,6 +884,28 @@ fn special_method<'py>(
             " but it supports the asynchronous context manager protocol. \
              Did you mean to use 'async with'?",
         );
+    }
+    Err(crate::raised(PyTypeError::new_err(message)))
+}
+
+/// [`special_method`] for `__aenter__` and `__aexit__`.
+fn async_special_method<'py>(
+    object: &Bound<'py, PyAny>,
+    name: &'static str,
+) -> PyResult<Bound<'py, PyAny>> {
+    if let Some(method) = lookup_special(object, name)? {
+        return Ok(method);
+    }
+    let mut message = format!(
+        "'{}' object does not support the asynchronous context manager protocol \
+         (missed {name} method)",
+        object.get_type().name()?
+    );
+    if lookup_special(object, "__enter__")?.is_some()
+        && lookup_special(object, "__exit__")?.is_some()
+    {
+        message
+            .push_str(" but it supports the context manager protocol. Did you mean to use 'with'?");
     }
     Err(crate::raised(PyTypeError::new_err(message)))
 }

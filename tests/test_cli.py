@@ -107,10 +107,10 @@ def test_transpile_ext_mode(tmp_path: Path) -> None:
 
 def test_no_fallback_reports_unsupported(tmp_path: Path, capsys) -> None:
     source = tmp_path / "bad.py"
-    source.write_text("async def f():\n    pass\n")
+    source.write_text("async def f():\n    yield 1\n")
     args = ["transpile", str(source), "-o", str(tmp_path / "out"), "--no-fallback"]
     assert main(args) == 1
-    assert "bad.py:1:1: unsupported: async function" in capsys.readouterr().err
+    assert "bad.py:1:1: unsupported: asynchronous generator" in capsys.readouterr().err
 
 
 def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, capsys) -> None:
@@ -121,7 +121,7 @@ def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, 
         "\n"
         "\n"
         "class A:\n"
-        "    def m(self):\n"
+        "    async def m(self):\n"
         "        yield self\n"
         "\n"
         "\n"
@@ -140,13 +140,13 @@ def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, 
     data = json.loads(report.read_text())
     assert data["functions"] == {"native": 1, "total": 3}
     features = {f["feature"]: f for f in data["features"]}
-    assert features["yield"] == {
-        "feature": "yield",
+    assert features["asynchronous generator"] == {
+        "feature": "asynchronous generator",
         "occurrences": 1,
         "functions": 1,
         "only": 1,
         "statements": 0,
-        "locations": ["app.py:7:9"],
+        "locations": ["app.py:6:5"],
     }
     assert features["generator expression with several for clauses"]["only"] == 1
     assert [(p["kind"], p["name"]) for p in data["python"]] == [
@@ -158,12 +158,12 @@ def test_mixed_mode_keeps_unsupported_code_and_reports_coverage(tmp_path: Path, 
     # The class is native, its method `m` is kept as Python.
     assert 'rt::class!(m, "A"(), a::body, line = 5)' in module_rs
     assert "line = 6," in module_rs
-    assert "    def m(self):\n" in module_rs
+    assert "    async def m(self):\n" in module_rs
 
 
 def test_coverage_merges_modules(tmp_path: Path, capsys) -> None:
-    (tmp_path / "a.py").write_text("def f():\n    yield 1\n")
-    (tmp_path / "b.py").write_text("def g():\n    yield 2\n\n\ndef h():\n    return 3\n")
+    (tmp_path / "a.py").write_text("async def f():\n    yield 1\n")
+    (tmp_path / "b.py").write_text("async def g():\n    yield 2\n\n\ndef h():\n    return 3\n")
     report = tmp_path / "report.json"
     args = ["coverage", str(tmp_path / "a.py"), str(tmp_path / "b.py"), "--report", str(report)]
     assert main(args) == 0
@@ -173,7 +173,13 @@ def test_coverage_merges_modules(tmp_path: Path, capsys) -> None:
     data = json.loads(report.read_text())
     assert [m["module"] for m in data["modules"]] == ["a.py", "b.py"]
     assert data["features"] == [
-        {"feature": "yield", "occurrences": 2, "functions": 2, "only": 2, "statements": 0}
+        {
+            "feature": "asynchronous generator",
+            "occurrences": 2,
+            "functions": 2,
+            "only": 2,
+            "statements": 0,
+        }
     ]
     assert not (tmp_path / "out").exists()
 

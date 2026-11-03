@@ -1,8 +1,3 @@
-//! Parts of `exceptions_uncaught.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 6, `def resource`: yield
-
 use pyo3::exceptions::PyKeyError;
 use pyo3::exceptions::PyLookupError;
 use pyo3::prelude::*;
@@ -10,6 +5,20 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
 use steelix_runtime::Attributes;
+
+// exceptions_uncaught.py:7
+pub async fn resource<'py>(
+    m: &rt::Module<'py>,
+    name: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "resource", 6, async |_| {
+        rt::builtins::print(py, ("open", name))?;
+        rt::yield_(name).await?;
+        rt::builtins::print(py, ("close", name))?;
+        Ok(rt::none(py))
+    })
+}
 
 // exceptions_uncaught.py:13
 pub fn load<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -85,18 +94,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // An uncaught exception with a cause and a context, raised through native
         // handlers, `finally` and `with`: CPython prints all three tracebacks.
         m.set_global("contextlib", rt::import(m, "contextlib")?)?;
-        // exceptions_uncaught.py:6, kept as Python: yield at 9:5
-        rt::exec_python!(
-            m,
-            line = 6,
-            r#"
-@contextlib.contextmanager
-def resource(name):
-    print("open", name)
-    yield name
-    print("close", name)
-"#
-        )?;
+        rt::def!(m, @contextlib.contextmanager gen resource(name))?;
         rt::def!(m, load(key))?;
         rt::def!(m, lookup(key))?;
         rt::def!(m, process(keys))?;

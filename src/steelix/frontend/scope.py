@@ -22,6 +22,7 @@ from collections.abc import Collection, Iterator
 from dataclasses import dataclass, field
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
+from steelix.frontend.desugar import AsyncFunctionDef
 
 FunctionNode = ast.FunctionDef | ast.Lambda | ast.GeneratorExp
 Comprehension = ast.ListComp | ast.SetComp | ast.DictComp
@@ -220,6 +221,19 @@ def scope_body(fn: FunctionNode) -> list[ast.AST]:
         case ast.Lambda():
             return [fn.body]
     return comprehension_parts(fn)
+
+
+def function_kind(fn: FunctionNode) -> str:
+    """`function`, `generator`, `coroutine` or `async generator`: what
+    calling `fn` returns, from the `yield` in its own scope and `async`."""
+    if not isinstance(fn, ast.FunctionDef):
+        return "generator" if isinstance(fn, ast.GeneratorExp) else "function"
+    yields = any(
+        isinstance(node, ast.Yield | ast.YieldFrom) for stmt in fn.body for node in walk_scope(stmt)
+    )
+    if isinstance(fn, AsyncFunctionDef):
+        return "async generator" if yields else "coroutine"
+    return "generator" if yields else "function"
 
 
 def nested_functions(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> list[FunctionNode]:

@@ -10,7 +10,7 @@ import ast
 from dataclasses import dataclass
 
 from steelix.frontend.bindings import is_constant_true
-from steelix.frontend.desugar import annotation_source, binding_name
+from steelix.frontend.desugar import AsyncFor, annotation_source, binding_name
 from steelix.frontend.fallback import COMPOUND, first_line, loop_jumps, python_runs, python_source
 from steelix.lower.comprehension import line_marker, unpack_pattern
 from steelix.lower.context import NAMESPACE, Context
@@ -461,6 +461,8 @@ class StmtLowering(HandlingLowering):
         iterable = self.exprs.value(stmt.iter)
         # Functions defined by the header, which the loop body must not hide.
         items = self.flush_items()
+        if isinstance(stmt, AsyncFor):
+            return items + self.async_for(stmt, iterable, label)
         iterator = rs.Try(iterable.method("try_iter"))
         markers = self.markers
         # Getting the iterator and each item can raise.
@@ -486,6 +488,46 @@ class StmtLowering(HandlingLowering):
         body, target = self.loop_body(stmt.body, label, stmt.lineno)
         loop = rs.For(pat, iterator, rs.Block((*head, *body.stmts)), target.label)
         out = items + self.with_else(stmt, loop, label)
+        if self.markers != markers:
+            self.line = None
+        return out
+
+    def async_for(self, stmt: AsyncFor, iterable: Value, label: str | None) -> list[rs.Stmt]:
+        """`async for`, in a block of its own that drops the iterator before
+        the `else` block runs (design §8):
+
+            {
+                let iter = rt::aiter(&xs)?;
+                while let Some(x) = rt::anext(&iter).await? { .. }
+            }
+        """
+        markers = self.markers
+        self.exprs.prelude[:0] = self.at_line(stmt.lineno)
+        iterator = self.ctx.temp("iter")
+        start = rs.Let(iterator, init=rs.Try(rs.Call(rs.Path("rt::aiter"), (iterable.ref(),))))
+        next_item = rs.Try(rs.Await(rs.Call(rs.Path("rt::anext"), (rs.Ref(rs.Path(iterator)),))))
+        fn = self.ctx.function
+        target = stmt.target
+        scoped = fn is not None and any(
+            fn.locals.loop_scoped.get(name) is stmt for name in _names(target)
+        )
+        head: list[rs.Stmt] = []
+        if scoped and isinstance(target, ast.Name):
+            assert fn is not None
+            pat = fn.names[target.id]
+        else:
+            pat = self.ctx.temp("item")
+            item = Value(rs.Path(pat), Kind.PLACE, temp=True)
+            with self.exprs.fresh() as prelude:
+                head = self.store(stmt, target, item, declare=scoped)
+            head = prelude + head
+        body, loop_target = self.loop_body(stmt.body, label, stmt.lineno)
+        loop = rs.While(
+            next_item, rs.Block((*head, *body.stmts)), loop_target.label, pattern=f"Some({pat})"
+        )
+        block = rs.ExprStmt(rs.BlockExpr(rs.Block((start, loop))))
+        self.ctx.release(iterator)
+        out = self.with_else(stmt, block, label)
         if self.markers != markers:
             self.line = None
         return out

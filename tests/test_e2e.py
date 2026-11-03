@@ -37,6 +37,8 @@ EXPECT_ERROR = re.compile(r"^# steelix-test: expect-error (.*)$", re.MULTILINE)
 # that removes the difference (such as frames for native functions) fails
 # the test, so that the entry gets removed.
 KNOWN_DIFFERENCES: dict[str, dict[str, str]] = {
+    # Native coroutines are not `types.CoroutineType`.
+    "coroutines": {"inspect.iscoroutine True": r"inspect\.iscoroutine False"},
     "frames_logging": {
         "WARNING frames_logging.py:16 step: native step 1": (
             r"WARNING __init__\.py:\d+ warning: native step 1"
@@ -260,6 +262,7 @@ DEFAULT_LINES_CASES = [
     "with_stmt",
     "except_custom_line",
     "decorators_uncaught",
+    "async_uncaught",
 ]
 DEFAULT_SUFFIX = "_default_lines"
 # Prints line numbers of traceback entries, which are the def lines here.
@@ -300,7 +303,7 @@ def native_lines(source: Path) -> dict[str, set[int]]:
     tree = ast.parse(source.read_text())
     lines: dict[str, set[int]] = {"<module>": {1}}
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.ClassDef):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             lines.setdefault(node.name, set()).add(first)
     return lines

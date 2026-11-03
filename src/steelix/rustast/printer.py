@@ -74,6 +74,8 @@ def _print_fn(fn: rs.Fn, level: int) -> str:
     generics = f"<{', '.join(fn.lifetimes)}>" if fn.lifetimes else ""
     params = ", ".join(f"{p.name}: {p.ty}" for p in fn.params)
     vis = "pub " if fn.public else ""
+    if fn.is_async:
+        vis += "async "
     body = print_block(fn.body, level)
     lines.append(f"{vis}fn {fn.name}{generics}({params}) -> {fn.ret} {body}")
     return _join_lines(lines, level)
@@ -121,8 +123,11 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
             return "return;" if value is None else f"return {print_expr(value, level)};"
         case rs.If():
             return _print_if(stmt, level)
-        case rs.While(cond, body, label):
-            return f"{_label(label)}while {print_expr(cond, level)} {print_block(body, level)}"
+        case rs.While(cond, body, label, pattern):
+            head = print_expr(cond, level)
+            if pattern is not None:
+                head = f"let {pattern} = {head}"
+            return f"{_label(label)}while {head} {print_block(body, level)}"
         case rs.Loop(body, label):
             return f"{_label(label)}loop {print_block(body, level)}"
         case rs.For(pat, iter_, body, label):
@@ -263,13 +268,19 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
             if isinstance(orelse, rs.IfExpr):
                 return text + print_expr(orelse, level)
             return text + print_block(orelse, level)
-        case rs.Closure(params, body, ret, braces):
-            head = f"|{', '.join(params)}|"
+        case rs.Closure(params, body, ret, braces, is_async):
+            head = f"{'async ' if is_async else ''}|{', '.join(params)}|"
             if ret is not None:
                 return f"{head} -> {ret} {print_block(body, level)}"
             if not braces and not body.stmts and body.tail is not None:
                 return f"{head} {print_expr(body.tail, level)}"
             return f"{head} {print_block(body, level)}"
+        case rs.AsyncBlock(body):
+            return f"async {print_block(body, level)}"
+        case rs.Await(rs.AsyncBlock() as block):
+            return f"{print_expr(block, level)}.await"
+        case rs.Await(inner):
+            return f"{_operand(inner, _POSTFIX, level)}.await"
         case rs.Match(scrutinee, arms):
             inner = INDENT * (level + 1)
             lines = [f"match {print_expr(scrutinee, level)} {{"]
@@ -313,7 +324,7 @@ def _args(args: tuple[rs.Expr, ...], level: int) -> str:
 
 def _precedence(expr: rs.Expr) -> int:
     match expr:
-        case rs.BlockExpr() | rs.IfExpr() | rs.Closure() | rs.Match():
+        case rs.BlockExpr() | rs.IfExpr() | rs.Closure() | rs.Match() | rs.AsyncBlock():
             return _BLOCKLIKE
         case rs.Binary(op):
             return _BINARY_PRECEDENCE.get(op, _COMPARE)

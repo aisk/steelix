@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from steelix.frontend.bindings import ModuleBindings
+from steelix.frontend.desugar import suspends
+from steelix.frontend.scope import function_kind
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
@@ -59,13 +61,22 @@ def resolve_call(
     `module_index` is the index of the enclosing top-level statement when the
     call is in module level code, where a direct call is only allowed once the
     `def` has executed.
+
+    A coroutine is only called directly by `await f(x)` and a generator by
+    `yield from g(x)`, which run the Rust future in place. Any other call
+    creates the coroutine or generator object, through the function object.
     """
     fn = bindings.direct_function(name)
+    if fn is not None and _CALLED_BY.get(function_kind(fn), suspends(call)) != suspends(call):
+        fn = None  # a coroutine or generator, not called by `await` or `yield from`
     if fn is not None and (module_index is None or bindings.def_index(name) < module_index):
         slots = bind_static(fn.args, call)
         if slots is not None:
             return Direct(fn, slots)
     return resolve_global(bindings, name)
+
+
+_CALLED_BY = {"coroutine": "await", "generator": "yield from"}
 
 
 def bind_static(args: ast.arguments, call: ast.Call) -> tuple[Slot, ...] | None:

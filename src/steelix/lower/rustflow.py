@@ -92,7 +92,7 @@ def _breaks_out(body: rs.Block, label: str | None, loop: bool = True) -> bool:
                 return target == label if target is not None else (loop and depth == 0)
             case rs.Loop() | rs.While() | rs.For():
                 return any(visit(child, depth + 1) for child in children(node))
-            case rs.Closure() | rs.Fn():
+            case rs.Closure() | rs.AsyncBlock() | rs.Fn():
                 return False
         return any(visit(child, depth) for child in children(node))
 

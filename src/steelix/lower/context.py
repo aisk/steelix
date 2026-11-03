@@ -76,6 +76,13 @@ class FunctionInfo:
     change it."""
     bool_locals: frozenset[str] = frozenset()
     """Locals that are a Rust `bool` (`frontend.booleans`, design §5)."""
+    kind: str = "function"
+    """`function`, `coroutine` or `generator` (`scope.function_kind`)."""
+
+    @property
+    def is_async(self) -> bool:
+        """Whether the Rust fn is an `async fn`: a coroutine or a generator."""
+        return self.kind != "function"
 
     def local_type(self, name: str) -> str:
         """The Rust type of an ordinary (not `Option`) local."""

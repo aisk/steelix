@@ -193,7 +193,9 @@ def _mentions(node: Any, name: str, body: bool = True) -> bool:
             name in _pattern_names(pattern)
         ):
             return True
-        case rs.If(pattern=str(pattern)) if name in _pattern_names(pattern):
+        case rs.If(pattern=str(pattern)) | rs.While(pattern=str(pattern)) if name in _pattern_names(
+            pattern
+        ):
             return True
         case rs.Closure(params) if any(name in _pattern_names(p) for p in params):
             return True
@@ -270,7 +272,7 @@ def _node(node: Any, owned: frozenset[str]) -> Any:
     match node:
         case rs.Fn():
             return dataclasses.replace(node, body=_body(node.body))
-        case rs.Closure(body=body):
+        case rs.Closure(body=body) | rs.AsyncBlock(body=body):
             return dataclasses.replace(node, body=_body(body))
         case rs.Block():
             return _block(node, owned)
@@ -280,6 +282,9 @@ def _node(node: Any, owned: frozenset[str]) -> Any:
             inner = owned | _pattern_names(pattern)
             other = None if orelse is None else _node(orelse, owned)
             return rs.If(_node(cond, owned), _block(then, inner), other, pattern)
+        case rs.While(cond, body, label, pattern) if pattern is not None:
+            inner = owned | _pattern_names(pattern)
+            return rs.While(_node(cond, owned), _block(body, inner), label, pattern)
     if isinstance(node, tuple):
         return tuple(_node(item, owned) for item in node)
     if not dataclasses.is_dataclass(node) or isinstance(node, type):
@@ -348,7 +353,7 @@ def _borrowed(expr: rs.Expr) -> frozenset[str]:
         match node:
             case rs.Ref(rs.Path(name)):
                 found.add(name)
-            case rs.Closure() | rs.Fn():
+            case rs.Closure() | rs.AsyncBlock() | rs.Fn():
                 return
         if isinstance(node, tuple):
             for item in node:

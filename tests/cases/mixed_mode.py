@@ -34,8 +34,9 @@ def double(x):
 
 def evens(limit):
     for n in range(limit):
-        if n % 2 == 0:
-            yield n
+        match n % 2:
+            case 0:
+                yield n
 
 
 def use_counter(start):

@@ -2,7 +2,7 @@ from .. import errors
 
 
 def lines(inventory):
-    # A generator: kept as Python source.
+    # A generator function.
     for item in inventory.items.values():
         if item.quantity < 0:
             raise errors.StoreError(f"negative quantity of {item.name}")

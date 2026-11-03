@@ -31,7 +31,8 @@ import builtins
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from steelix.frontend.regions import Region, expression_body
+from steelix.frontend.desugar import AsyncWith
+from steelix.frontend.regions import Region, expression_body, suspends
 from steelix.frontend.resolve import Lookup, resolve_global
 from steelix.lower.expr import Kind, Value
 from steelix.lower.function import BOUND
@@ -111,6 +112,12 @@ class HandlingLowering:
         return rs.Return(_ok(_flow(kind.capitalize())))
 
     # --- closures ---
+
+    def suspends(self: StmtLowering, region: Region) -> bool:
+        """Whether the closure of `region` is `async`: it awaits or yields
+        (design §8). Other regions of a coroutine stay plain closures."""
+        fn = self.ctx.function
+        return fn is not None and fn.is_async and suspends(region.nodes())
 
     def closure(self: StmtLowering, regions: list[Region], lower):  # type: ignore[no-untyped-def]
         """Lower the code of a closure region with `lower()`, which returns
@@ -245,9 +252,13 @@ class HandlingLowering:
         finally_ = self.ctx.temp("finally")
         closure = lowered.call
         assert isinstance(closure, rs.Closure)
-        inlined = _inlined(closure)
+        inlined = None if self.suspends(region) else _inlined(closure)
         out: list[rs.Stmt]
-        if inlined is not None:
+        if self.suspends(region):
+            # `let result: PyResult<..> = async { .. }.await;`
+            awaited = rs.Await(rs.AsyncBlock(closure.body))
+            out = [rs.Let(result, ty=closure.ret, init=awaited)]
+        elif inlined is not None:
             # Nothing to catch: `let result: PyResult<..> = Ok(..);`
             before, outcome = inlined
             out = [*before, rs.Let(result, ty=closure.ret, init=outcome)]
@@ -275,6 +286,7 @@ class HandlingLowering:
             return [*self.block(stmt.body).stmts, *self.block(stmt.orelse).stmts]
         expr = expression_body(stmt)
         prelude: list[rs.Stmt] = []
+        async_outcome: str | None = None
         if expr is not None:
             body = stmt.body[0]
             with self.exprs.fresh() as inner:
@@ -285,7 +297,15 @@ class HandlingLowering:
             prelude += hoisted
             lifetime = self.ctx.lifetime()
             ret = f"PyResult<Bound<{lifetime}, PyAny>>"
-            if inner:
+            if _has_await(scrutinee) and (inner or _has_try(scrutinee)):
+                # `match async { .. }.await`: the type of `Ok(..)` must be
+                # spelled out, a `PyResult` returned by PyO3 or the runtime
+                # tells it.
+                if _is_ok(scrutinee):
+                    assert isinstance(scrutinee, rs.Call)
+                    scrutinee = rs.Call(rs.Path("Ok::<_, PyErr>"), scrutinee.args)
+                scrutinee = rs.Await(rs.AsyncBlock(rs.Block(tuple(inner), scrutinee)))
+            elif inner:
                 # The expression needs statements first: they can raise too.
                 scrutinee = rs.Call(rs.Closure((), rs.Block(tuple(inner), scrutinee), ret), ())
             elif _has_try(scrutinee):
@@ -302,13 +322,20 @@ class HandlingLowering:
             handler_line = self.line
             ok_arms = self.expression_arms(stmt, body)
         else:
-            closure, stmts = self.closure(
-                [Region(stmt, "body")], lambda: list(self.block(stmt.body).stmts)
-            )
+            region = Region(stmt, "body")
+            closure, stmts = self.closure([region], lambda: list(self.block(stmt.body).stmts))
             lowered = self.finish_closure(closure, stmts)
             assert isinstance(lowered.call, rs.Closure)
-            inlined = _inlined(lowered.call)
-            if inlined is not None:
+            inlined = None if self.suspends(region) else _inlined(lowered.call)
+            if self.suspends(region):
+                # `match async { .. }.await` can not tell the error type of
+                # a `?` in it: `let result: PyResult<..> = async { .. }.await;`
+                outcome = self.ctx.temp("result")
+                awaited = rs.Await(rs.AsyncBlock(lowered.call.body))
+                prelude = [rs.Let(outcome, ty=lowered.call.ret, init=awaited)]
+                scrutinee = rs.Path(outcome)
+                async_outcome = outcome
+            elif inlined is not None:
                 # Only the outcome can be an error (`try: raise E`): the
                 # statements run before the `match` on it.
                 prelude, scrutinee = inlined
@@ -338,6 +365,10 @@ class HandlingLowering:
         if not catch_all:
             err = self.ctx.binding("err")
             arms.append(rs.Arm(f"Err({err})", rs.Block((_err(rs.Path(err)),))))
+        if async_outcome is not None and all(arm.pattern != "Err(_)" for arm in arms):
+            # The `match` moves the exception out, nothing is left to drop
+            # (with `Err(_)` the statement gets a block of its own instead).
+            self.ctx.pinned.add(async_outcome)
         self.line = ends[0] if all(end == ends[0] for end in ends) else None
         match_ = rs.Match(scrutinee, tuple(arms))
         fn = self.ctx.function
@@ -618,8 +649,25 @@ class HandlingLowering:
                     # A body that always raises says nothing about the type.
                     ret = "PyResult<()>"
             block = rs.Block(tuple(stmts), tail)
+        if isinstance(stmt, AsyncWith):
+            # `frame.async_with(&manager, async |value| ..).await`
+            closure_ = rs.Closure((param,), block, ret, is_async=True)
+            return before, rs.Await(_frame("async_with", manager_ref, closure_)), entry
+        if self.suspends(region):
+            closure_ = rs.Closure((param,), block, ret, is_async=True)
+            return before, rs.Await(_frame("with_async", manager_ref, closure_)), entry
         call = _frame("with", manager_ref, rs.Closure((param,), block, ret))
         return before, call, entry
+
+
+def _has_await(expr: rs.Expr) -> bool:
+    """Whether `expr` awaits, not looking into closures."""
+    match expr:
+        case rs.Await():
+            return True
+        case rs.Closure() | rs.AsyncBlock() | rs.Fn():
+            return False
+    return any(_has_await(child) for child in children(expr))
 
 
 def _unflow(stmt: rs.Stmt) -> rs.Stmt:
@@ -633,15 +681,15 @@ def _unflow(stmt: rs.Stmt) -> rs.Stmt:
             ):
                 # `Ok(f()?)` is `f()`, as `Value.result` writes it.
                 return rs.Return(value.expr if isinstance(value, rs.Try) else _ok(value))
-            case rs.Closure() | rs.Fn():
+            case rs.Closure() | rs.AsyncBlock() | rs.Fn():
                 return node
             case rs.Block(stmts, tail):
                 return rs.Block(tuple(visit(s) for s in stmts), tail)
             case rs.If(cond, then, orelse, pattern):
                 other = None if orelse is None else visit(orelse)
                 return rs.If(cond, visit(then), other, pattern)
-            case rs.While(cond, body, label):
-                return rs.While(cond, visit(body), label)
+            case rs.While(cond, body, label, pattern):
+                return rs.While(cond, visit(body), label, pattern)
             case rs.Loop(body, label):
                 return rs.Loop(visit(body), label)
             case rs.For(pat, iter_, body, label):
@@ -670,7 +718,7 @@ def _inlined(closure: rs.Closure) -> tuple[list[rs.Stmt], rs.Expr] | None:
         match node:
             case rs.Try() | rs.Return():
                 return True
-            case rs.Closure() | rs.Fn():
+            case rs.Closure() | rs.AsyncBlock() | rs.Fn():
                 return False
         return any(escapes(child) for child in children(node))
 

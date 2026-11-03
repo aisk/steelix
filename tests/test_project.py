@@ -248,7 +248,7 @@ def test_cli_transpiles_a_project(tmp_path: Path, capsys) -> None:
         {
             "app.py": "import pkg\nimport plugins.extra\n",
             "pkg/__init__.py": "from .core import run\n",
-            "pkg/core.py": "def run():\n    yield 1\n",
+            "pkg/core.py": "async def run():\n    yield 1\n",
             "plugins/__init__.py": "",
             "plugins/extra.py": "",
             "plugins/more.py": "",
@@ -279,7 +279,7 @@ def test_cli_transpiles_a_project(tmp_path: Path, capsys) -> None:
     data = json.loads(report.read_text())
     assert [m["module"] for m in data["modules"]][:2] == ["app.py", "pkg/__init__.py"]
     assert data["total"]["functions"] == {"native": 0, "total": 1}
-    assert data["features"][0]["feature"] == "yield"
+    assert data["features"][0]["feature"] == "asynchronous generator"
 
 
 def test_cli_python_m(tmp_path: Path, monkeypatch) -> None:

@@ -2,13 +2,15 @@
 
 It tells which module level functions are part of a cycle of direct Rust
 calls and need a `RecursionGuard` (calls through Python objects are already
-guarded by CPython; nested functions are only ever called through Python).
+guarded by CPython; nested functions are only ever called through Python),
+or, for coroutines and generators, `Box::pin` around the future of a
+recursive call.
 """
 
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from steelix.frontend.bindings import ModuleBindings
 from steelix.frontend.resolve import Direct, resolve_call
@@ -19,6 +21,14 @@ from steelix.frontend.scope import FunctionNode, ModuleScopes, scope_body, walk_
 class CallGraph:
     edges: dict[FunctionNode, list[ast.FunctionDef]]
     recursive: set[FunctionNode]
+    cycles: dict[FunctionNode, int] = field(default_factory=dict)
+    """The cycle (strongly connected component) of each recursive function."""
+
+    def in_cycle(self, caller: FunctionNode, callee: FunctionNode) -> bool:
+        """Whether a direct call from `caller` to `callee` is part of a
+        cycle: the future of a recursive `async fn` needs `Box::pin`."""
+        cycle = self.cycles.get(caller)
+        return cycle is not None and self.cycles.get(callee) == cycle
 
 
 def build_call_graph(
@@ -36,7 +46,8 @@ def build_call_graph(
                 if isinstance(target, Direct) and target.fn not in callees:
                     callees.append(target.fn)
         edges[fn] = callees
-    return CallGraph(edges, _in_cycles(edges))
+    cycles = _cycles(edges)
+    return CallGraph(edges, set(cycles), cycles)
 
 
 def _walk_body(fn: FunctionNode):
@@ -44,13 +55,14 @@ def _walk_body(fn: FunctionNode):
         yield from walk_scope(node)
 
 
-def _in_cycles(edges: dict[FunctionNode, list[ast.FunctionDef]]) -> set[FunctionNode]:
-    """Nodes on a cycle: members of a non-trivial SCC or with a self loop (Tarjan)."""
+def _cycles(edges: dict[FunctionNode, list[ast.FunctionDef]]) -> dict[FunctionNode, int]:
+    """Nodes on a cycle, members of a non-trivial SCC or with a self loop,
+    numbered by their SCC (Tarjan)."""
     index: dict[FunctionNode, int] = {}
     low: dict[FunctionNode, int] = {}
     stack: list[FunctionNode] = []
     on_stack: set[FunctionNode] = set()
-    result: set[FunctionNode] = set()
+    result: dict[FunctionNode, int] = {}
 
     def connect(v: FunctionNode) -> None:
         index[v] = low[v] = len(index)
@@ -71,7 +83,8 @@ def _in_cycles(edges: dict[FunctionNode, list[ast.FunctionDef]]) -> set[Function
                 if w is v:
                     break
             if len(component) > 1 or v in edges.get(v, []):
-                result.update(component)
+                number = len(set(result.values()))
+                result.update(dict.fromkeys(component, number))
 
     for v in edges:
         if v not in index:

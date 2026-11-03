@@ -6,7 +6,7 @@
 
 ## 结论
 
-- 转换一次就成功，不需要 `--include`、`--exclude` 或改源码。函数 373/374 原生（修复复数字面量之后），剩下的一个是 generator
+- 转换一次就成功，不需要 `--include`、`--exclude` 或改源码。函数 373/374 原生（修复复数字面量之后），剩下的一个是 generator，M13 之后 374/374
 - 行为和 CPython 一致：8 个 Scheme 程序（REPL 方式）的 stdout、退出码和 stderr 最后一行全部相同，`tests/projects/skime` 里 7 组命令行在 `--traceback-lines` 下和 CPython 的完整 traceback 相同
 - skime 自己的 108 个 pytest 用例对 ext 模式的原生包全部通过
 - `steelix build` 的分发在 `bwrap` 里运行正确，有源文件和 `--no-sources` 两种都和 CPython 一样
@@ -29,6 +29,8 @@ uv run steelix transpile -m skime --root skime -o out --report report.json
 
 - `Parser.parse_number`（`compiler/parser.py`）：复数字面量 `1j`（`num1 + sign2 * num2 * 1j`）。已经支持，见"steelix 的问题"
 - `iter_list`（`prim.py`）：generator（`yield`）。和 `coverage.md` 里别的程序一样，generator 是剩下的唯一障碍
+
+M13 之后 `iter_list` 也是原生的（`pub async fn iter_list`，`rt::def!(m, gen iter_list(lst, excp_t = ..))`），函数 374/374、行 4128/4128 全部原生，生成的 Rust 13516 行（M12 的修复改变了一些写法，所以比下面的数字少）。调用它的 `list(iter_list(lst))`、生成器表达式等经过函数对象创建生成器对象，和 CPython 一样。
 
 生成的 Rust 有 14851 行（`prim.rs` 4742 行、`compiler/compiler.rs` 2542 行、`macro.rs` 2456 行），是 Python 的 3.2 倍。干净构建（含 PyO3）开发模式 61 s，只改生成代码后重新构建约 10 s，release 54 s。转换本身 3 s。生成的 crate 编译没有警告，修复后 clippy 也是干净的。
 
@@ -75,6 +77,11 @@ uv run --project ~/steelix steelix test ~/steelix/out -- -q
 | CPython（`PYTHONPATH` 指向项目目录） | 108 passed | 0.14 s |
 | 原生，debug（opt-level 1，PyO3 和 runtime 是 3） | 108 passed | 0.25 s |
 | 原生，release（LTO） | 108 passed | 0.23 s |
+| M13，原生，debug | 108 passed | 0.26 s |
+| M13，原生，release | 108 passed | 0.23 至 0.25 s |
+| M13，CPython | 108 passed | 0.14 s |
+
+M13 之后 `iter_list` 是原生生成器，`tests/test_projects.py` 里 skime 的 8 个测试（驱动脚本 7 组命令行的完整 traceback、上面的 108 个用例等）照常通过，时间和 M12 一样。
 
 干净构建（含 PyO3）debug 47 s，之后的 `steelix test` 只有 cargo 的检查和 pytest 本身。
 
@@ -362,5 +369,5 @@ fib 22 分步看：只换 runtime（vectorcall、method descriptor、快速路�
 2. **一个 crate 同时出 bin 和 ext（M12 换了做法，用 bin 的解释器角色跑测试，见第 3 节）。** 生成的 crate 同时有 `[lib]`（cdylib）和 `[[bin]]`，或者 `steelix` 提供把一个 crate 的模块文件用于另一种模式的命令，让项目自己的测试套件能直接测改写后的代码。顺带写一份"用项目自己的 pytest 测原生代码"的做法（这次最有用的验证手段），并修好 ext 模式的 `python -m pkg`
 3. **补充 §15（M12 已做，见第 6 节）。** 加上这次遇到的几种情况：用原生函数取代一个类的用途（保留还是删除类）、适配层构造别的模块的类的实例（按 import 的别名取 globals）、抛项目自己的异常类（并在 runtime 里加一个小工具）、内联别的类的方法时的语义变化、Python 源码本身是生成的时候怎么保持单一来源
 4. **为第二步提供"属性读写索引"（M12 已做，`steelix attrs`，见第 6 节）。** 静态列出项目里每个类的每个实例属性被哪些函数读写（`ctx.ip` 这类），作为 `steelix coverage` 或单独命令的输出。改写 `Context` 这样被五个模块共享的类之前，没有这张表只能靠 grep
-5. **generator。** skime 里剩下的唯一一个保留函数，和 `coverage.md` 的结论一致
+5. **generator（M13 已做）。** skime 里剩下的唯一一个保留函数，和 `coverage.md` 的结论一致
 6. **分发的小问题。** 复制包目录时可以排除开发用的文件（`--exclude-data` 或按 `pyproject.toml` 的打包配置），`type(f).__module__` 返回字符串

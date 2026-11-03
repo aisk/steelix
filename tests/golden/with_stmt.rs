@@ -1,9 +1,3 @@
-//! Parts of `with_stmt.py` kept as Python source and run in place by
-//! `rt::exec_python!` (steelix does not lower them yet):
-//!
-//! - line 34, `def __aenter__`: async function
-//! - line 37, `def __aexit__`: async function
-
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::types::PyList;
@@ -440,25 +434,28 @@ pub mod async_ {
     /// The body of `class Async`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Async", 33, |_| {
-            // with_stmt.py:34, kept as Python: async function at 34:5
-            rt::exec_python!(
-                ns,
-                line = 34,
-                r#"
-    async def __aenter__(self):
-        return self
-"#
-            )?;
-            // with_stmt.py:37, kept as Python: async function at 37:5
-            rt::exec_python!(
-                ns,
-                line = 37,
-                r#"
-    async def __aexit__(self, *args):
-        return False
-"#
-            )?;
+            rt::def!(ns, async __aenter__(slf as "self"))?;
+            rt::def!(ns, async __aexit__(slf as "self", *args))?;
             Ok(())
+        })
+    }
+
+    // with_stmt.py:34
+    pub async fn __aenter__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Async.__aenter__", 34, async |_| { Ok(slf.clone()) })
+    }
+
+    // with_stmt.py:37
+    pub async fn __aexit__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        args: &Bound<'py, PyTuple>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        rt::frame!(m, "Async.__aexit__", 37, async |_| {
+            Ok(rt::bool(m.py(), false))
         })
     }
 }

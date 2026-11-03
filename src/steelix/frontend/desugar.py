@@ -22,6 +22,8 @@ class _LocalAnnotations(ast.NodeTransformer):
         self.depth -= 1
         return node
 
+    visit_AsyncFunctionDef = visit_FunctionDef
+
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
         # Annotations in a class body are the class's, never locals.
         saved, self.depth = self.depth, 0
@@ -142,7 +144,63 @@ def annotation_source(annotation: ast.expr) -> str:
     return getattr(annotation, "_steelix_source", None) or ast.unparse(annotation)
 
 
+class AsyncFunctionDef(ast.FunctionDef):
+    """`async def`, as a kind of `def` (`desugar`)."""
+
+
+class AsyncFor(ast.For):
+    """`async for`, as a kind of `for` (`desugar`)."""
+
+
+class AsyncWith(ast.With):
+    """`async with`, as a kind of `with` (`desugar`)."""
+
+
+_ASYNC = {
+    ast.AsyncFunctionDef: AsyncFunctionDef,
+    ast.AsyncFor: AsyncFor,
+    ast.AsyncWith: AsyncWith,
+}
+
+
+def _async_as_subclasses(module: ast.Module) -> None:
+    """Replace `async def`, `async for` and `async with` nodes by the
+    subclasses of `def`, `for` and `with` above, which have the same fields
+    and class names: the analyses treat them like their plain forms (scopes,
+    bindings, regions), the lowering tells them apart with `isinstance`, and
+    `ast.unparse` and visitors still see `async` nodes."""
+    for node in ast.walk(module):
+        if isinstance(node, ast.Await | ast.YieldFrom) and isinstance(node.value, ast.Call):
+            node.value._steelix_suspends = (  # type: ignore[attr-defined]
+                "await" if isinstance(node, ast.Await) else "yield from"
+            )
+        for name, value in ast.iter_fields(node):
+            if isinstance(value, list):
+                for i, item in enumerate(value):
+                    if type(item) in _ASYNC:
+                        value[i] = _converted(item)
+            elif type(value) in _ASYNC:
+                setattr(node, name, _converted(value))
+
+
+def _converted(node: ast.AST) -> ast.AST:
+    new = _ASYNC[type(node)](**dict(ast.iter_fields(node)))
+    for attr in node._attributes:
+        if hasattr(node, attr):
+            setattr(new, attr, getattr(node, attr))
+    new.__dict__.update({k: v for k, v in node.__dict__.items() if k.startswith("_steelix")})
+    return new
+
+
+def suspends(call: ast.Call) -> str | None:
+    """`await` for the call in `await f(x)`, `yield from` for the one in
+    `yield from g(x)`: the only calls that can go straight to the Rust fn
+    of a native coroutine or generator (design §8)."""
+    return getattr(call, "_steelix_suspends", None)
+
+
 def desugar(module: ast.Module) -> None:
     """Rewrite `module` in place."""
     _Mangle().visit(module)
     _LocalAnnotations().visit(module)
+    _async_as_subclasses(module)
