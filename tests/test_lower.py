@@ -120,7 +120,7 @@ def test_option_local_and_none_return() -> None:
 
 def test_globals_builtin_reads_the_module_dict() -> None:
     out = lower("x = globals()\n")
-    assert 'm.set_global("x", m.globals().clone().into_any())?;' in out
+    assert 'm.set_global("x", m.globals())?;' in out
 
 
 def test_pure_operands_need_no_temporaries() -> None:
@@ -483,7 +483,7 @@ def test_exec_without_namespace_gets_the_module_globals() -> None:
             return eval("y")
         """
     )
-    call = 'm.global("exec")?\n            .call1(("y = 1", m.globals().clone().into_any()))?;'
+    call = 'm.global("exec")?.call1(("y = 1", m.globals()))?;'
     assert call in out
     assert "// m.py:3, kept as Python: eval() without a namespace in a function at 4:12" in out
 

@@ -61,9 +61,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.global("print")?.call1((
             m.global("area")?.getattr("__doc__")?,
             m.global("area")?.getattr("__module__")?,
-            m.global("area")?
-                .getattr("__globals__")?
-                .is(m.globals().clone().into_any()),
+            m.global("area")?.getattr("__globals__")?.is(m.globals()),
         ))?;
         m.global("print")?.call1((
             m.global("area")?.getattr("__defaults__")?,

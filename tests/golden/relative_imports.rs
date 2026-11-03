@@ -104,7 +104,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                             " import nothing",
                         ),
                     )?,
-                    m.globals().clone().into_any(),
+                    m.globals(),
                 ))
             })() {
                 Ok(_) => {}

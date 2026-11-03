@@ -29,7 +29,7 @@ pub fn span<'py>(
         let mut start = start.clone();
         let mut stop = stop.clone();
         if stop.is_none() {
-            [start, stop] = rt::unpack(PyTuple::new(py, [&rt::int(py, 0), &start])?.as_any())?;
+            [start, stop] = [rt::int(py, 0), start.clone()];
         }
         Ok(PyList::new(py, [&start, &stop, step])?.into_any())
     })

@@ -526,6 +526,15 @@ class StmtLowering(HandlingLowering):
                     )
                     setter = o.method("setattr", rs.StrLit(attr), v.arg())
                     return [_try_stmt(setter)]
+                case ast.Tuple(elts) | ast.List(elts) if _same_shape(elts, value):
+                    # `a, b = b, a`: no tuple to build and unpack again.
+                    assert isinstance(value, ast.Tuple | ast.List)
+                    items = exprs.operands(list(value.elts))
+                    array = rs.Array(tuple(item.owned() for item in items))
+                    return self.unpack(stmt, elts, None, False, array)
+            fn = self.ctx.function
+            if isinstance(target, ast.Name) and fn is not None and target.id in fn.bool_locals:
+                return [self.store_name(stmt, target.id, exprs.bool_value(exprs.condition(value)))]
             return self.store(stmt, target, exprs.value(value))
         # `a = b = value`: evaluate once, then assign left to right.
         lowered = exprs.value(value)
@@ -574,6 +583,9 @@ class StmtLowering(HandlingLowering):
             return _try_stmt(rs.MethodCall(rs.Path(rust), "set", (value.arg(),)))
         info = fn.locals
         init = value.owned()
+        if name in fn.bool_locals:
+            assert value.kind is Kind.BOOL, value
+            init = value.expr
         if name in info.optional:
             init = rs.Call(rs.Path("Some"), (init,))
         if info.declared_at.get(name) is stmt:
@@ -583,15 +595,25 @@ class StmtLowering(HandlingLowering):
         return rs.Assign(rs.Path(rust), init)
 
     def unpack(
-        self, stmt: ast.stmt, elts: list[ast.expr], value: Value, declare: bool
+        self,
+        stmt: ast.stmt,
+        elts: list[ast.expr],
+        value: Value | None,
+        declare: bool,
+        array: rs.Expr | None = None,
     ) -> list[rs.Stmt]:
-        """`a, b = value` and `a, *rest = value`.
+        """`a, b = value` and `a, *rest = value`, or with `array` instead of
+        `value`, the items of a display of the same length.
 
         With `declare`, names are declared by the `let` pattern itself (loop
         variables scoped to the loop body).
         """
         star = next((i for i, e in enumerate(elts) if isinstance(e, ast.Starred)), None)
-        call = rs.Try(_rt("unpack" if star is None else "unpack_star", value.ref()))
+        if array is not None:
+            call = array
+        else:
+            assert value is not None
+            call = rs.Try(_rt("unpack" if star is None else "unpack_star", value.ref()))
         targets = [e.value if isinstance(e, ast.Starred) else e for e in elts]
 
         fn = self.ctx.function
@@ -778,3 +800,14 @@ def _target_base(target: ast.expr) -> str:
 
 def _names(target: ast.expr) -> list[str]:
     return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
+
+
+def _same_shape(targets: list[ast.expr], value: ast.expr) -> bool:
+    """`a, b = x, y`: a tuple or list display with one item per target, and
+    no `*` on either side. Python evaluates the items, then assigns them
+    in order; the tuple in between is never seen."""
+    return (
+        isinstance(value, ast.Tuple | ast.List)
+        and len(value.elts) == len(targets)
+        and not any(isinstance(e, ast.Starred) for e in [*targets, *value.elts])
+    )

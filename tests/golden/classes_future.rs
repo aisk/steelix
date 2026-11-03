@@ -186,8 +186,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         {
             let dataclass = m.global("dataclasses")?.getattr("dataclass")?;
             let pair = rt::class!(m, "Pair"(), pair::body, line = 31)?;
-            let pair = dataclass.call1((pair,))?;
-            m.set_global("Pair", pair)?;
+            m.set_global("Pair", dataclass.call1((pair,))?)?;
         }
         rt::builtins::print(
             py,

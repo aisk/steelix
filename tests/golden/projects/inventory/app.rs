@@ -235,7 +235,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     if PySet::new(py, ["store", "plugins", "config", "lazy", "app"])?
                         .contains(&item)?
                     {
-                        return Ok(Some(m.clone()));
+                        return Ok(Some(m));
                     }
                     py.check_signals()?;
                 }

@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10。
 
 ## M0 项目骨架 ✅
 
@@ -215,14 +215,23 @@ M9 第一项提前做，并且改成默认行为。
 - [x] golden 重新生成，`tests/golden/traceback_lines/` 留几个用例的 marker 版本。golden 从 20493 行减到 18114 行，`tests/apps` 的输出从 11041 行减到 9419 行
 - [x] `examples/logsum/rewritten` 里没改写的函数换成新的生成结果，§15 写明改写时怎么处理 `rt::frame!`
 
-## M9 可读性与渐进式改写
+## M9 可读性 ✅
 
-- [ ] 基于类型注解的可选 typed lowering（`int` → `i64` 等），只在用户显式开启时启用
-- [ ] 符合条件的类可选升级为 `#[pyclass]`（§10）
-- [ ] 生成代码的清理 pass：去掉多余 clone、合并临时变量
-- [ ] 用一两个真实的小项目做验证，记录转换覆盖率
-- [ ] CI
+只做低成本、按构造就保持语义的改进。基于类型注解的 typed lowering 和自动升级 `#[pyclass]` 移到"以后再说"。
+
+- [x] 先测量：在 golden、`tests/apps`、`tests/projects` 和 154 个标准库模块上统计 clone、临时变量、`as_any`/`into_any` 等写法。结论是大部分 clone 和临时变量都是必要的（参数是 `&Bound`、两个 Python 变量共享对象、求值顺序），数据和取舍见 §8
+- [x] 返回或 yield 在同一个 fn 或闭包里声明的局部变量时 move 而不是 clone（`rustast/cleanup.py`）
+- [x] 个数相同、没有 `*` 的解包赋值 `a, b = b, a` 写成 `[a, b] = [b.clone(), a.clone()]`，不构造元组再解包；`globals()` 不再 clone；装饰类的最外层装饰器在保存时调用，和函数一样
+- [x] 只会是 `bool` 的局部变量是 Rust `bool`（§5，`frontend/booleans.py`），只认 Python 语义保证是 `bool` 的值（`not`、`is`、`in`、`isinstance`、`bool()`、字面量和它们的 `and`/`or`），比较运算不算。标准库 12087 个局部变量里有 128 个
+- [x] 用例 `bool_locals`（富比较返回非 bool、`__bool__` 的调用时机、被捕获、可能未赋值、`try`/`with` 里赋值）和 `returned_locals`（move 之后 `__del__`、weakref 的时机不变）
+- [x] CI：`.github/workflows/ci.yml`，ruff、cargo fmt、clippy 和完整的 pytest（§14）
+
+已有用例的 golden 从 18168 行变成 18138 行（新增的两个用例另有 815 行），`tests/golden/projects` 的模块从 7873 行变成 7860 行，`tests/apps` 的输出从 9419 行变成 9407 行，154 个标准库模块从 332793 行变成 332235 行。行数变化不大，主要的变化是返回值少了 clone、解包不再构造元组、bool 局部变量不再经过 `rt::bool` 和 `is_truthy`（标准库里 `rt::bool(` 从 1251 个减到 1048 个，`is_truthy` 从 5585 个减到 5440 个）。
+
+## M10 真实项目验证
+
+- [ ] 用一两个真实的小项目完整走一遍转换、`steelix build` 部署、按 §15 逐步改写，记录转换覆盖率和改写时遇到的阻碍，据此决定下一步
 
 ## 以后再说
 
-generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）
+基于类型注解的 typed lowering（`int` → `i64` 等）和符合条件的类自动升级为 `#[pyclass]`（M9 原来的计划，不做的原因是注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就要同时生成两套代码路径，见 §1、§10）、generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）

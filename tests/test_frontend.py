@@ -6,6 +6,7 @@ import textwrap
 import pytest
 
 from steelix.frontend.bindings import analyze_locals, analyze_module_bindings
+from steelix.frontend.booleans import bool_locals
 from steelix.frontend.callgraph import build_call_graph
 from steelix.frontend.parse import parse_source
 from steelix.frontend.resolve import (
@@ -854,3 +855,111 @@ def test_walrus_declares_where_it_always_runs() -> None:
     assert isinstance(info.declared_at["y"], ast.NamedExpr)
     # Only assigned when `y` is true.
     assert "z" not in info.declared_at
+
+
+# --- bool locals -------------------------------------------------------------
+
+
+def bools_of(source: str, name: str = "f") -> frozenset[str]:
+    tree, src = parse(source)
+    fn = function(tree, name)
+    scopes = analyze_scopes(tree, src, "m.py")
+    scope = scopes.of(fn)
+    bindings = analyze_module_bindings(tree)
+    return bool_locals(fn, scope, analyze_locals(scope, scopes), bindings)
+
+
+def test_locals_assigned_only_bools_are_bool_locals() -> None:
+    found = bools_of(
+        """
+        def f(x, xs):
+            a = True
+            b = not x
+            c = x is None
+            d = x is not None
+            e = x in xs
+            g = x not in xs
+            h = isinstance(x, int)
+            i = bool(x)
+            j = a and (b or c)
+            k = d if x else e
+            l = k
+            if x:
+                a = False
+            return a, b, c, d, e, g, h, i, j, k, l
+        """
+    )
+    assert found == set("abcdeghijkl")
+
+
+def test_values_python_does_not_guarantee_to_be_bool() -> None:
+    found = bools_of(
+        """
+        def f(x, y, xs, isinstance):
+            lt = x < y
+            eq = x == y
+            chained = x in xs in xs
+            either = x or True
+            shadowed = isinstance(x, int)
+            mixed = False
+            if x:
+                mixed = 1
+            maybe = None
+            maybe = True
+            return lt, eq, chained, either, shadowed, mixed, maybe
+        """
+    )
+    assert found == frozenset()
+
+
+def test_shadowed_bool_builtin_is_not_a_bool() -> None:
+    tree, src = parse(
+        """
+        def bool(x):
+            return x
+
+        def f(x):
+            b = bool(x)
+            return b
+        """
+    )
+    fn = function(tree, "f")
+    scopes = analyze_scopes(tree, src, "m.py")
+    scope = scopes.of(fn)
+    info = analyze_locals(scope, scopes)
+    assert bool_locals(fn, scope, info, analyze_module_bindings(tree)) == frozenset()
+
+
+def test_bool_locals_must_be_plain_locals() -> None:
+    found = bools_of(
+        """
+        def f(flag, xs):
+            loop = False
+            for loop in xs:
+                pass
+            deleted = True
+            del deleted
+            captured = True
+            def g():
+                return captured
+            walrus = False
+            if (walrus := flag is None):
+                pass
+            unbound_on_some_path = None
+            if flag:
+                maybe = True
+            print(maybe)
+            augmented = True
+            augmented &= flag is None
+            tupled = True
+            tupled, other = True, False
+            flag = True
+            try:
+                attempt = flag in xs
+            except TypeError:
+                attempt = False
+            plain = flag is None
+            return loop, captured, walrus, augmented, tupled, other, attempt, plain
+        """
+    )
+    assert found == {"plain"}

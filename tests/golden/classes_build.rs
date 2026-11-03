@@ -73,7 +73,7 @@ pub fn fake_meta<'py>(
                 for k in ns {
                     let k = k?;
                     if !k.call_method1("startswith", ("__",))?.is_truthy()? {
-                        return Ok(Some(k.clone()));
+                        return Ok(Some(k));
                     }
                     m.py().check_signals()?;
                 }
@@ -1051,8 +1051,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 25
             )?;
             let ordered = decorator2.call1((ordered,))?;
-            let ordered = decorator.call1((ordered,))?;
-            m.set_global("Ordered", ordered)?;
+            m.set_global("Ordered", decorator.call1((ordered,))?)?;
         }
         rt::builtins::print(
             py,
@@ -1428,8 +1427,7 @@ def replaced(cls):
         {
             let replaced = m.global("replaced")?;
             let original = rt::class!(m, "Original"(), original::body, line = 318)?;
-            let original = replaced.call1((original,))?;
-            m.set_global("Original", original)?;
+            m.set_global("Original", replaced.call1((original,))?)?;
         }
         rt::builtins::print(
             py,

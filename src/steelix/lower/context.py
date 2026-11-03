@@ -72,6 +72,12 @@ class FunctionInfo:
     """Locals that `:=` assigns somewhere in the function: reading one is
     not pure, an assignment expression later in the same expression may
     change it."""
+    bool_locals: frozenset[str] = frozenset()
+    """Locals that are a Rust `bool` (`frontend.booleans`, design §5)."""
+
+    def local_type(self, name: str) -> str:
+        """The Rust type of an ordinary (not `Option`) local."""
+        return "bool" if name in self.bool_locals else "Bound<'py, PyAny>"
 
     def is_cell(self, name: str) -> bool:
         """Whether `name` is a `rt::Cell` here: an owned cell that nested

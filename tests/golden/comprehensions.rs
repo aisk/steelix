@@ -820,7 +820,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             print.call1((module_level, list, set))?;
         }
         let print = m.global("print")?;
-        let value = m.globals().clone().into_any().contains("n")?;
+        let value = m.globals().contains("n")?;
         let dict = PyDict::new(py);
         for item2 in m
             .global("zip")?

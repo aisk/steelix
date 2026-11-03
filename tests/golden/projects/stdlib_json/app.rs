@@ -7,45 +7,32 @@ use steelix_runtime as rt;
 // app.py:23
 /// Which functions came from `_json`.
 pub fn accelerated<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "accelerated", 23, |_| {
         Ok([
             (
                 "scanner",
-                &rt::bool(
-                    py,
-                    m.global("scanner")?
-                        .getattr("make_scanner")?
-                        .is(m.global("scanner")?.getattr("c_make_scanner")?),
-                ),
+                m.global("scanner")?
+                    .getattr("make_scanner")?
+                    .is(m.global("scanner")?.getattr("c_make_scanner")?),
             ),
             (
                 "scanstring",
-                &rt::bool(
-                    py,
-                    m.global("decoder")?
-                        .getattr("scanstring")?
-                        .is(m.global("decoder")?.getattr("c_scanstring")?),
-                ),
+                m.global("decoder")?
+                    .getattr("scanstring")?
+                    .is(m.global("decoder")?.getattr("c_scanstring")?),
             ),
             (
                 "encode_basestring_ascii",
-                &rt::bool(
-                    py,
-                    m.global("encoder")?
-                        .getattr("encode_basestring_ascii")?
-                        .is(m.global("encoder")?.getattr("c_encode_basestring_ascii")?),
-                ),
+                m.global("encoder")?
+                    .getattr("encode_basestring_ascii")?
+                    .is(m.global("encoder")?.getattr("c_encode_basestring_ascii")?),
             ),
             (
                 "make_encoder",
-                &rt::bool(
-                    py,
-                    !m.global("encoder")?.getattr("c_make_encoder")?.is_none(),
-                ),
+                !m.global("encoder")?.getattr("c_make_encoder")?.is_none(),
             ),
         ]
-        .into_py_dict(py)?
+        .into_py_dict(m.py())?
         .into_any())
     })
 }

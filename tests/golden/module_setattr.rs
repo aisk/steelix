@@ -47,10 +47,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.global("me")?.setattr("other", plain2)?;
         m.global("print")?
             .call1((m.global("other")?.call1((1,))?,))?;
-        m.global("exec")?.call1((
-            "def plain(x):\n    return x * 10",
-            m.globals().clone().into_any(),
-        ))?;
+        m.global("exec")?
+            .call1(("def plain(x):\n    return x * 10", m.globals()))?;
         m.global("print")?.call1((
             m.global("plain")?.call1((21,))?,
             m.global("other")?.call1((1,))?,

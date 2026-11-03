@@ -216,8 +216,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 9,
                 annotations = [("name", "str"), ("price", "float"), ("tags", "list")]
             )?;
-            let item = dataclass.call1((item,))?;
-            m.set_global("Item", item)?;
+            m.set_global("Item", dataclass.call1((item,))?)?;
         }
         {
             let decorator = rt::call!(m.global("dataclass")?, frozen = true, order = true)?;
@@ -228,8 +227,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 19,
                 annotations = [("major", "int"), ("minor", "int")]
             )?;
-            let version = decorator.call1((version,))?;
-            m.set_global("Version", version)?;
+            m.set_global("Version", decorator.call1((version,))?)?;
         }
         m.set_global("item", m.global("Item")?.call1(("pen", 1.5))?)?;
         rt::builtins::print(
@@ -409,8 +407,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 78,
                 annotations = [("x", "int"), ("y", "int")]
             )?;
-            let slotted = decorator.call1((slotted,))?;
-            m.set_global("Slotted", slotted)?;
+            m.set_global("Slotted", decorator.call1((slotted,))?)?;
         }
         m.set_global("s", m.global("Slotted")?.call1((1,))?)?;
         rt::builtins::print(
@@ -431,8 +428,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 91,
                 annotations = [("color", "str")]
             )?;
-            let child = dataclass.call1((child,))?;
-            m.set_global("Child", child)?;
+            m.set_global("Child", dataclass.call1((child,))?)?;
         }
         rt::builtins::print(
             py,

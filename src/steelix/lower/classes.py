@@ -124,14 +124,19 @@ def lower_class_def(lowering: StmtLowering, stmt: ast.ClassDef) -> list[rs.Stmt]
     if decorators:
         temp = ctx.temp(mod_name(stmt.name, set()))
         out.append(rs.Let(temp, init=created))
-        for line, decorator in reversed(decorators):
+        for line, decorator in reversed(decorators[1:]):
             applied = exprs.call_value(decorator, [Value(rs.Path(temp), Kind.OWNED)])
             out += lowering.at_line(line)
             out.append(rs.Let(temp, init=applied.expr))
-        created = rs.Path(temp)
+        # The outermost one is applied where the class is stored, like a
+        # decorated function: `m.set_global("Point", decorator.call1((point,))?)?`.
+        line, decorator = decorators[0]
+        out += lowering.at_line(line)
+        created = exprs.call_value(decorator, [Value(rs.Path(temp), Kind.OWNED)]).expr
     with exprs.fresh() as prelude:
         store = lowering.store_name(stmt, binding_name(stmt), Value(created, Kind.OWNED))
-    return out + prelude + [store]
+    assert not prelude  # it would run before the decorator
+    return out + [store]
 
 
 def merge_text(parts: list[str | rs.Expr]) -> tuple[str | rs.Expr, ...]:

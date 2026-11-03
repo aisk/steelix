@@ -570,10 +570,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             &rt::call!(m.global("Manager")?, "module quiet", suppress = true)?,
             |_| -> PyResult<()> { Err(frame.raise(m.global("ValueError")?.call1(("module",))?)) },
         )?;
-        m.global("print")?.call1((
-            m.globals().clone().into_any().contains("pair")?,
-            m.global("pair")?,
-        ))?;
+        m.global("print")?
+            .call1((m.globals().contains("pair")?, m.global("pair")?))?;
         Ok(())
     })
 }

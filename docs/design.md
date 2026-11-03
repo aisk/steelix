@@ -16,7 +16,7 @@
 
 ### 非目标（至少在 PoC 阶段）
 
-- 性能优化，类型推导出原生类型（后续可基于类型注解做可选的 typed lowering）
+- 性能优化，类型推导出原生类型。按类型注解生成原生类型（`int` 变成 `i64` 等）也不做：注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就得同时生成两套代码路径。唯一的例外是 Python 语义保证只会是 `bool` 的局部变量（§5），它不依赖注解
 - 100% 语义兼容。允许有文档化的差异（见第 12 节）
 - generator、async/await、match、metaclass 自定义、`exec`/`eval` 等复杂特性的原生转换。用到它们的代码通过混合模式保留为 Python 源码照常运行（第 13 节）
 
@@ -31,12 +31,14 @@ Python AST + 注释
   │  frontend/scope.py     symtable 分析作用域（local/global/nonlocal/cell/free）
   │  frontend/bindings.py  自行遍历 AST，统计模块级名字的绑定次数，
   │                        局部变量的定值分析（definite assignment）
+  │  frontend/booleans.py  只会是 bool 的局部变量（§5）
   ▼
 带作用域信息的 AST
   │  lower/*               逐节点降级，按 Python 求值顺序生成临时变量，
   │                        保留的语句生成 rt::exec_python!
   ▼
 Rust AST（rustast/nodes.py）
+  │  rustast/cleanup.py    返回的局部变量 move 而不是 clone（§8）
   │  rustast/verify.py     检查作用域、跳转标签、带类型的接收者
   │  rustast/printer.py    渲染成源码，再强制过一遍 rustfmt
   ▼
@@ -46,7 +48,7 @@ Rust AST（rustast/nodes.py）
 Cargo crate
 ```
 
-选择先构建一个小型 Rust AST 再打印，而不是直接拼字符串。这样 lowering 和格式化解耦，也方便做局部的可读性改写（例如去掉多余的 clone、合并 `?`）。Rust AST 只覆盖生成代码用得到的部分，不追求完整。
+选择先构建一个小型 Rust AST 再打印，而不是直接拼字符串。这样 lowering 和格式化解耦，也方便做局部的可读性改写（`rustast/cleanup.py` 把返回的局部变量 move 出去而不是 clone，§8）。Rust AST 只覆盖生成代码用得到的部分，不追求完整。
 
 打印之前先跑一遍检查器（`rustast/verify.py`，M3a），发现问题就报内部错误，而不是写出编译不过或语义错误的代码。它检查三类容易在 lowering 里犯、review 也不容易看出来的错误：
 
@@ -185,6 +187,11 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 - body 不会失败的 `try`（只有 `pass`，或者一条语句把常量、已赋值的普通局部变量或它们组成的元组赋给普通局部变量、作为表达式求值或返回，如 `try: x = 1`）直接生成 body，handler 不可达，变量在 body 的赋值处声明。多条语句的 body 仍然走闭包
 - A 形式的 `try`（§9）`x = expr`，没有 `else`/`finally`，每个 handler 都以给 `x` 赋值结束或者跳走（`raise`、`return`、`break`、`continue`），并且 handler 里别处不用 `x` 时，写成 `let x = match .. { Ok(value) => value, Err(..) => { ..; value } };`
 - 被内层函数捕获并且之后会改变的变量（cell）用 `rt::Cell`，不参与上面的处理，见第 6 节
+- 只会是 `bool` 的局部变量（M9，`frontend/booleans.py`）是 Rust `bool`：`let mut found = false;`，`found = true;`，`if !found { .. }`。条件是它每次被赋的值按 Python 的语义一定是 `bool`，与操作数的类型无关，并且 lowering 本来就把这个值算成 Rust `bool`
+  - 符合的值只有 `True`/`False`、`not x`、单个的 `is`/`is not`/`in`/`not in` 比较（`in` 会把 `__contains__` 的结果转成 `bool`）、名字只可能是 builtin 时的 `isinstance(x, t)` 和 `bool(x)`、其它这样的局部变量，以及操作数都符合的 `and`/`or` 和条件表达式。`a < b`、`a == b` 不算，富比较可以返回任何对象（numpy、自定义的 `__eq__`），Python 的局部变量存的就是那个对象
+  - 变量本身必须是普通的 Rust 局部变量：只由 `x = value` 赋值（没有 `for`、`with`、`except`、`import`、`del`、增量赋值、解包赋值和 `:=`），不会在可能未赋值时读取（那需要 `Option`，仍然用对象），没有被内层函数捕获，也不是单表达式 `try`（`try: x = expr`）的赋值目标（它的 `match` 得到的是对象）。函数里的 `locals()` 等本来就让整个函数保留为 Python
+  - 赋值时右边按条件求值（`exprs.condition`），和 `if` 的条件写法一样。读取时是 `Kind.BOOL` 的值，和 `in`、`is` 的结果一样处理：条件里直接用，作为 `IntoPyObject` 参数（`print(found)`、`call1((found,))`）直接传 `found`，PyO3 转换成 `True`/`False`；需要 `Bound<PyAny>` 的地方（返回值、方法的接收者、`&Bound` 参数）写 `rt::bool(py, found)`。没有用 `PyBool::new(py, found)`，因为它返回 `Borrowed<PyBool>`，还要 `.to_owned().into_any()`；`found.into_pyobject(py)?` 也一样要擦除类型。全是 Rust `bool` 的列表、元组字面量直接写成 `[found, x.is_none()]`
+  - 标准库 154 个模块里 7171 个转换的函数共有 12087 个局部变量，符合的有 128 个（99 个函数），`tests/apps` 的 6 个工具里有 4 个
 - `try` 体、`finally` 之前的部分和 `with` 体在立即调用的闭包里执行（第 9 节），闭包不能初始化外层 fn 里声明了但还没赋值的变量，所以（`frontend/regions.py`、`frontend/bindings.py`）
   - 只在一个闭包区域内出现的局部变量在闭包里声明，规则同上（区域顶层第一次赋值处 `let`，否则在闭包开头声明），每次执行闭包都从未赋值开始
   - 在闭包里赋值、但在外面也用到的变量，进入闭包时必须已经确定赋值，否则是 `Option`
@@ -470,6 +477,15 @@ h.call0()?.contains(&item)?
     h.setattr("attr", rt::iadd(&h.getattr("attr")?, 1)?)?;
 }
 ```
+
+返回值和赋值的清理（M9）。下面这些只在语义上完全等价时做，不改变求值顺序，也不改变任何对象释放的时机（`tests/cases/returned_locals.py` 用 `__del__` 和 weakref 检查）
+
+- 返回或者 yield 一个在同一个 fn 或闭包里声明的局部变量时直接 move（`return Ok(x)`、`return Ok(Some(x))`），不 clone（`rustast/cleanup.py`，在 Rust AST 上做，因为只有那里知道变量在哪个闭包里声明）。返回之后这个变量不会再被用到，对象由返回值继续持有，不会有别的对象因此提前或推迟释放。外层 fn 或闭包的变量（被闭包按引用捕获）、参数（`&Bound`）、`Option` 变量和被 guard 借用的变量（`rt::Handling::new(&err)`）照旧 clone
+- 目标和右边个数相同、都没有 `*` 的解包赋值 `a, b = b, a` 不再构造元组再 `rt::unpack`，写成 `[a, b] = [b.clone(), a.clone()];`。Python 也是先按顺序求值右边的每一项，再依次赋值，中间的元组看不到（CPython 对两三项的情况本来就不构造元组）
+- `globals()` 是模块持有的 `&Bound<PyDict>`，直接用 `m.globals()`，不再 `.clone().into_any()`（`m.globals().contains("n")?`）
+- 带装饰器的类和带装饰器的函数一样，最外层的装饰器在保存时调用：`m.set_global("Point", decorator.call1((point,))?)?`
+
+量过但没有做的（标准库 154 个模块，32 万行）：`.clone()` 共 2422 个，其中 1150 个是被重新赋值的参数 `let mut n = n.clone();`（参数是 `&Bound`），约 400 个是 `x = y.clone()`（两个 Python 变量都持有这个对象，move 会让对象在 `x` 被重新赋值时提前释放），约 270 个是返回参数（`&Bound`，只能 clone），约 170 个是条件表达式和 `and`/`or` 的值形式里的局部变量，都是必要的。临时变量在 lowering 时已经只在求值顺序需要时才引入，3052 个临时变量里能原样内联而不改变求值顺序的只有装饰器的 `let decorator`/`let function`（650 多个，内联之后是一个很长的嵌套调用，不比现在好读）和上面的装饰类
 
 具体写法
 
@@ -887,7 +903,7 @@ m.set_global(
 ### 不选的方案
 
 - `types.new_class` 的语义和 `__build_class__` 相同，但类体要以 Python 回调的形式传进去，`__qualname__`、`__module__`、`__firstlineno__`、`__classcell__` 和类体的帧都要在回调外另外处理。直接复刻 `__build_class__` 的 C 代码，求值顺序和报错更容易对齐
-- `#[pyclass]` 不作为默认方案（已验证）：不能继承 Python 定义的类（TestCase、Enum、NamedTuple、Thread 等），不支持 pickle/copy，和 Exception 混合继承会出现 layout conflict，类体内的逻辑、条件定义的类、局部类都无法表达。它是手工改写时的升级路径（第 15 节），M9 计划为符合条件的类提供可选的自动升级，适用于只继承 object 或原生类型、且有类型注解的类，更接近最终的 Rust 形态
+- `#[pyclass]` 不作为默认方案（已验证）：不能继承 Python 定义的类（TestCase、Enum、NamedTuple、Thread 等），不支持 pickle/copy，和 Exception 混合继承会出现 layout conflict，类体内的逻辑、条件定义的类、局部类都无法表达。它是手工改写时的升级路径（第 15 节）。自动升级符合条件的类（只继承 object 或原生类型、有类型注解）也不做：注解不强制，字段的 Rust 类型在运行时可能放不下 Python 实际传进来的值，`#[pyclass]` 还会改变 pickle、`__dict__`、被 Python 类继承等可见的行为，要保持语义就需要两套实现
 - 方法级混合模式的另一种做法是把保留的方法单独编译成函数，再放进命名空间。没有这样做，因为 `super()`、`__class__`、私有名字改编、`__qualname__` 都依赖编译器把它当作类体的一部分编译。现在的做法见 §13
 
 ## 11. 输出模式
@@ -1203,7 +1219,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 
 - **单元测试**：rustast 打印、作用域与绑定分析等纯 Python 逻辑
 - **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动。golden 是默认的输出（没有行号 marker），`tests/golden/traceback_lines/` 另有几个用例（`fib`、`control_flow`、`try_except`、`classes_basic`）在 `--traceback-lines` 下的输出
-- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段。同一层还对所有 golden 跑 `cargo clippy`（默认 lint 组，警告也算失败）。crate 根上另外 allow 五个 clippy lint：`never_loop`（Python 里 `for` 的第一轮就 `return`/`break` 是常见写法）、`approx_constant`（Python 源码里的 `3.14159` 本来就是那个字面量）、`if_same_then_else`（Python 两个分支写同样的代码是程序本身的事）、`too_many_arguments`（Python 函数的参数个数，M6 转换 `json` 时遇到）、`doc_lazy_continuation`（docstring 不是 Markdown，doctest 的 `>>>` 会被当成引用块），它们说的是 Python 程序本身，不是生成方式
+- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段。同一层还对所有 golden 跑 `cargo clippy`（默认 lint 组，警告也算失败）。crate 根上另外 allow 几个 clippy lint：`never_loop`（Python 里 `for` 的第一轮就 `return`/`break` 是常见写法）、`approx_constant`（Python 源码里的 `3.14159` 本来就是那个字面量）、`if_same_then_else`（Python 两个分支写同样的代码是程序本身的事）、`too_many_arguments`（Python 函数的参数个数，M6 转换 `json` 时遇到）、`doc_lazy_continuation`（docstring 不是 Markdown，doctest 的 `>>>` 会被当成引用块），以及 M9 的 bool 局部变量（§5）带来的四个：`while_immutable_condition`（`while not done` 但循环里从不给 `done` 赋值，Python 程序靠 `break` 退出）、`eq_op`、`nonminimal_bool`、`overly_complex_bool_expr`（`a and a`、`a and not a` 这样多余的逻辑）。它们说的是 Python 程序本身，不是生成方式
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码和 stderr。这些 crate 用 `--traceback-lines` 生成，有 traceback 时比较完整的 traceback（M4 起原生函数也有帧，第 9 节），只去掉原生帧没有的 `^^^` 行和 CPython 编译时的 `SyntaxWarning`；少数用例（直接调用的递归，§12）只比较异常类型。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
@@ -1221,7 +1237,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
 - 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
-- CI：GitHub Actions 跑 ruff、pytest（含 e2e），后续补上
+- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，`uv python install 3.14.9`、Rust stable，`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
 
 ## 15. 把函数改写成原生 Rust（M3b）
 
@@ -1300,7 +1316,7 @@ pub fn percentile<'py>(
 每个类生成一个 mod（§10），改写也以 mod 为单位，两步和上面对应：
 
 1. **方法逐个改写，实例状态留在 `__dict__` 里。** 方法的 fn 就是适配层，签名 `(m, slf, ..)` 和普通函数一样不改。方法体可以把属性读出来转成原生类型，调用原生模块里的函数，再写回 `slf.setattr(..)`。只要读写的属性名和值的类型不变，同一个类的其他方法、子类和 Python 代码都不受影响。`rt::class!` 那一行和 `body` 不用动。也可以手工把类里保留为 Python 的方法改成原生的：在 mod 里加一个 fn，把 `body` 里的 `rt::exec_python!(ns, ..)?;` 换成 `ns.set("name", rt::function!(ns, name(slf as "self", ..), qualname = "C.name")?)?;`，方法里用了 `super()` 时在 `body` 开头 `let __class__ = ns.class_cell();` 并按闭包捕获它（照着同一个文件里生成的方法写）
-2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。M9 计划为符合条件的类自动生成这一步
+2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。这一步不自动生成，原因见 §10
 
 和函数一样，`self.method()` 在生成代码里总是动态调用，改写成原生代码之后，同一个结构体的方法之间可以直接调用，不经过 Python。
 

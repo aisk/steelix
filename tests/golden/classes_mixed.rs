@@ -401,7 +401,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 for k in __dict__ {
                     let k = k?;
                     if !k.call_method1("startswith", ("__",))?.is_truthy()? {
-                        return Ok(Some(k.clone()));
+                        return Ok(Some(k));
                     }
                     m.py().check_signals()?;
                 }
@@ -482,8 +482,7 @@ def decorate(cls):
         {
             let decorate = m.global("decorate")?;
             let decorated = rt::class!(m, "Decorated"(), decorated::body, line = 98)?;
-            let decorated = decorate.call1((decorated,))?;
-            m.set_global("Decorated", decorated)?;
+            m.set_global("Decorated", decorate.call1((decorated,))?)?;
         }
         rt::builtins::print(
             py,

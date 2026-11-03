@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 
 from steelix.frontend.bindings import LocalsInfo, analyze_locals
+from steelix.frontend.booleans import bool_locals
 from steelix.frontend.desugar import annotation_source
 from steelix.frontend.scope import (
     FunctionNode,
@@ -71,7 +72,15 @@ def lower_function(
     )
     module.names[scope] = names
     by_value = captured_by_value(module, scope)
-    info = FunctionInfo(fn, scope, locals_info, names, by_value, _walrus_targets(fn, scope))
+    info = FunctionInfo(
+        fn,
+        scope,
+        locals_info,
+        names,
+        by_value,
+        _walrus_targets(fn, scope),
+        bool_locals(fn, scope, locals_info, module.bindings),
+    )
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
     first_line = _first_line(fn)
     lowering = StmtLowering(ctx, line=first_line)
@@ -109,7 +118,7 @@ def lower_function(
         elif name in locals_info.optional:
             body.append(rs.Let(rust, True, f"Option<{BOUND}>", rs.Path("None")))
         else:
-            body.append(rs.Let(rust, name in locals_info.mutable, BOUND))
+            body.append(rs.Let(rust, name in locals_info.mutable, info.local_type(name)))
 
     if isinstance(fn, ast.Lambda):
         with lowering.exprs.fresh() as prelude:

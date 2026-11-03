@@ -6,7 +6,7 @@ use steelix_runtime as rt;
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        let [first, second] = rt::unpack(PyList::new(py, [1, 2])?.as_any())?;
+        let [first, second] = [rt::int(py, 1), rt::int(py, 2)];
         m.set_global("first", first)?;
         m.set_global("second", second)?;
         rt::builtins::print(py, (m.global("first")?, m.global("second")?))?;

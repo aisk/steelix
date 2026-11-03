@@ -17,22 +17,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("x", 1)?;
         m.global("print")?.call1((
             m.dir()?.contains("x")?,
-            m.dir()?.rich_compare(
-                m.global("sorted")?
-                    .call1((m.globals().clone().into_any(),))?,
-                CompareOp::Eq,
-            )?,
+            m.dir()?
+                .rich_compare(m.global("sorted")?.call1((m.globals(),))?, CompareOp::Eq)?,
         ))?;
-        m.global("print")?.call1((
-            m.globals()
-                .clone()
-                .into_any()
-                .is(m.globals().clone().into_any()),
-            m.globals()
-                .clone()
-                .into_any()
-                .is(m.globals().clone().into_any()),
-        ))?;
+        m.global("print")?
+            .call1((m.globals().is(m.globals()), m.globals().is(m.globals())))?;
         // namespaces.py:8, kept as Python: locals() in a function at 10:19
         rt::exec_python!(
             m,

@@ -59,7 +59,7 @@ pub fn no_carets<'py>(
                         .call_method1("strip", ("^~",))?
                         .ne("")?
                     {
-                        return Ok(Some(line.clone()));
+                        return Ok(Some(line));
                     }
                     m.py().check_signals()?;
                 }

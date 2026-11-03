@@ -338,7 +338,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 for k in __dict__ {
                     let k = k?;
                     if k.contains("y")? {
-                        return Ok(Some(k.clone()));
+                        return Ok(Some(k));
                     }
                     m.py().check_signals()?;
                 }

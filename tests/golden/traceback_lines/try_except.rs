@@ -800,8 +800,7 @@ def name_after_handler():
             Err(err) => return Err(err),
         }
         frame.line(272);
-        m.global("print")?
-            .call1((m.globals().clone().into_any().contains("e")?,))?;
+        m.global("print")?.call1((m.globals().contains("e")?,))?;
         frame.line(273);
         m.global("groups")?.call0()?;
         frame.line(274);

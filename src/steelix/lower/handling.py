@@ -169,7 +169,7 @@ class HandlingLowering:
             if name in fn.locals.optional:
                 out.append(rs.Let(rust, True, f"Option<{BOUND}>", rs.Path("None")))
             else:
-                out.append(rs.Let(rust, name in fn.locals.mutable, BOUND))
+                out.append(rs.Let(rust, name in fn.locals.mutable, fn.local_type(name)))
         return out
 
     def dispatch(

@@ -92,8 +92,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 line = 19,
                 annotations = [("x", "int")]
             )?;
-            let p = decorator.call1((p,))?;
-            m.set_global("P", p)?;
+            m.set_global("P", decorator.call1((p,))?)?;
         }
         rt::builtins::print(
             py,

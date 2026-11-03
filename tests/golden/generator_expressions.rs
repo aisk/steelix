@@ -146,7 +146,7 @@ pub fn first_iterable_now<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "first_iterable_now.<locals>.<genexpr>", 42, |_| {
                 if let Some(x) = rt::next(iter)? {
-                    return Ok(Some(x.clone()));
+                    return Ok(Some(x));
                 }
                 Ok(None)
             })
@@ -212,7 +212,7 @@ pub fn failing_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "failing_iteration.<locals>.<genexpr>", 70, |_| {
                 if let Some(x) = rt::next(iter)? {
-                    return Ok(Some(x.clone()));
+                    return Ok(Some(x));
                 }
                 Ok(None)
             })
@@ -245,7 +245,7 @@ pub fn failing_condition<'py>(
                 for x in xs {
                     let x = x?;
                     if rt::int(py, 10).floor_div(&x)?.is_truthy()? {
-                        return Ok(Some(x.clone()));
+                        return Ok(Some(x));
                     }
                     py.check_signals()?;
                 }
@@ -330,7 +330,7 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "protocol.<locals>.<genexpr>", 113, |_| {
                 if let Some(i) = rt::next(iter)? {
-                    return Ok(Some(i.clone()));
+                    return Ok(Some(i));
                 }
                 Ok(None)
             })
@@ -453,7 +453,7 @@ pub fn consumers<'py>(
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "consumers.<locals>.<genexpr>", 132, |_| {
                 if let Some(w) = rt::next(words)? {
-                    return Ok(Some(w.clone()));
+                    return Ok(Some(w));
                 }
                 Ok(None)
             })
@@ -465,7 +465,7 @@ pub fn consumers<'py>(
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "consumers.<locals>.<genexpr>", 132, |_| {
                 if let Some(w) = rt::next(words)? {
-                    return Ok(Some(w.clone()));
+                    return Ok(Some(w));
                 }
                 Ok(None)
             })
@@ -542,7 +542,7 @@ pub fn consumers<'py>(
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "consumers.<locals>.<genexpr>", 134, |_| {
                 if let Some(w) = rt::next(words)? {
-                    return Ok(Some(w.clone()));
+                    return Ok(Some(w));
                 }
                 Ok(None)
             })
@@ -700,7 +700,7 @@ pub fn collected<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 for x in iter {
                     let x = x?;
                     if !g.get()?.is_none() {
-                        return Ok(Some(x.clone()));
+                        return Ok(Some(x));
                     }
                     m.py().check_signals()?;
                 }

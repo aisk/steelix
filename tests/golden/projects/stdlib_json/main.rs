@@ -3,6 +3,12 @@
 #![allow(non_snake_case, unused_variables, unused_assignments)]
 #![allow(clippy::never_loop, clippy::approx_constant, clippy::if_same_then_else)]
 #![allow(clippy::too_many_arguments, clippy::doc_lazy_continuation)]
+#![allow(
+    clippy::while_immutable_condition,
+    clippy::eq_op,
+    clippy::nonminimal_bool
+)]
+#![allow(clippy::overly_complex_bool_expr)]
 
 mod app;
 mod json;

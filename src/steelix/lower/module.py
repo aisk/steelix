@@ -41,6 +41,7 @@ from steelix.lower.function import (
 from steelix.lower.names import CONTEXT, MODULE_RESERVED, Renamer, module_ident
 from steelix.lower.stmt import StmtLowering
 from steelix.rustast import nodes as rs
+from steelix.rustast.cleanup import move_returned_locals
 
 
 @dataclass
@@ -170,7 +171,7 @@ def _lower(
         submodules + [rs.Use(u) for u in uses] + items,
         inner_doc=_python_summary(parsed, tree, plan),
     )
-    return LoweredModule(parsed.name, file, plan)
+    return LoweredModule(parsed.name, move_returned_locals(file), plan)
 
 
 def _lower_exec_module(

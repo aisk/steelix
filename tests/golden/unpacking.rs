@@ -10,12 +10,11 @@ pub fn swap<'py>(
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "swap", 4, |_| {
         let mut a = a.clone();
         let mut b = b.clone();
-        [a, b] = rt::unpack(PyTuple::new(py, [&b, &a])?.as_any())?;
-        Ok(PyTuple::new(py, [&a, &b])?.into_any())
+        [a, b] = [b.clone(), a.clone()];
+        Ok(PyTuple::new(m.py(), [&a, &b])?.into_any())
     })
 }
 
@@ -32,9 +31,7 @@ pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bou
         let ([], init, [last]) = rt::unpack_star(&rt::str(py, "abc"))?;
         let ([left], middle, [right]) = rt::unpack_star(&rt::builtin(py, "range")?.call1((5,))?)?;
         rt::builtins::print(py, (&head, &rest, &init, &last, &left, &middle, &right))?;
-        let [x2, items] = rt::unpack(
-            PyTuple::new(py, [&rt::int(py, 1), PyList::new(py, [2, 3])?.as_any()])?.as_any(),
-        )?;
+        let [x2, items] = [rt::int(py, 1), PyList::new(py, [2, 3])?.into_any()];
         x = x2;
         [y, z] = rt::unpack(&items)?;
         rt::builtins::print(py, (&x, &y, &z))?;
@@ -51,7 +48,7 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let mut key: Option<Bound<'py, PyAny>> = None;
         let mut value: Bound<'py, PyAny>;
         let r#box = PyList::new(py, [0, 0, 0])?.into_any();
-        let [item, item2] = rt::unpack(PyTuple::new(py, ["a", "c"])?.as_any())?;
+        let [item, item2] = [rt::str(py, "a"), rt::str(py, "c")];
         r#box.set_item(0, item)?;
         r#box.set_item(2, item2)?;
         let value2 = PyList::new(py, [5])?.into_any();
@@ -119,10 +116,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(py, (unpack(m, PyTuple::new(py, [7, 8])?.as_any())?,))?;
         targets(m)?;
         empty_star(m)?;
-        let [m2, n] = rt::unpack(PyTuple::new(py, [10, 20])?.as_any())?;
+        let [m2, n] = [rt::int(py, 10), rt::int(py, 20)];
         m.set_global("m", m2)?;
         m.set_global("n", n)?;
-        let [m3, n2] = rt::unpack(PyTuple::new(py, [&m.global("n")?, &m.global("m")?])?.as_any())?;
+        let [m3, n2] = [m.global("n")?, m.global("m")?];
         m.set_global("m", m3)?;
         m.set_global("n", n2)?;
         rt::builtins::print(py, (m.global("m")?, m.global("n")?))?;

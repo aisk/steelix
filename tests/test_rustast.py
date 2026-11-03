@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from steelix.rustast import nodes as rs
+from steelix.rustast.cleanup import move_returned_locals
 from steelix.rustast.fmt import rustfmt
 from steelix.rustast.printer import byte_string_literal, print_expr, print_file, string_literal
 from steelix.rustast.rewrite import count_path, replace_path
@@ -155,3 +156,60 @@ def test_path_rewrites_skip_nested_fns() -> None:
     assert count_path(replaced, "py") == 0
     assert replaced.stmts[0] == rs.ItemStmt(nested)
     assert replaced.tail == rs.Tokens(("g(", rs.MethodCall(p("m"), "py"), ")"))
+
+
+# --- cleanup -------------------------------------------------------------------
+
+
+def _ok(expr: rs.Expr) -> rs.Expr:
+    return rs.Call(p("Ok"), (expr,))
+
+
+def _clone(name: str) -> rs.Expr:
+    return rs.MethodCall(p(name), "clone")
+
+
+def _cleaned(body: rs.Block, params: tuple[rs.Param, ...] = ()) -> str:
+    fn = rs.Fn("f", params, "PyResult<Bound<'py, PyAny>>", body, ("'py",))
+    return print_file(move_returned_locals(rs.File([fn])))
+
+
+def test_locals_declared_in_the_body_are_moved_when_returned() -> None:
+    x = rs.Let("x", init=rs.Try(rs.Call(p("make"), ())))
+    early = rs.If(p("c"), rs.Block((rs.Return(_ok(_clone("x"))),)))
+    out = _cleaned(rs.Block((x, early), _ok(_clone("x"))))
+    assert "return Ok(x);" in out
+    assert out.endswith("    Ok(x)\n}\n")
+    assert "clone" not in out
+
+
+def test_parameters_and_captured_locals_keep_their_clone() -> None:
+    outer = rs.Let("x", init=rs.Try(rs.Call(p("make"), ())))
+    closure = rs.Closure((), rs.Block((), _ok(_clone("x"))), "PyResult<Bound<'py, PyAny>>")
+    call = rs.Let("r", init=rs.Call(closure, ()))
+    param = rs.Param("n", "&Bound<'py, PyAny>")
+    body = rs.Block((outer, call, rs.Return(_ok(_clone("n")))), _ok(_clone("x")))
+    out = _cleaned(body, (param,))
+    assert "    Ok(x.clone())\n})();" in out
+    assert "return Ok(n.clone());" in out
+    # Shadowed by an owned local, the parameter is moved too.
+    shadow = rs.Let("n", True, init=_clone("n"))
+    assert "Ok(n)" in _cleaned(rs.Block((shadow,), _ok(_clone("n"))), (param,))
+
+
+def test_locals_borrowed_by_a_guard_and_option_locals_keep_their_clone() -> None:
+    err = rs.Let("err", init=rs.MethodCall(p("frame"), "catch", (p("e"),)))
+    guard = rs.Let("_handling", init=rs.Call(p("rt::Handling::new"), (rs.Ref(p("err")),)))
+    out = _cleaned(rs.Block((err, guard), _ok(_clone("err"))))
+    assert "Ok(err.clone())" in out
+    option = rs.Let("y", True, "Option<Bound<'py, PyAny>>", p("None"))
+    assert "Ok(y.clone())" in _cleaned(rs.Block((option,), _ok(_clone("y"))))
+
+
+def test_if_let_and_nested_returns() -> None:
+    some = rs.Call(p("Some"), (_clone("x"),))
+    then = rs.Block((rs.Return(_ok(some)),))
+    next_ = rs.Try(rs.Call(p("rt::next"), (p("it"),)))
+    stmt = rs.If(next_, then, pattern="Some(x)")
+    out = _cleaned(rs.Block((stmt,), _ok(p("None"))))
+    assert "return Ok(Some(x));" in out

@@ -467,6 +467,12 @@ class ExprLowering(ComprehensionLowering):
                     then = self.condition(body)
                 with self.fresh() as pre_else:
                     other = self.condition(orelse)
+                if not pre_then and not pre_else and isinstance(then, rs.BoolLit):
+                    # `True if c else False` is `c`.
+                    if then == rs.BoolLit(True) and other == rs.BoolLit(False):
+                        return cond
+                    if then == rs.BoolLit(False) and other == rs.BoolLit(True):
+                        return negate(cond)
                 return rs.IfExpr(
                     cond, rs.Block(tuple(pre_then), then), rs.Block(tuple(pre_else), other)
                 )
@@ -543,6 +549,8 @@ class ExprLowering(ComprehensionLowering):
             if name in fn.locals.optional:
                 check = _rt("local", rs.Ref(rs.Path(rust)), rs.StrLit(name))
                 return Value(_try(check), Kind.REF)
+            if name in fn.bool_locals:
+                return self.bool_value(rs.Path(rust), pure=True)
             if name in fn.locals.with_params:
                 return Value(rs.Path(rust), Kind.REF)  # the parameter of a `with` closure
             if name in fn.scope.params and name not in fn.locals.assigned_params:
@@ -718,6 +726,8 @@ class ExprLowering(ComprehensionLowering):
             kinds = {_literal_type(v.expr) for v in values}
             if len(kinds) == 1 and None not in kinds:
                 return [v.expr for v in values]
+        if values and all(v.kind is Kind.BOOL or _is_bool_literal(v) for v in values):
+            return [v.expr for v in values]  # Rust `bool`s: `[found, x.is_none()]`
         return [v.ref() for v in values]
 
     def sequence(self, type_name: str, elts: list[ast.expr]) -> Value:
@@ -949,9 +959,9 @@ class ExprLowering(ComprehensionLowering):
                 name in ("locals", "vars") and self.ctx.at_module_level
             )
             if namespace_name:
+                # `&Bound<PyDict>`, owned by the module: no clone to read it.
                 namespace = self.module_call("globals")
-                owned = rs.MethodCall(rs.MethodCall(namespace, "clone"), "into_any")
-                return Value(owned, Kind.OWNED)
+                return Value(namespace, Kind.REF, typed="PyDict", pure=True)
             if name == "dir" and self.ctx.at_module_level:
                 return Value(_try(self.module_call("dir")), Kind.OWNED)
             if name in ("locals", "vars", "dir"):
@@ -1221,6 +1231,10 @@ def _native_int_comparable(lhs: Value, rhs: Value) -> bool:
         )
 
     return (lhs.kind is Kind.NATIVE and literal(rhs)) or (rhs.kind is Kind.NATIVE and literal(lhs))
+
+
+def _is_bool_literal(value: Value) -> bool:
+    return value.kind is Kind.LITERAL and isinstance(value.expr, rs.BoolLit)
 
 
 def _literal_type(expr: rs.Expr) -> str | None:

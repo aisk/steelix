@@ -699,8 +699,7 @@ def name_after_handler():
             }
             Err(err) => return Err(err),
         }
-        m.global("print")?
-            .call1((m.globals().clone().into_any().contains("e")?,))?;
+        m.global("print")?.call1((m.globals().contains("e")?,))?;
         m.global("groups")?.call0()?;
         m.global("name_after_handler")?.call0()?;
         Ok(())
