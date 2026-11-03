@@ -140,7 +140,7 @@ Classes are rewritten the same way, method by method, with the instance state le
 ## What is missing
 
 - **Async generators** (`async def` with `yield`), async comprehensions and a few rare uses of `await` and `yield` (in a lambda, in an `except` clause, `types.coroutine`) are kept as Python. Coroutines and generator functions are native: they become `async fn`s whose `.await` points are the Python `await` and `yield` expressions, driven by a small runtime object that behaves like CPython's coroutine and generator.
-- **`match`** statements and a few rarer constructs (custom metaclasses, `exec`/`eval` without a namespace, ...) are kept as Python.
+- **OR patterns with captures** in `match` statements (`case [x] | {"x": x}:`) and a few rarer constructs (custom metaclasses, `exec`/`eval` without a namespace, ...) are kept as Python. Other `match` statements are native: each `case` becomes an `if let .. && ..` chain over small runtime checks that behave like CPython's pattern matching, down to the order of `len()`, `__eq__` and attribute lookups.
 - **Executables for Windows and macOS** are not supported yet, only Linux.
 - **Free-threaded Python** is not supported.
 

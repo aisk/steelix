@@ -21,6 +21,8 @@ _UNARY = 4
 _POSTFIX = 5
 
 _BINARY_PRECEDENCE = {"||": _OR, "&&": _AND}
+# The value of a `let` in a let chain: anything but `&&` and `||`.
+_LAZY_SCRUTINEE = _COMPARE
 
 
 def print_file(file: rs.File) -> str:
@@ -281,6 +283,16 @@ def print_expr(expr: rs.Expr, level: int = 0) -> str:
             return f"{print_expr(block, level)}.await"
         case rs.Await(inner):
             return f"{_operand(inner, _POSTFIX, level)}.await"
+        case rs.LetExpr(pattern, value):
+            # A lazy boolean operator would end the scrutinee.
+            if isinstance(value, rs.BlockExpr | rs.IfExpr | rs.Match):
+                return f"let {pattern} = {print_expr(value, level)}"
+            return f"let {pattern} = {_operand(value, _LAZY_SCRUTINEE, level)}"
+        case rs.Matches(value, pattern, guard):
+            head = f"{print_expr(value, level)}, {pattern}"
+            if guard is not None:
+                head += f" if {print_expr(guard, level)}"
+            return f"matches!({head})"
         case rs.Match(scrutinee, arms):
             inner = INDENT * (level + 1)
             lines = [f"match {print_expr(scrutinee, level)} {{"]
@@ -328,6 +340,9 @@ def _precedence(expr: rs.Expr) -> int:
             return _BLOCKLIKE
         case rs.Binary(op):
             return _BINARY_PRECEDENCE.get(op, _COMPARE)
+        case rs.LetExpr():
+            # Only ever a link of a chain of `&&`, which needs no parentheses.
+            return _COMPARE
         case rs.Ref() | rs.Unary():
             return _UNARY
         case rs.IntLit(value) if value < 0:

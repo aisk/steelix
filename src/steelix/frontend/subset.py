@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.desugar import AsyncFor, AsyncWith
+from steelix.frontend.patterns import irrefutable, pattern_captures
 from steelix.frontend.scope import comprehension_variables, function_kind
 
 # Human readable names for the error message, by AST node type.
@@ -21,7 +22,6 @@ _FEATURES: dict[type[ast.AST], str] = {
     ast.AnnAssign: "annotated assignment",
     ast.TryStar: "try/except*",
     ast.ClassDef: "class definition",
-    ast.Match: "match statement",
     ast.TypeAlias: "type alias",
     ast.Slice: "slice outside a subscript",
     ast.Starred: "starred expression",
@@ -274,6 +274,13 @@ class SubsetChecker:
                     if item.optional_vars is not None:
                         self.check_target(item.optional_vars)
                 self.check_body(body)
+            case ast.Match(subject, cases):
+                self.check_expr(subject)
+                for case in cases:
+                    self.check_pattern(case.pattern)
+                    if case.guard is not None:
+                        self.check_expr(case.guard)
+                    self.check_body(case.body)
             case ast.AnnAssign() if self.in_class_body():
                 self.fail(CLASS_ANNOTATION_IN_BLOCK, stmt)
                 self.descend(stmt)
@@ -293,6 +300,34 @@ class SubsetChecker:
                 self.check_class(stmt)
             case _:
                 self.unsupported(stmt)
+
+    def check_pattern(self, pattern: ast.pattern) -> None:
+        """A `case` pattern (design §8): the expressions in it, and OR
+        patterns, which are only lowered without captures."""
+        match pattern:
+            case ast.MatchValue(value):
+                self.check_expr(value)
+            case ast.MatchOr(alternatives):
+                if any(pattern_captures(alt) for alt in alternatives):
+                    self.fail("OR pattern with captures", pattern)
+                elif any(irrefutable(alt) for alt in alternatives):
+                    self.fail("OR pattern with an irrefutable alternative", pattern)
+                for alt in alternatives:
+                    self.check_pattern(alt)
+            case ast.MatchClass(cls, patterns, _, kwd_patterns):
+                self.check_expr(cls)
+                for sub in [*patterns, *kwd_patterns]:
+                    self.check_pattern(sub)
+            case ast.MatchMapping(keys, patterns):
+                for key in keys:
+                    self.check_expr(key)
+                for sub in patterns:
+                    self.check_pattern(sub)
+            case ast.MatchSequence(patterns):
+                for sub in patterns:
+                    self.check_pattern(sub)
+            case ast.MatchAs(sub) if sub is not None:
+                self.check_pattern(sub)
 
     def check_body(self, body: list[ast.stmt]) -> None:
         for stmt in body:

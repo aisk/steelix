@@ -193,6 +193,26 @@ class Match(Expr):
 
 
 @dataclass(frozen=True)
+class LetExpr(Expr):
+    """`let pattern = value` as a link of an `if` condition chained with
+    `&&` (a let chain): the names the pattern binds are in scope in the
+    links after it and in the `then` block."""
+
+    pattern: str
+    value: Expr
+
+
+@dataclass(frozen=True)
+class Matches(Expr):
+    """`matches!(value, pattern if guard)`: the names the pattern binds are
+    in scope in the guard."""
+
+    value: Expr
+    pattern: str
+    guard: Expr | None = None
+
+
+@dataclass(frozen=True)
 class Tokens(Expr):
     """A macro argument that is not an expression, such as `name = value` or
     a signature: verbatim token text interleaved with expressions.

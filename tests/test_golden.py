@@ -23,6 +23,8 @@ TRACEBACK_LINES_CASES = [
     "classes_basic",
     "async_with_for",
     "generators",
+    "match_basic",
+    "match_async",
 ]
 
 

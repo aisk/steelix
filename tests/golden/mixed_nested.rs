@@ -3,9 +3,9 @@
 //!
 //! - line 12, `assign` statement: generator expression with several for clauses
 //! - line 28, `assign` statement: generator expression with several for clauses
-//! - line 33, `while` statement: match statement
-//! - line 42, `for` statement: match statement
-//! - line 63, `assign` statement: generator expression with several for clauses
+//! - line 33, `while` statement: try/except*
+//! - line 44, `for` statement: try/except*
+//! - line 67, `assign` statement: generator expression with several for clauses
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -20,22 +20,22 @@ pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound
 pub mod point {
     use super::*;
 
-    // mixed_nested.py:51
+    // mixed_nested.py:55
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Point", 51, |_| {
+        rt::frame!(ns, "Point", 55, |_| {
             rt::def!(ns, __init__(slf as "self", x))?;
             Ok(())
         })
     }
 
-    // mixed_nested.py:52
+    // mixed_nested.py:56
     pub fn __init__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.__init__", 52, |_| {
+        rt::frame!(m, "Point.__init__", 56, |_| {
             slf.set_attr("x", x)?;
             Ok(rt::none(m.py()))
         })
@@ -45,10 +45,10 @@ pub mod point {
 pub mod local {
     use super::*;
 
-    // mixed_nested.py:59
+    // mixed_nested.py:63
     /// The body of `class Local`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Local", 59, |_| {
+        rt::frame!(ns, "Local", 63, |_| {
             ns.set("label", "local class")?;
             Ok(())
         })
@@ -129,31 +129,35 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         // `break` in a kept statement: the loop is kept whole.
         m.set_global("n", 0)?;
-        // mixed_nested.py:33, kept as Python: match statement at 35:5
+        // mixed_nested.py:33, kept as Python: try/except* at 35:5
         rt::exec_python!(
             m,
             line = 33,
             r#"
 while True:
     n += 1
-    match n:
-        case 3:
+    try:
+        if n == 3:
             break
+    except* ValueError:
+        pass
     print("tried", n)
 "#
         )?;
         // A kept loop inside a native one: its `break` is its own.
         for item2 in PyList::new(py, ["ab", "cde"])?.try_iter()? {
             m.set_global("word", item2?)?;
-            // mixed_nested.py:42, kept as Python: match statement at 43:9
+            // mixed_nested.py:44, kept as Python: try/except* at 45:9
             rt::exec_python!(
                 m,
-                line = 42,
+                line = 44,
                 r#"
     for ch in word:
-        match ch:
-            case "d":
+        try:
+            if ch == "d":
                 break
+        except* ValueError:
+            pass
         print("char", ch)
     else:
         print("no d in", word)
@@ -163,11 +167,11 @@ while True:
         }
         m.set_global(
             "Point",
-            rt::class!(m, "Point"(), point::body, line = 51, attributes = ["x"])?,
+            rt::class!(m, "Point"(), point::body, line = 55, attributes = ["x"])?,
         )?;
         if m.global("__name__")?.eq("__main__")? {
             rt::builtins::print(py, ("main", m.global("mode")?))?;
-            m.set_global("Local", rt::class!(m, "Local"(), local::body, line = 59)?)?;
+            m.set_global("Local", rt::class!(m, "Local"(), local::body, line = 63)?)?;
             rt::builtins::print(
                 py,
                 (
@@ -177,10 +181,10 @@ while True:
                         .attr("x")?,
                 ),
             )?;
-            // mixed_nested.py:63, kept as Python: generator expression with several for clauses at 63:16
+            // mixed_nested.py:67, kept as Python: generator expression with several for clauses at 67:16
             rt::exec_python!(
                 m,
-                line = 63,
+                line = 67,
                 r#"
     total = sum(j for j in range(5) for _ in "1")
 "#

@@ -1,9 +1,9 @@
 //! Parts of `frames_logging.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 20, `def kept_step`: match statement
-//! - line 39, `def warn_kept`: match statement
-//! - line 45, `def kept_calls_native`: match statement
+//! - line 20, `def kept_step`: type alias
+//! - line 38, `def warn_kept`: type alias
+//! - line 43, `def kept_calls_native`: type alias
 
 use pyo3::prelude::*;
 use steelix_runtime as rt;
@@ -18,7 +18,7 @@ pub fn step<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'
     })
 }
 
-// frames_logging.py:27
+// frames_logging.py:26
 pub fn show_warning<'py>(
     m: &rt::Module<'py>,
     message: &Bound<'py, PyAny>,
@@ -29,7 +29,7 @@ pub fn show_warning<'py>(
     line: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "show_warning", 27, |_| {
+    rt::frame!(m, "show_warning", 26, |_| {
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -49,12 +49,12 @@ pub fn show_warning<'py>(
     })
 }
 
-// frames_logging.py:35
+// frames_logging.py:34
 pub fn warn_native<'py>(
     m: &rt::Module<'py>,
     message: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "warn_native", 35, |_| {
+    rt::frame!(m, "warn_native", 34, |_| {
         m.global("warnings")?.method1("warn", (message,))?;
         Ok(rt::none(m.py()))
     })
@@ -77,15 +77,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             format = "%(levelname)s %(filename)s:%(lineno)d %(funcName)s: %(message)s"
         )?;
         rt::def!(m, step(n))?;
-        // frames_logging.py:20, kept as Python: match statement at 21:5
+        // frames_logging.py:20, kept as Python: type alias at 21:5
         rt::exec_python!(
             m,
             line = 20,
             r#"
 def kept_step(n):
-    match n:  # kept as Python
-        case _:
-            logging.warning("kept step %d", n)
+    type Step = int  # kept as Python
+    logging.warning("kept step %d", n)
     return n + 1
 "#
         )?;
@@ -105,26 +104,24 @@ def kept_step(n):
             .set_attr("showwarning", show_warning2)?;
         m.global("warnings")?.method1("simplefilter", ("always",))?;
         rt::def!(m, warn_native(message))?;
-        // frames_logging.py:39, kept as Python: match statement at 40:5
+        // frames_logging.py:38, kept as Python: type alias at 39:5
         rt::exec_python!(
             m,
-            line = 39,
+            line = 38,
             r#"
 def warn_kept():
-    match 0:  # kept as Python
-        case _:
-            warnings.warn("from kept code")
+    type Kept = int  # kept as Python
+    warnings.warn("from kept code")
 "#
         )?;
-        // frames_logging.py:45, kept as Python: match statement at 46:5
+        // frames_logging.py:43, kept as Python: type alias at 44:5
         rt::exec_python!(
             m,
-            line = 45,
+            line = 43,
             r#"
 def kept_calls_native():
-    match 0:  # kept as Python
-        case _:
-            warn_native("from native code, called by kept code")
+    type Kept = int  # kept as Python
+    warn_native("from native code, called by kept code")
 "#
         )?;
         step(m, &rt::int(py, 1))?;

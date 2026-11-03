@@ -59,7 +59,13 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
             2,
             13,
         ),
-        ("match x:\n    case 1:\n        pass\n", "match statement", 1, 1),
+        ("match x:\n    case [a] | [b]:\n        pass\n", "OR pattern with captures", 2, 10),
+        (
+            "match x:\n    case 1 | _:\n        pass\n",
+            "OR pattern with an irrefutable alternative",
+            2,
+            10,
+        ),
         ("def f():\n    class A:\n        pass\n", "class definition in a function", 2, 5),
         ("class A[T]:\n    pass\n", "type parameters", 1, 1),
         (
@@ -441,9 +447,10 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
         """
         for i in range(3):
             print(i)
-            match i:
-                case 1:
-                    break
+            try:
+                break
+            except* ValueError:
+                pass
         """
     ) == [2]
     # Jumps in a kept loop belong to it; native jumps stay native.
@@ -454,9 +461,10 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
                 ys = [t'{i}']
                 break
             for j in range(i):
-                match j:
-                    case _:
-                        continue
+                try:
+                    continue
+                except* ValueError:
+                    pass
             else:
                 print(i)
         """
@@ -470,9 +478,10 @@ def test_jump_in_kept_loop_else_keeps_the_outer_loop() -> None:
             for j in range(3):
                 pass
             else:
-                match j:
-                    case _:
-                        break
+                try:
+                    break
+                except* ValueError:
+                    pass
         """
     ) == [2]
 

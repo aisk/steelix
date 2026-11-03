@@ -1,6 +1,6 @@
 # 真实应用的转换覆盖率（M3c，M3d、M4、M5、M8 更新）
 
-数据截至 M13（最后一节）。真实项目的数据见 `m10-skime.md`。
+数据截至 M14（最后一节）。真实项目的数据见 `m10-skime.md`。
 
 M3c 的最后一步是拿不是我们写的代码跑一遍混合模式（design.md §13），看哪些已经能原生转换、哪些还保留为 Python，再据此决定 M4、M5、M8 的先后。
 
@@ -250,3 +250,33 @@ M13 原生转换了生成器函数和 `async def`（design.md §8 "协程和生�
 
 M12 时 `yield`（121 个函数，只被它挡住的 102 个）、`async function`（29、10）、`yield from`（28、12）、`await`（12、0）、`async with`（1、0）这几项都没有了。`yield in a lambda` 只出现在 `_collections_abc` 的一条顶层语句里（`generator = type((lambda: (yield))())`），两个异步生成器也在 `_collections_abc` 和 `types` 里，都是为了取得类型对象。剩下最多的是 `match`（M14）。
 
+
+## M14 的变化
+
+M14 原生转换了 `match` 语句（design.md §8 "match 语句"），只有带捕获的 OR 模式和有不会失败的分支的 OR 模式保留为 Python。"之前"是 M13 结束时的数字，用 M13 的提交重新测过，和上一节一样。
+
+| | 函数 | 顶层语句 | 行数 |
+|---|---|---|---|
+| 6 个工具，M13 | 164/164（100%） | 167/169（98.8%） | 2990/2992（99.9%） |
+| 6 个工具，M14 | 164/164（100%） | 167/169（98.8%） | 2990/2992（99.9%） |
+| 标准库，M13 | 6406/6466（99.1%） | 3489/3517（99.2%） | 119229/122951（97.0%） |
+| 标准库，M14 | 6423/6466（99.3%） | 3489/3517（99.2%） | 120195/122951（97.8%） |
+
+6 个工具没有用到 `match`，数字不变。标准库里用到 `match` 的 17 个函数（`_strptime`、`annotationlib`、`dataclasses`、`pdb`、`symtable`、`traceback`、`turtle`、`typing` 这 8 个模块里的 18 条 `match`）全部变成原生代码，没有一个用到带捕获的 OR 模式，所以新的两个特性名在标准库里都是 0。这 8 个模块转换后 `cargo clippy`（默认和 `--traceback-lines` 两种）没有错误，警告只有以前就有的文档注释缩进和 `turtle` 里两处 bool 赋值，没有出自 `match` 的。检查时发现 guard 里的生成器表达式的 fn item 被放进了 case 体里（`pdb` 的 `all(isinstance(c, str) for c in completions)`），已经修好，`match_basic` 里有这个写法。
+
+现在挡住函数的特性：
+
+| 特性 | 6 个工具 functions | only | 标准库 functions | only |
+|---|---|---|---|---|
+| class definition in a function | 0 | 0 | 9 | 9 |
+| star import | 0 | 0 | 8 | 7 |
+| except-as name used outside its handler | 0 | 0 | 7 | 7 |
+| type parameters | 0 | 0 | 5 | 5 |
+| eval() without a namespace in a function | 0 | 0 | 4 | 4 |
+| generator expression with several for clauses | 0 | 0 | 3 | 3 |
+| locals() in a function | 0 | 0 | 3 | 3 |
+| call with more than 12 arguments | 0 | 0 | 2 | 2 |
+| asynchronous generator | 0 | 0 | 2 | 1 |
+| exec() without a namespace in a function | 0 | 0 | 1 | 1 |
+
+剩下最多的是函数里的类（9 个函数），其余每项都不超过 8 个函数。

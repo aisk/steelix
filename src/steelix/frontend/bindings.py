@@ -16,6 +16,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 
 from steelix.frontend.desugar import binding_name
+from steelix.frontend.patterns import irrefutable, pattern_captures
 from steelix.frontend.regions import (
     Region,
     expression_body,
@@ -432,6 +433,10 @@ class LocalsInfo:
     """Region scoped locals declared at the start of the region's closure."""
     with_params: set[str] = field(default_factory=set)
     """`with .. as name` names bound by the parameter of the `with` closure."""
+    case_scoped: set[str] = field(default_factory=set)
+    """Names only bound by `case` patterns and only used in the guards and
+    bodies of the cases binding them: the `if let` chain of each case
+    binds its own Rust variable (design §8)."""
     infallible_tries: set[ast.Try] = field(default_factory=set)
     """`try` statements whose body can not raise (`try: x = 1`): their
     handlers never run, and their statements are unreachable."""
@@ -503,6 +508,7 @@ class _DefiniteAssignment:
         self.info.end_reachable = end is not None
         self._infallible_tries()
         self._loop_scoped(body)
+        self._case_scoped(body)
         self._regions(body)
         self._declarations(body)
         params = set(self.scope.params)
@@ -591,9 +597,39 @@ class _DefiniteAssignment:
                 return self.try_(stmt, state)
             case ast.With():
                 return self.with_(stmt, state)
+            case ast.Match():
+                return self.match(stmt, state)
             case _:
                 raise AssertionError(f"unexpected statement {stmt!r}")
         return state
+
+    def match(self, stmt: ast.Match, state: _Flow) -> State:
+        """`match`: each case is tried with the state left by the cases that
+        did not match. A pattern that fails stores nothing; captures are
+        stored once the whole pattern matched, before the guard, so a guard
+        that fails leaves them assigned."""
+        state = self.expr(stmt.subject, state)
+        failed: State = state
+        ends: list[State] = []
+        for case in stmt.cases:
+            if failed is None:
+                if self.recording:
+                    self.info.unreachable.update(case.body)
+                continue
+            matched = failed
+            for expr in _pattern_exprs(case.pattern):
+                matched = self.expr(expr, matched)
+            for name in pattern_captures(case.pattern):
+                matched = self.assign_name(name, matched)
+            if case.guard is not None:
+                matched = self.expr(case.guard, matched)
+            if irrefutable(case.pattern):
+                # Only the guard can fail, after the captures are stored.
+                failed = matched if case.guard is not None else None
+            elif case.guard is not None:
+                failed = _merge(failed, matched)
+            ends.append(self.block(case.body, matched))
+        return _merge(*ends, failed)
 
     def try_(self, stmt: ast.Try, entry: _Flow) -> State:
         regions = try_regions(stmt)
@@ -941,10 +977,52 @@ class _DefiniteAssignment:
                 for name in names:
                     self.info.loop_scoped[name] = loop
 
+    def _case_scoped(self, body: list[ast.stmt]) -> None:
+        """Find captures that the `if let` chain of each case can bind: the
+        name is only bound by `case` patterns, every use is in the guard or
+        body of a case binding it, and no case binding it is inside another
+        one (whose binding the inner one would only shadow)."""
+        cases: dict[str, list[ast.match_case]] = {}
+        for stmt in body:
+            for node in walk_scope(stmt):
+                if isinstance(node, ast.match_case):
+                    for name in pattern_captures(node.pattern):
+                        cases.setdefault(name, []).append(node)
+        if not cases:
+            return
+        bindings = self._binding_counts(body)
+        where: dict[str, list[ast.AST]] = {}
+        for stmt in body:
+            for node in walk_scope(stmt):
+                for name in _names_bound_or_used(node, self._nested_frees):
+                    where.setdefault(name, []).append(node)
+        for name, bound in cases.items():
+            if (
+                not self.scope.is_local(name)
+                or name in self.scope.cells
+                or name in self.scope.params
+                or name in self.info.optional
+                or bindings[name] != len(bound)
+            ):
+                continue
+            inside: set[int] = set()
+            for case in bound:
+                parts: list[ast.AST] = [*case.body]
+                if case.guard is not None:
+                    parts.append(case.guard)
+                inside |= {id(n) for part in parts for n in walk_scope(part)}
+            if any(id(case.pattern) in inside for case in bound):
+                continue
+            captures = {
+                id(n) for case in bound for n in ast.walk(case.pattern) if name in _bound_names(n)
+            }
+            if all(id(n) in inside or id(n) in captures for n in where.get(name, [])):
+                self.info.case_scoped.add(name)
+
     def _declarations(self, body: list[ast.stmt]) -> None:
         """Pick locals whose first occurrence is a top-level assignment."""
         info = self.info
-        seen: set[str] = set(self.scope.params) | set(info.loop_scoped)
+        seen: set[str] = set(self.scope.params) | set(info.loop_scoped) | info.case_scoped
         elsewhere = set(info.scoped) | info.handler_scoped | info.with_params
         for stmt in body:
             first = [
@@ -1052,7 +1130,11 @@ class _DefiniteAssignment:
         info = self.info
         for region, names in self.candidates.items():
             for name in names:
-                if name not in info.optional and name not in info.loop_scoped:
+                if (
+                    name not in info.optional
+                    and name not in info.loop_scoped
+                    and name not in info.case_scoped
+                ):
                     info.scoped[name] = region
         self._with_params(body)
         for region, entry in self.region_entry.items():
@@ -1061,6 +1143,8 @@ class _DefiniteAssignment:
                 if not self.scope.is_local(name) or name in self.scope.cells:
                     continue
                 if name in info.handler_scoped or name in info.loop_scoped:
+                    continue
+                if name in info.case_scoped:
                     continue
                 if name in info.with_params:
                     continue
@@ -1237,6 +1321,21 @@ class _DefiniteAssignment:
                 once = bindings[name] == 1 and name in info.declared_at
             if once and name not in info.mutable:
                 info.frozen.add(name)
+
+
+def _pattern_exprs(pattern: ast.pattern) -> list[ast.expr]:
+    """The expressions a `case` pattern evaluates (value patterns, the
+    classes of class patterns, mapping keys), in order."""
+    found: list[ast.expr] = []
+    for node in ast.walk(pattern):
+        match node:
+            case ast.MatchValue(value):
+                found.append(value)
+            case ast.MatchClass(cls):
+                found.append(cls)
+            case ast.MatchMapping(keys):
+                found += keys
+    return found
 
 
 def _after_exception(state: _Flow, nodes: list[ast.AST]) -> _Flow:

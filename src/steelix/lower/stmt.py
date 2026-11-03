@@ -17,6 +17,7 @@ from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
 from steelix.lower.function import cell_declared_at, lower_nested
 from steelix.lower.handling import HandlingLowering
+from steelix.lower.patterns import MatchLowering
 from steelix.lower.rustflow import diverges, fallible, statement_line
 from steelix.lower.temps import settle
 from steelix.rustast import nodes as rs
@@ -48,7 +49,7 @@ class _Loop:
     the body set the traceback line back to it."""
 
 
-class StmtLowering(HandlingLowering):
+class StmtLowering(HandlingLowering, MatchLowering):
     def __init__(self, ctx: Context, line: int | None = None) -> None:
         self.ctx = ctx
         self.exprs = ExprLowering(ctx)
@@ -58,6 +59,8 @@ class StmtLowering(HandlingLowering):
         """Number of labeled blocks open around the statement being lowered."""
         self.closures: list = []
         """The closure regions being lowered (`handling.Closure`), innermost last."""
+        self.cases: list[ast.match_case] = []
+        """The `case` clauses being lowered, innermost last."""
         self.exprs.line = line
         self.frame_line = line
         """The line of the frame header (`rt::frame!(m, "f", line, ..)`), which
@@ -227,6 +230,8 @@ class StmtLowering(HandlingLowering):
                 return self.try_stmt(stmt)
             case ast.With():
                 return self.with_stmt(stmt)
+            case ast.Match():
+                return self.match_stmt(stmt)
             case ast.AnnAssign():
                 return self.class_annotation(stmt)
             case ast.Pass() | ast.Global() | ast.Nonlocal():

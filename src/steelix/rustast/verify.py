@@ -186,14 +186,12 @@ class _Verifier:
                 if value is not None:
                     self.expr(value, scope)
             case rs.If(cond, then, orelse, pattern):
-                self.expr(cond, scope)
-                if pattern is None:
-                    self.block(then, scope)
-                else:
-                    inner = _Scope(scope)
+                inner = self.condition(cond, scope)
+                if pattern is not None:
+                    inner = _Scope(inner)
                     for name in _pattern_names(pattern):
                         inner.locals[name] = None
-                    self.block(then, inner)
+                self.block(then, inner)
                 if isinstance(orelse, rs.If):
                     self.stmt(orelse, scope)
                 elif orelse is not None:
@@ -226,6 +224,24 @@ class _Verifier:
                 pass
             case _:
                 self.problem(f"unknown statement {type(stmt).__name__}")
+
+    def condition(self, cond: rs.Expr, scope: _Scope) -> _Scope:
+        """Check an `if` condition, which may be a let chain: the names each
+        `let` binds are in scope in the links after it. Returns the scope of
+        the `then` block."""
+        match cond:
+            case rs.Binary("&&", lhs, rhs):
+                return self.condition(rhs, self.condition(lhs, scope))
+            case rs.LetExpr(pattern, value):
+                self.expr(value, scope)
+                inner = _Scope(scope)
+                names = _pattern_names(pattern)
+                ty = self.type_of(value, scope) if len(names) == 1 else None
+                for name in names:
+                    inner.locals[name] = ty
+                return inner
+        self.expr(cond, scope)
+        return scope
 
     def loop(self, body: rs.Block, label: str | None, scope: _Scope) -> None:
         self.labels.append(_Label(label, loop=True))
@@ -288,8 +304,7 @@ class _Verifier:
             case rs.BlockExpr(block):
                 self.block(block, scope)
             case rs.IfExpr(cond, then, orelse):
-                self.expr(cond, scope)
-                self.block(then, scope)
+                self.block(then, self.condition(cond, scope))
                 if isinstance(orelse, rs.IfExpr):
                     self.expr(orelse, scope)
                 else:
@@ -311,6 +326,15 @@ class _Verifier:
                 self.labels = []
                 self.block(body, scope)
                 self.labels = saved
+            case rs.LetExpr():
+                self.problem("`let` outside of an `if` condition")
+            case rs.Matches(value, pattern, guard):
+                self.expr(value, scope)
+                inner = _Scope(scope)
+                for name in _pattern_names(pattern):
+                    inner.locals[name] = None
+                if guard is not None:
+                    self.expr(guard, inner)
             case rs.Match(scrutinee, arms):
                 self.expr(scrutinee, scope)
                 for arm in arms:

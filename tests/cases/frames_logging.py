@@ -18,9 +18,8 @@ def step(n):
 
 
 def kept_step(n):
-    match n:  # kept as Python
-        case _:
-            logging.warning("kept step %d", n)
+    type Step = int  # kept as Python
+    logging.warning("kept step %d", n)
     return n + 1
 
 
@@ -37,15 +36,13 @@ def warn_native(message):
 
 
 def warn_kept():
-    match 0:  # kept as Python
-        case _:
-            warnings.warn("from kept code")
+    type Kept = int  # kept as Python
+    warnings.warn("from kept code")
 
 
 def kept_calls_native():
-    match 0:  # kept as Python
-        case _:
-            warn_native("from native code, called by kept code")
+    type Kept = int  # kept as Python
+    warn_native("from native code, called by kept code")
 
 
 step(1)

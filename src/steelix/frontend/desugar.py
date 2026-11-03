@@ -120,6 +120,21 @@ class _Mangle(ast.NodeVisitor):
             node.name = self.fix(node.name)
         self.generic_visit(node)
 
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        # Captures are mangled, the attribute names of class patterns are not.
+        if node.name is not None:
+            node.name = self.fix(node.name)
+        self.generic_visit(node)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        if node.name is not None:
+            node.name = self.fix(node.name)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        if node.rest is not None:
+            node.rest = self.fix(node.rest)
+        self.generic_visit(node)
+
     def visit_Global(self, node: ast.Global) -> None:
         node.names = [self.fix(n) for n in node.names]
 

@@ -18,7 +18,7 @@
 
 - 性能优化，类型推导出原生类型。按类型注解生成原生类型（`int` 变成 `i64` 等）也不做：注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就得同时生成两套代码路径。唯一的例外是 Python 语义保证只会是 `bool` 的局部变量（§5），它不依赖注解
 - 100% 语义兼容。允许有文档化的差异（见第 12 节）
-- match、metaclass 自定义、`exec`/`eval` 等复杂特性的原生转换。用到它们的代码通过混合模式保留为 Python 源码照常运行（第 13 节）。generator 和 async/await 原来也在这里，M13 找到了可读的做法并原生转换（§8 "协程和生成器"），只剩异步生成器、异步推导式等少数写法保留为 Python
+- metaclass 自定义、`exec`/`eval` 等复杂特性的原生转换。用到它们的代码通过混合模式保留为 Python 源码照常运行（第 13 节）。generator 和 async/await 原来也在这里，M13 找到了可读的做法并原生转换（§8 "协程和生成器"），只剩异步生成器、异步推导式等少数写法保留为 Python。match 也一样，M14 用 let chains 原生转换（§8 "match 语句"），只有带捕获的 OR 模式保留为 Python
 
 ## 2. 总体流水线
 
@@ -807,6 +807,74 @@ lowering（`lower/expr.py` 的 `suspension`、`lower/handling.py`、`lower/stmt.
 - 第一个参数传一个 `co` 对象让函数体 `co.yield_(..)`：通道通过 waker 找到，生成代码里不需要多一个参数
 - 参数按值传（`session: Bound<'py, PyAny>`）：直接调用时到处是 `.clone()`，和同步函数的写法也不一样
 
+### match 语句（M14）
+
+Python 的模式全是运行时的检查（`Py_TPFLAGS_SEQUENCE`、`len()`、`.get()`、`isinstance`、`__match_args__`、`getattr`、`==`、`is`），Rust 的 `match` 对不上。对得上的是 let chains（edition 2024）：每个 `case` 是一个 `if let .. && ..`，模式的每一层是链上的一节，和 Python 原文一行对一行。
+
+```rust
+// match message:
+//     case {"type": "click", "pos": [x, y], **rest}:
+//         ...
+//     case {"type": "key", "key": str(key)} if len(key) == 1:
+//         ...
+if let Some([type_, pos]) = rt::match_map(message, ["type", "pos"])?
+    && type_.eq("click")?
+    && let Some([x, y]) = rt::match_seq(&pos)?
+    && let rest = rt::match_rest(message, ["type", "pos"])?
+{
+    ..
+} else if let Some([type_, key2]) = rt::match_map(message, ["type", "key"])?
+    && type_.eq("key")?
+    && let Some([key]) = rt::match_class(&key2, &rt::builtin(py, "str")?, 1, [])?
+    && key.len()? == 1
+{
+    ..
+}
+```
+
+runtime 的 helper（`crates/steelix-runtime/src/matching.rs`）各做 CPython 的一条指令对一层模式做的事，一次交出这一层的所有值（`Option<[Bound; N]>`），链再按深度优先、从左到右检查子模式。所以求值顺序、短路和报错都和 CPython 一样（对照 3.14 的 `Python/codegen.c`、`Python/ceval.c`）。
+
+- 序列：`rt::match_seq::<N>` 是 `MATCH_SEQUENCE`、长度相等和 `UNPACK_SEQUENCE`（迭代取值），`rt::match_seq_star::<B, A>` 是 `UNPACK_EX`，带名字的星号得到 list，返回 `([..; B], rest, [..; A])`。只有通配符时只检查长度（`rt::match_seq_len`，`[*_]` 连 `len()` 都不调用）。有 `*_` 而别的子模式要取值时，和 CPython 一样不解包，`rt::match_seq_min` 之后按下标取 `subject.get_item(i)?`，星号之后的是 `rt::item_from_end(&subject, k)?`（`subject[len(subject) - k]`，每次重新调用 `len()`），取值和子模式交替进行。自定义的 Sequence 能看出这些区别，`match_order` 用例逐一比较过
+- 映射：key 全是字面量时是 `rt::match_map(subject, ["a", "b"])`（`MATCH_MAPPING`、`len() >= N`、`MATCH_KEYS`），别的 key 是 `rt::match_mapping(subject, n)` 之后先求值 key（`&& let key = ..`）再 `rt::match_keys(subject, (&key,))`，和 CPython 一样在映射检查之后才求值值模式。`MATCH_KEYS` 用 `subject.get(key, 哨兵)`，第一个找不到的 key 就停下，两个相等的值模式抛 `ValueError: mapping pattern checks duplicate key (..)`。`**rest` 是 `rt::match_rest`，`dict.update` 之后删掉匹配过的 key
+- 类：没有子模式时是 `rt::match_instance`，否则 `rt::match_class(subject, cls, 位置子模式的个数, ["关键字", ..])`，返回先位置后关键字的值。不是类型时抛 `TypeError: called match pattern must be a class`，只有有位置子模式时才读 `__match_args__`（必须是 tuple，元素必须是 str，个数不够时 `C() accepts 1 positional sub-pattern (2 given)`），重复的属性 `TypeError`，`getattr` 的 `AttributeError` 算不匹配，`bool`、`int`、`str`、`list` 等内置类型（`_Py_TPFLAGS_MATCH_SELF`）的一个位置子模式匹配主体本身。错误文字都和 3.14 一样（`match_errors`）
+- 字面量用 `==`，主体在左边（`value.eq(1)?`，`COMPARE_OP` 之后 `TO_BOOL`），`None`/`True`/`False` 用 `is`。`-1`、`1 + 2j` 和 CPython 一样当成常量。值模式（`Color.RED`）走到那一步才求值
+- 不带捕获的 OR 模式写成 `||`，嵌套在别的模式里时每个分支是 `matches!(rt::match_seq(&item)?, Some([a, b]) if a.eq(1)? && b.eq(0)?)`
+- 通配符和没被读到的值用 `_`，模式里不绑定名字的中间值取名 `item`（被局部变量占用时 `item2`），类的关键字子模式用属性名，映射的值用 key 的名字
+- 主体是不会被重新赋值的局部变量或参数时直接用，否则先 `let subject = ..;`
+
+捕获的名字按 CPython 的顺序（后序，`as` 的名字在里面的名字之后，`**rest` 最后）在整个模式成功之后、guard 之前存进变量，所以 guard 失败时也已经绑定，`match` 之后能读到。存法有两种
+
+- 只在这个 case 的 guard 和体里用到的名字（`LocalsInfo.case_scoped`，和 `for` 的 `loop_scoped` 一样的分析）直接用 `if let` 绑定的名字，和链上别的节一样
+- 别的（`match` 之后还读、模块级和类体里的名字、cell）先赋给局部变量（`x = Some(x2);`、`m.set_global`、`ns.set`），再求值 guard。这时 guard 不能是链上的一节（失败也要已经赋值），整个 `match` 写成带标签的块，每个 case 一个 `if`，体结束时 `break 'match_`
+
+```rust
+// match values:
+//     case [x, y] if x > y: ...
+//     case [x, *_] if x < 0: ...
+'match_: {
+    if let Some([x2, y2]) = rt::match_seq(values)? {
+        x = Some(x2);
+        y = Some(y2);
+        if rt::local(&x, "x")?.gt(rt::local(&y, "y")?)? {
+            ..
+            break 'match_;
+        }
+    }
+    if rt::match_seq_min(values, 1)?
+        && let x2 = values.get_item(0)?
+    {
+        x = Some(x2);
+        if rt::local(&x, "x")?.lt(0)? { .. }
+    }
+}
+```
+
+没有这种 case 时整个 `match` 是 `if .. else if .. else` 链，最后一个不会失败的 case 是 `else`，体是空的就省掉。guard 里的 `:=`、生成器表达式、lambda 照常（嵌套的 fn item 放在 `match` 之前）。`match` 可以出现在模块级、类体、协程和生成器里（`match_async`），`return`、`break`、`continue` 照常。`--traceback-lines` 时每一节之前标出它所在的行（多行的模式里出错的子模式所在的行，guard 的行），和 CPython 一样（`match_uncaught`）。链的第一节的 marker 写在 `if` 之前，后面的 case 因此是 `else { frame.line(n); if .. }`（clippy 的 `blocks_in_conditions` 不允许整个条件是一个块）。
+
+保留为 Python 的（§13，覆盖率报告里的特性名）：带捕获的 OR 模式（`OR pattern with captures`，每个分支要绑定同样的名字，链上表达不出来）和有不会失败的分支的 OR 模式（`OR pattern with an irrefutable alternative`，CPython 只允许它在最后，很少见）。`match_kept` 用例。
+
+否决的方案：每个 case 一个闭包返回 `Option<(..)>`，名字和值离得太远；Rust 的 `match` 加 guard，所有检查都在 guard 里，等于没用上模式。
+
 ## 9. 异常（M4）
 
 目标是让最常见的写法读起来像手写的 Rust，少数几种固定的结构覆盖其余情况。运行时的部分在 `crates/steelix-runtime/src/frame.rs`，生成的部分在 `lower/handling.py`。
@@ -1180,6 +1248,7 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
   - 只在 `try` 体里用到的变量声明在 `try` 生成的闭包里（§9），`try` 语句结束时就释放。同样，只在 `with` 里用到的 `as` 目标是 `frame.with` 闭包的参数（§9），`with` 结束时释放，CPython 要等到函数返回
   - 被重新赋值的参数（`let mut n = n.clone();`）不会让实参提前释放，调用方一直持有实参到调用返回，CPython 的帧拥有实参，`f(T())` 里的 `T()` 在 `n` 被重新赋值时就释放
   - 经过函数对象的调用（`f.call1((a, b))?`，例如嵌套函数和不能直接调用的模块函数）的参数在调用返回后按书写顺序释放，先 `a` 后 `b`，因为 Rust 的元组按字段顺序 drop。CPython 先释放 `b`。直接调用的参数是语句里的临时变量，按相反的顺序释放，和 CPython 一样
+  - `match`（§8 "match 语句"，`tests/cases/match_release.py`）的主体活到 `match` 结束，模式取出来但没有绑定名字的值（`if let Some([item, x])` 里的 `item`、类模式的属性）活到这个 case 结束，CPython 在执行体之前就释放了它们。只在一个 case 里用到的捕获名字在这个 case 结束时释放，和 `for` 的目标变量一样，CPython 要等到函数返回
   - 一条语句里的临时值活到语句结束（§8 的"粒度是语句"）：`print("made", D(tag).tag)` 里的 `D` 在 `print` 之后才释放，CPython 取完 `.tag` 就释放
   - 异常离开原生函数时，函数的局部变量随着 Rust 的返回立即释放。CPython 的 traceback 引用帧，帧持有局部变量，它们要等 traceback 释放（通常是调用方的 `except` 结束）才释放。原生帧没有 `f_locals`，traceback 里也看不到它们
 
@@ -1258,8 +1327,8 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 目标是 CPython 能运行的应用都能转换，并且行为一致。steelix 还不能降级的部分保留为 Python 源码，在模块的 globals 里执行。整个程序先跑起来，再逐步扩大原生转换的范围，覆盖率报告（下面）告诉我们下一步该支持什么。
 
 - 默认就是混合模式。`steelix transpile --no-fallback` 恢复以前的行为：遇到不支持的语法就报错，诊断信息带 `文件:行:列` 和特性名
-- 粒度是模块作用域里的语句。模块的作用域就是 globals 字典，所以不支持的模块级语句（带注解的赋值、`import *`、容器字面量里的 `*` 展开等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（异步生成器、多个 `for` 的生成器表达式、函数里的类等，协程和生成器里保留的写法见 §8 "协程和生成器"）整个保留为 Python，嵌套函数一起保留
-- 模块级的 `if`、`for`、`while`（包括 `if __name__ == "__main__":`）会拆开（M3d）：只有体里的某些语句不支持时，只保留这些语句，`if`/循环本身和其余语句仍是原生代码。拆分是递归的，体里的 `if`/`for`/`while` 同样处理。不拆的情况：不支持的构造在条件、循环变量或被迭代的表达式里，整个语句保留；保留的语句里有跳出原生循环的 `break`/`continue`（单独编译是 `SyntaxError`），整个循环保留，这是最简单而且正确的做法，保留的循环自己的 `break`/`continue` 不受影响。保留的语句之间不用同步任何东西，它们读写的都是 globals
+- 粒度是模块作用域里的语句。模块的作用域就是 globals 字典，所以不支持的模块级语句（带注解的赋值、`import *`、容器字面量里的 `*` 展开等）可以就地从源码执行，求值顺序和 Python 一致。包含不支持语法的顶层 `def`（异步生成器、多个 `for` 的生成器表达式、函数里的类、带捕获的 OR 模式等，协程和生成器里保留的写法见 §8 "协程和生成器"，`match` 的见 §8 "match 语句"）整个保留为 Python，嵌套函数一起保留
+- 模块级的 `if`、`for`、`while`（包括 `if __name__ == "__main__":`）和 `match`（M14）会拆开（M3d）：只有体里的某些语句不支持时，只保留这些语句，`if`/循环/`match` 本身和其余语句仍是原生代码。拆分是递归的，体里的复合语句同样处理。不拆的情况：不支持的构造在条件、循环变量、被迭代的表达式或者 `case` 的模式和 guard 里，整个语句保留；保留的语句里有跳出原生循环的 `break`/`continue`（单独编译是 `SyntaxError`），整个循环保留，这是最简单而且正确的做法，保留的循环自己的 `break`/`continue` 不受影响。保留的语句之间不用同步任何东西，它们读写的都是 globals
 - 类按方法拆开（M5，方法级的混合模式）：类本身原生创建，只有含不支持语法的方法和类体语句保留为 Python，在类的命名空间里执行，见下面的"类体里保留的语句"。类体里的 `if`/`for`/`while` 同样拆开
 - 原生函数里的一部分语句保留为 Python（更细的粒度）暂不做：那需要在 Rust 局部变量和 Python 代码之间同步局部变量。记录保留哪些语句的数据结构（`frontend/fallback.py` 的 `FallbackPlan`）按语句节点索引，现在已经放进模块级复合语句里的语句，以后可以直接放进函数里的语句
 

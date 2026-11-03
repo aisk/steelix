@@ -1,7 +1,7 @@
 //! Parts of `mixed_mode.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 35, `def evens`: match statement
+//! - line 35, `def evens`: type alias
 //! - line 49, `assign` statement: generator expression with several for clauses
 //! - line 75, `def twice`: function redefinition
 
@@ -147,16 +147,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,
         )?;
         rt::def!(m, double(x))?;
-        // mixed_mode.py:35, kept as Python: match statement at 37:9
+        // mixed_mode.py:35, kept as Python: type alias at 36:5
         rt::exec_python!(
             m,
             line = 35,
             r#"
 def evens(limit):
+    type Number = int
     for n in range(limit):
-        match n % 2:
-            case 0:
-                yield n
+        if n % 2 == 0:
+            yield n
 "#
         )?;
         rt::def!(m, use_counter(start))?;

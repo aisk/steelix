@@ -39,17 +39,26 @@ EXPECT_ERROR = re.compile(r"^# steelix-test: expect-error (.*)$", re.MULTILINE)
 KNOWN_DIFFERENCES: dict[str, dict[str, str]] = {
     # Native coroutines are not `types.CoroutineType`.
     "coroutines": {"inspect.iscoroutine True": r"inspect\.iscoroutine False"},
+    # The subject lives until the `match` ends and the values a pattern took
+    # apart without binding them until their case ends (CPython releases both
+    # before the body). A capture only read in its case is released when the
+    # case ends (CPython keeps it until the function returns).
+    "match_release": {
+        "captures after the match: ['a']": r"captures after the match: \[\]",
+        "unused capture: ['b']": r"unused capture: \['b', 'subject'\]",
+        "in the body: []": r"in the body: \['attribute', 'subject'\]",
+    },
     "frames_logging": {
         "WARNING frames_logging.py:16 step: native step 1": (
             r"WARNING __init__\.py:\d+ warning: native step 1"
         ),
         # No Python frame at all.
-        "UserWarning frames_logging.py:36: from native code": (
+        "UserWarning frames_logging.py:35: from native code": (
             r"UserWarning <sys>:0: from native code"
         ),
         # The kept function's call of the native one.
-        "UserWarning frames_logging.py:36: from native code, called by kept code": (
-            r"UserWarning frames_logging\.py:48: from native code, called by kept code"
+        "UserWarning frames_logging.py:35: from native code, called by kept code": (
+            r"UserWarning frames_logging\.py:45: from native code, called by kept code"
         ),
     },
 }
@@ -263,6 +272,7 @@ DEFAULT_LINES_CASES = [
     "except_custom_line",
     "decorators_uncaught",
     "async_uncaught",
+    "match_uncaught",
 ]
 DEFAULT_SUFFIX = "_default_lines"
 # Prints line numbers of traceback entries, which are the def lines here.

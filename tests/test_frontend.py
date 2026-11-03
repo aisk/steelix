@@ -339,6 +339,46 @@ def test_loop_variables_only_read_in_the_body_are_loop_scoped() -> None:
     assert "x" not in info.declared_at_top
 
 
+def test_captures_only_read_in_their_case_are_case_scoped() -> None:
+    info, _ = locals_of(
+        """
+        def f(v):
+            match v:
+                case [x, (a, b)] if a:
+                    print(x, b)
+                case {"k": k, **rest}:
+                    pass
+                case [y, *_] if y:
+                    pass
+                case {"y": y}:
+                    print(y)
+                case z:
+                    z = 1
+            match v:
+                case [late]:
+                    pass
+            print(late)
+        """
+    )
+    assert info.case_scoped == {"x", "a", "b", "k", "rest", "y"}
+    assert "late" in info.optional
+
+
+def test_failed_guard_leaves_captures_assigned() -> None:
+    info, _ = locals_of(
+        """
+        def f(v):
+            match v:
+                case x if x:
+                    pass
+                case _:
+                    pass
+            return x
+        """
+    )
+    assert "x" not in info.optional
+
+
 def test_break_continue_and_loop_else() -> None:
     info, fn = locals_of(
         """

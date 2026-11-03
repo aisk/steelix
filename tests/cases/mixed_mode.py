@@ -33,10 +33,10 @@ def double(x):
 
 
 def evens(limit):
+    type Number = int
     for n in range(limit):
-        match n % 2:
-            case 0:
-                yield n
+        if n % 2 == 0:
+            yield n
 
 
 def use_counter(start):

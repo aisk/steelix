@@ -7,7 +7,7 @@ A class is split like a compound statement (method level mixed mode): only
 the methods and other statements of its body that contain unsupported
 constructs are kept, and run in the class namespace.
 
-Module level `if`, `for` and `while` statements are split: when only some of
+Module level `if`, `for`, `while` and `match` statements are split: when only some of
 the statements in their bodies are unsupported, only those are kept and the
 compound statement itself stays native. Module scope is the globals dict, so
 the kept code needs no other state. A kept statement must not `break` or
@@ -73,19 +73,23 @@ class FallbackPlan:
         return True
 
 
-_SPLIT = (ast.If, ast.For, ast.While)
+_SPLIT = (ast.If, ast.For, ast.While, ast.Match)
 
 
 def split(stmt: ast.stmt, issues: list[Issue]) -> dict[ast.stmt, list[Issue]]:
     """The statements to keep as Python for the unsupported constructs
     `issues` in `stmt`: `stmt` itself, or for an `if`, `for` or `while`
-    whose header is supported, the statements of its bodies that contain
-    them, split further the same way."""
+    (or `match`) whose header is supported, the statements of its bodies
+    that contain them, split further the same way. The subject, patterns
+    and guards of a `match` count as its header."""
     if isinstance(stmt, ast.ClassDef):
         return _split_class(stmt, issues)
     if not isinstance(stmt, _SPLIT):
         return {stmt: issues}
-    children = [*stmt.body, *stmt.orelse]
+    if isinstance(stmt, ast.Match):
+        children = [s for case in stmt.cases for s in case.body]
+    else:
+        children = [*stmt.body, *stmt.orelse]
     by_child: dict[ast.stmt, list[Issue]] = {}
     for issue in issues:
         line, col = issue.location.line, issue.location.col

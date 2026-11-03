@@ -62,6 +62,10 @@ def bool_locals(
                 candidates -= {(a.asname or a.name).partition(".")[0] for a in names}
             case ast.ExceptHandler(name=str(name)):
                 candidates.discard(name)
+            case ast.MatchAs(name=str(name)) | ast.MatchStar(name=str(name)):
+                candidates.discard(name)
+            case ast.MatchMapping(rest=str(name)):
+                candidates.discard(name)
     for node in _walk(fn):
         if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
             if id(node) not in plain_targets:

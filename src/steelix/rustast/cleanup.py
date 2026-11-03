@@ -199,6 +199,8 @@ def _mentions(node: Any, name: str, body: bool = True) -> bool:
             return True
         case rs.Closure(params) if any(name in _pattern_names(p) for p in params):
             return True
+        case rs.LetExpr(pattern) | rs.Matches(pattern=pattern) if name in _pattern_names(pattern):
+            return True
     if isinstance(node, tuple):
         return any(_mentions(item, name) for item in node)
     if not dataclasses.is_dataclass(node) or isinstance(node, type):

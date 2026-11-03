@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12 ✅ → M13 ✅ → M14（计划）。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12 ✅ → M13 ✅ → M14 ✅。
 
 ## M0 项目骨架 ✅
 
@@ -324,36 +324,38 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 
 runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_`、`rt::aiter`、`rt::anext`、`Frame::async_with` 等，`rt::Frame` 多了一个生命周期参数 `Frame<'a, 'py>`），生成的代码用到了这些，下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
 
-## M14 match 语句（计划）
+## M14 match 语句 ✅
 
-`match` 现在整个保留为 Python（标准库里 17 个函数，为 3.10 以后写的应用会多一些，比如解析命令、处理 JSON 消息）。Rust 的 `match` 对不上，因为 Python 的模式全是运行时的检查（`isinstance`、`len()`、`Sequence`/`Mapping`、`__match_args__`、`getattr`、`.get()`、`==`/`is`）。对得上的是 let chains（Rust 1.88 起在 edition 2024 稳定）：整个 `match` 是一个带标签的块，每个 `case` 是一个 `if let .. && ..`，模式的每一层是链上的一节，和 Python 原文一行对一行。
+`match` 原来整个保留为 Python（标准库里 17 个函数，为 3.10 以后写的应用会多一些，比如解析命令、处理 JSON 消息）。Rust 的 `match` 对不上，因为 Python 的模式全是运行时的检查（`isinstance`、`len()`、`Sequence`/`Mapping`、`__match_args__`、`getattr`、`.get()`、`==`/`is`）。对得上的是 let chains（Rust 1.88 起在 edition 2024 稳定）：每个 `case` 是一个 `if let .. && ..`，模式的每一层是链上的一节，和 Python 原文一行对一行（design §8 "match 语句"）。
 
 ```rust
-'match_: {
-    let subject = command.method0("split")?;
-    // case ["go", direction] if direction in exits:
-    if let Some([verb, direction]) = rt::match_seq(&subject)?
-        && verb.eq("go")?
-        && exits.contains(&direction)?
-    {
-        go(m, &direction)?;
-        break 'match_;
-    }
-    // case Point(x=0, y=y):
-    if let Some([x, y]) = rt::match_class(&subject, &m.global("Point")?, 0, ["x", "y"])?
-        && x.eq(0)?
-    { .. }
+// case ["go", direction] if direction in EXITS:
+if let Some([item, direction]) = rt::match_seq(&subject)?
+    && item.eq("go")?
+    && m.global("EXITS")?.contains(&direction)?
+{
+    ..
+// case Point(x=0, y=y):
+} else if let Some([x, y]) = rt::match_class(point, &m.global("Point")?, 0, ["x", "y"])?
+    && x.eq(0)?
+{
+    ..
 }
 ```
 
-- [ ] runtime 的 helper，每个一次取出这一层的所有值（和 CPython 的 `MATCH_CLASS`、`MATCH_KEYS`、序列解包一样），返回 `Option<[Bound; N]>`，let 链再按深度优先、从左到右检查子模式，所以求值顺序和短路与 CPython 相同
-  - `rt::match_seq`、`rt::match_seq_star`：`Py_TPFLAGS_SEQUENCE`（str、bytes 不算）、`len()`，取值方式照 CPython 编译器按模式形状的选择（迭代或下标），自定义的 Sequence 能看出区别
-  - `rt::match_map`：`Py_TPFLAGS_MAPPING`、`.get(key, 哨兵)`、重复 key 的 `ValueError`、`**rest` 复制后删掉已匹配的 key
-  - `rt::match_class`：`isinstance`（不是类型时 `TypeError`）、`__match_args__`（必须是 tuple，位置参数太多时报错）、关键字属性用 `getattr`（`AttributeError` 算不匹配）、`int(x)` 这类内置类型的位置参数匹配主体本身、重复属性的 `TypeError`，错误文字和 CPython 一样
-- [ ] 字面量用 `==`（主体在左边），`None`/`True`/`False` 用 `is`，值模式（`Color.RED`）走到那一步才求值
-- [ ] 捕获的名字在整个模式成功之后、guard 之前绑定（guard 失败也已经绑定，`match` 之后能读到）。只在这个 case 的体里用到时直接用 `if let` 绑定的名字，否则先赋给局部变量再求值 guard
-- [ ] 不带捕获的 OR 模式写成 `||`，带捕获的先保留为 Python
-- [ ] 对照 CPython `Python/codegen.c` 的模式匹配部分逐条核对，用例覆盖各种模式、副作用的顺序（自定义的 Sequence/Mapping/`__match_args__`/`__eq__`）、报错文字，golden 和 `tests/cases/`
+- [x] runtime 的 helper（`matching.rs`），每个一次取出这一层的所有值（和 CPython 的 `MATCH_CLASS`、`MATCH_KEYS`、序列解包一样），返回 `Option<[Bound; N]>`，let 链再按深度优先、从左到右检查子模式，所以求值顺序和短路与 CPython 相同
+  - `rt::match_seq`、`rt::match_seq_star`、`rt::match_seq_len`、`rt::match_seq_min`、`rt::item_from_end`：`Py_TPFLAGS_SEQUENCE`（str、bytes 不算）、`len()`，取值方式照 CPython 编译器按模式形状的选择（迭代或下标），自定义的 Sequence 能看出区别
+  - `rt::match_map`、`rt::match_mapping`、`rt::match_keys`、`rt::match_rest`：`Py_TPFLAGS_MAPPING`、`.get(key, 哨兵)`、重复 key 的 `ValueError`、`**rest` 复制后删掉已匹配的 key，不是字面量的 key 在映射检查之后才求值
+  - `rt::match_class`、`rt::match_instance`：`isinstance`（不是类型时 `TypeError`）、`__match_args__`（必须是 tuple，元素必须是 str，位置参数太多时报错）、关键字属性用 `getattr`（`AttributeError` 算不匹配）、`int(x)` 这类内置类型的位置参数匹配主体本身、重复属性的 `TypeError`，错误文字和 CPython 一样
+- [x] 字面量用 `==`（主体在左边），`None`/`True`/`False` 用 `is`，`-1`、`1 + 2j` 当成常量，值模式（`Color.RED`）走到那一步才求值
+- [x] 捕获的名字在整个模式成功之后、guard 之前按 CPython 的顺序绑定（guard 失败也已经绑定，`match` 之后能读到）。只在这个 case 里用到时直接用 `if let` 绑定的名字（`LocalsInfo.case_scoped`），否则先赋给局部变量再求值 guard，这时整个 `match` 是带标签的块，否则是 `if .. else if ..` 链
+- [x] 不带捕获的 OR 模式写成 `||`（嵌套时用 `matches!`），带捕获的和有不会失败的分支的保留为 Python（覆盖率报告的特性名 `OR pattern with captures`、`OR pattern with an irrefutable alternative`）
+- [x] 模块级、类体、协程和生成器里的 `match`，guard 里的 `:=`、生成器表达式和 lambda，`--traceback-lines` 的行号（出错的子模式和 guard 所在的行），模块级的 `match` 和 `if`/`for` 一样按 case 体拆开保留
+- [x] 对照 CPython 3.14 `Python/codegen.c`、`Python/ceval.c` 的模式匹配部分逐条核对。用例 `match_basic`（命令解析、各个位置的星号、嵌套、guard 失败后仍然绑定、OR、AS、单例和 `==`、模块级和类体）、`match_classes`（`__match_args__`、dataclass、enum、内置类型）、`match_mappings`（`**rest`、值模式做 key、非 dict 的映射）、`match_order`（自定义的 Sequence/Mapping/`__eq__`/`__getattr__`/`__match_args__`/`__instancecheck__` 打印每一次调用和存名字的顺序）、`match_errors`（所有报错文字）、`match_async`、`match_uncaught`（也在默认行号下测）、`match_kept`、`match_release`（§12 的释放时机），`match_basic`、`match_async` 也有 `--traceback-lines` 的 golden
+- [x] 原来用 `match` 当"不支持的写法"的测试换成 `type` 别名和 `try`/`except*`
+- [x] 覆盖率（`coverage.md`）：标准库的函数 99.1% → 99.3%，行数 97.0% → 97.8%，17 个用 `match` 的函数全部原生，没有带捕获的 OR 模式；含 `match` 的 8 个标准库模块 `cargo clippy` 没有错误，也没有出自 `match` 的警告
+
+runtime 的公开接口多了 `matching.rs` 的 11 个函数（`rt::match_seq` 等），生成的代码用到了它们，下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`（和 M13 的变化一起）。
 
 ## 性能的候选项（未排期）
 
@@ -370,6 +372,6 @@ runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新�
 
 ## 以后再说
 
-generator 和 async/await 移到了 M13，match 移到了 M14。
+generator 和 async/await 移到了 M13 并完成，match 移到了 M14 并完成。
 
 基于类型注解的 typed lowering（`int` → `i64` 等）和符合条件的类自动升级为 `#[pyclass]`（M9 原来的计划，不做的原因是注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就要同时生成两套代码路径，见 §1、§10）、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）
