@@ -1,0 +1,7 @@
+(begin (define (square x) (* x x)) 'square)
+(map square '(1 2 3))
+(let loop ((i 0) (acc '())) (if (= i 4) (reverse acc) (loop (+ i 1) (cons (square i) acc))))
+(string-append "a" (number->string (square 12)))
+(car 5)
+)
+(vector-ref (vector 1 2 3) 1)

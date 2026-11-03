@@ -61,7 +61,6 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
             5,
         ),
         ("x = t'{a}'\n", "t-string", 1, 5),
-        ("x = 1j\n", "complex constant", 1, 5),
     ],
 )
 def test_unsupported_constructs_report_location(
@@ -326,7 +325,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
         class A[T]:
             # inside the class
             pass
-        ys = 2j  # squares
+        ys = (i for i in x for j in x)  # squares
         zs = t"{ys}"
         def gen():
             yield 1
@@ -338,9 +337,10 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
     assert comments in out
     assert "// inside the class" not in out
     assert '"\nclass A[T]:\n    # inside the class\n    pass\n"' in out
-    simple = 'ys = 2j  # squares\nzs = t"{ys}"\n'
+    simple = 'ys = (i for i in x for j in x)  # squares\nzs = t"{ys}"\n'
     assert f'"\n{simple}"' in out
-    assert "// m.py:7, kept as Python: complex constant at 7:6, t-string at 8:6\n" in out
+    reasons = "generator expression with several for clauses at 7:6, t-string at 8:6"
+    assert f"// m.py:7, kept as Python: {reasons}\n" in out
     assert "// m.py:9, kept as Python: yield at 10:5\n" in out
 
 
@@ -352,7 +352,7 @@ def test_python_statement_after_semicolon() -> None:
 
 
 def test_raw_string_delimiter_avoids_the_source() -> None:
-    out = lower("""x = (1j, '"#', '"##')\n""")
+    out = lower("""x = (t'', '"#', '"##')\n""")
     assert 'r###"\n' in out
 
 
@@ -396,7 +396,7 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
             def f():
                 yield x
         else:
-            ys = [1j]
+            ys = [t'']
             print(ys)
         """
     )
@@ -405,13 +405,13 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
     assert 'rt::builtins::print(m.py(), (m.global("ys")?,))?;' in out
     # Indented as in the file.
     assert 'r#"\n    def f():\n        yield x\n"#' in out
-    assert 'r#"\n    ys = [1j]\n"#' in out
+    assert "r#\"\n    ys = [t'']\n\"#" in out
 
 
 def test_unsupported_header_keeps_the_whole_statement() -> None:
     assert kept_lines(
         """
-        if 1j:
+        if t'':
             print(1)
         for x in (i for i in range(3) for j in ()):
             print(x)
@@ -436,7 +436,7 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
         """
         for i in range(3):
             if i:
-                ys = [i * 1j]
+                ys = [t'{i}']
                 break
             for j in range(i):
                 match j:

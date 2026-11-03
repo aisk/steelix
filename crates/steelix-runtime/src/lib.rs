@@ -14,7 +14,7 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PySlice, PyString, PyTuple};
+use pyo3::types::{PyBool, PyBytes, PyComplex, PyFloat, PyInt, PySlice, PyString, PyTuple};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -89,6 +89,11 @@ pub fn bigint<'py>(py: Python<'py>, digits: &str) -> PyResult<Bound<'py, PyAny>>
 /// Builds a Python `float`.
 pub fn float(py: Python<'_>, value: f64) -> Bound<'_, PyAny> {
     PyFloat::new(py, value).into_any()
+}
+
+/// Builds a Python `complex`, for an imaginary literal like `2j`.
+pub fn complex(py: Python<'_>, real: f64, imag: f64) -> Bound<'_, PyAny> {
+    PyComplex::from_doubles(py, real, imag).into_any()
 }
 
 /// Builds a Python `str`.

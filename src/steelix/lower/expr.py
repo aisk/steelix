@@ -517,6 +517,9 @@ class ExprLowering(ComprehensionLowering):
                 return Value(lit, Kind.LITERAL, _rt("str", py(), lit))
             case bytes():
                 return Value(_rt("bytes", py(), rs.ByteStrLit(value)), Kind.OWNED, pure=True)
+            case complex():
+                parts = (rs.FloatLit(value.real), rs.FloatLit(value.imag))
+                return Value(_rt("complex", py(), *parts), Kind.OWNED, pure=True)
         if value is Ellipsis:
             ellipsis = rs.MethodCall(py(), "Ellipsis")
             owned = rs.MethodCall(ellipsis, "into_bound", (py(),))

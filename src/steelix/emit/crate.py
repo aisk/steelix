@@ -37,16 +37,18 @@ RUNTIME_VERSION = "0.1"
 # never reads (including `del x`, which becomes `x = None`). The clippy lints
 # are about the Python program itself, which the translation keeps as it is:
 # a loop that always leaves in its first iteration, a literal close to `pi`,
-# branches with the same code, a function with many parameters,
-# docstrings, which are not Markdown (`>>>` lines of doctests), and
-# redundant logic on bool locals (`while not done` that never sets `done`,
-# `a and a`, `a and not a`).
+# branches with the same code, an `if` nested in another without an `else`,
+# a function with many parameters, a module named like its package
+# (`pkg/pkg.py`), docstrings, which are not Markdown (`>>>` lines of
+# doctests), and redundant logic on bool locals (`while not done` that never
+# sets `done`, `a and a`, `a and not a`).
 CRATE_ALLOWS = """\
 #![allow(non_snake_case, unused_variables, unused_assignments)]
 #![allow(clippy::never_loop, clippy::approx_constant, clippy::if_same_then_else)]
 #![allow(clippy::too_many_arguments, clippy::doc_lazy_continuation)]
 #![allow(clippy::while_immutable_condition, clippy::eq_op, clippy::nonminimal_bool)]
-#![allow(clippy::overly_complex_bool_expr)]"""
+#![allow(clippy::overly_complex_bool_expr, clippy::collapsible_if)]
+#![allow(clippy::module_inception)]"""
 
 
 # Unoptimized PyO3 makes every Python operation several times slower, so the

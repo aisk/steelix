@@ -285,7 +285,7 @@ class SubsetChecker:
         match expr:
             case ast.Constant(value):
                 if value is not Ellipsis and not isinstance(
-                    value, int | float | str | bytes | None
+                    value, int | float | complex | str | bytes | None
                 ):
                     self.fail(f"{type(value).__name__} constant", expr)
             case ast.Name():

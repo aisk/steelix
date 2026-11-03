@@ -229,9 +229,18 @@ M9 第一项提前做，并且改成默认行为。
 
 已有用例的 golden 从 18168 行变成 18138 行（新增的两个用例另有 815 行），`tests/golden/projects` 的模块从 7873 行变成 7860 行，`tests/apps` 的输出从 9419 行变成 9407 行，154 个标准库模块从 332793 行变成 332235 行。行数变化不大，主要的变化是返回值少了 clone、解包不再构造元组、bool 局部变量不再经过 `rt::bool` 和 `is_truthy`（标准库里 `rt::bool(` 从 1251 个减到 1048 个，`is_truthy` 从 5585 个减到 5440 个）。
 
-## M10 真实项目验证
+## M10 真实项目验证 ✅
 
-- [ ] 用一两个真实的小项目完整走一遍转换、`steelix build` 部署、按 §15 逐步改写，记录转换覆盖率和改写时遇到的阻碍，据此决定下一步
+用 skime（用户自己的 Scheme 实现，24 个模块，4582 行）完整走了一遍，详细记录和建议见 `m10-skime.md`。
+
+- [x] 转换：不需要任何参数，函数 373/374 原生（剩下一个 generator），行 99.9%
+- [x] 和 CPython 比较：8 个 Scheme 程序（REPL）输出、退出码相同，`--traceback-lines` 下完整 traceback 相同
+- [x] skime 自己的 108 个 pytest 用例对 ext 模式的原生包全部通过（CPython 0.17 s，原生 0.43 s）
+- [x] `steelix build` 的分发（61 MB，tar.gz 20 MB）在 `bwrap` 里运行正确，包括 `--no-sources`
+- [x] 按 §15 改写读取器（第二步，纯 Rust 加单元测试）和 VM 主循环（第一步），记录了 10 个阻碍
+- [x] 修复：复数字面量（`rt::complex`，用例 `complex_constants`），clippy 的 `collapsible_if`（用例 `nested_if`）和 `module_inception` 在 crate 根上 allow
+- [x] `tests/projects/skime`：原样副本加驱动脚本和 Scheme 程序，和 CPython 比较，不做 golden（生成的 Rust 有 1.5 万行）
+- 发现的主要问题是性能：解释器这类小函数密集的程序比 CPython 慢 6 倍，原因是 Python 调用原生函数的开销（没有 vectorcall）和属性名没有 intern（只改后者就快 1.8 倍）。下一步的建议按优先级排在 `m10-skime.md` 第 10 节
 
 ## 以后再说
 

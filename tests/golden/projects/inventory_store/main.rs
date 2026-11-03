@@ -8,7 +8,8 @@
     clippy::eq_op,
     clippy::nonminimal_bool
 )]
-#![allow(clippy::overly_complex_bool_expr)]
+#![allow(clippy::overly_complex_bool_expr, clippy::collapsible_if)]
+#![allow(clippy::module_inception)]
 
 mod config;
 mod store;

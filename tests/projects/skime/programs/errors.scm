@@ -1,0 +1,11 @@
+(car '())
+(undefined-var 1)
+(vector-ref (vector 1 2) 5)
+(+ 1 "a")
+((lambda (x) x))
+(define (f x) (g x))
+(f 1)
+(1 2 3)
+(string-ref "abc" 10)
+(quotient 1 0)
+'after-errors

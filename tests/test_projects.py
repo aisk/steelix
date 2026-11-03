@@ -2,7 +2,8 @@
 
 Each project is transpiled from its entry script (or `-m module`) together
 with the project modules it imports. The generated crate is a golden
-snapshot (`tests/golden/projects/<name>/`, every file under `src/`), builds without warnings
+snapshot (`tests/golden/projects/<name>/`, every file under `src/`; not for
+`skime`, the largest), builds without warnings
 and clippy lints, and the program behaves like CPython running the same
 sources: stdout, exit code, and full tracebacks with file names.
 """
@@ -42,6 +43,9 @@ class Case:
     include: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
     commands: list[list[str]] = field(default_factory=lambda: [[]])
+    # Whether the generated `src/` is a golden snapshot (skime's is not: its
+    # 15000 lines of Rust would almost double the goldens).
+    golden: bool = True
 
     @property
     def root(self) -> Path:
@@ -95,6 +99,21 @@ CASES = [
             ["sample.json", "lines.jsonl"],
         ],
     ),
+    Case(
+        "skime",
+        "skime",
+        script="app.py",
+        commands=[
+            ["programs/numbers.scm"],
+            ["programs/control.scm"],
+            ["programs/data.scm"],
+            ["programs/errors.scm"],
+            ["load", "programs/library.scm"],
+            ["eval", "(vector-ref (vector 1 2) 9)"],
+            ["eval", "(car (quote (1 . 2)) 3)"],
+        ],
+        golden=False,
+    ),
 ]
 BY_NAME = {case.name: case for case in CASES}
 
@@ -119,7 +138,7 @@ def generated_sources(crate: Path) -> dict[str, str]:
     }
 
 
-@pytest.mark.parametrize("name", list(BY_NAME))
+@pytest.mark.parametrize("name", [case.name for case in CASES if case.golden])
 def test_project_golden(name: str, update_golden: bool, tmp_path: Path) -> None:
     case = BY_NAME[name]
     generate(case, tmp_path / name)
