@@ -287,8 +287,10 @@ def test_cli_python_m(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     assert main(["transpile", "-m", "pkg", "-o", "out", "-q"]) == 0
     main_rs = (tmp_path / "out" / "src" / "main.rs").read_text()
-    assert 'run_module(env!("STEELIX_PYTHON"), &script, MODULES, "pkg.__main__")' in main_rs
-    assert f'argv0: "{tmp_path.resolve() / "pkg" / "__main__.py"}",' in main_rs
+    assert 'steelix_runtime::script!("pkg/__main__.py");' in main_rs
+    assert 'run_module(&script, MODULES, "pkg.__main__")' in main_rs
+    build_rs = (tmp_path / "out" / "build.rs").read_text()
+    assert f'const PROJECT: &str = "{tmp_path.resolve()}";' in build_rs
     assert 'name = "pkg"' in (tmp_path / "out" / "Cargo.toml").read_text()
     assert (tmp_path / "out" / "src" / "pkg" / "__main__.rs").is_file()
 

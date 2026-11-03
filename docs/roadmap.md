@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 → M9。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M9。
 
 ## M0 项目骨架 ✅
 
@@ -169,13 +169,15 @@
 - [ ] ext 模式下 `python -m pkg`：`NativeLoader` 需要 `get_code`
 - [ ] 命名空间包（没有 `__init__.py` 的目录）里的模块现在不转换
 
-## M7 分发
+## M7 分发 ✅
 
-- [ ] 部署后的二进制不能依赖源文件：`multiprocessing` 的子进程现在会用 venv 的 python 重新执行原来的 `.py`，源文件挪走就失败。需要让子进程使用二进制本身（`multiprocessing.set_executable`、`__spec__` 等），或者明确要求源文件随二进制一起部署
-- [ ] Spike：对比附带 python-build-standalone + site-packages、静态链接 libpython 等方案，结论写入 design.md §11
-- [ ] 运行时按相对于二进制的路径定位 Python 安装，不再写死构建时路径
-- [ ] `steelix build` 一条命令产出可分发的目录或压缩包
-- [ ] 在干净环境（容器）里验证可运行
+- [x] 部署后的二进制不依赖源文件：multiprocessing 的 spawn 和 forkserver 子进程启动程序本身（`sys.meta_path` 上的 hook 在 `multiprocessing.spawn` 第一次 import 时调用 `set_executable`），程序识别子进程的 `-c` 命令行，把 `_fixup_main_from_path`、`_fixup_main_from_name` 换成执行原生 `__main__` 的版本。开发构建和分发都一样（§11）
+- [x] `sys.executable` 仍然是 Python 解释器：开发时是 venv 的 python，分发里是指向程序的 `python/bin/python`，程序以这个名字运行时就是 python（`Py_RunMain`），`subprocess.run([sys.executable, ...])` 照常可用
+- [x] Spike：附带 python-build-standalone 加 site-packages（采用）、静态链接 libpython、系统 Python、标准库 zip，测量了 hello 和 json 项目在几种标准库取舍下的体积、文件数和启动时间，结论写入 design.md §11
+- [x] 运行时按相对于二进制的路径定位 Python 安装（`PyConfig.home`，rpath `$ORIGIN/python/lib`）和项目目录，不再写死构建时路径。`main.rs` 里只有 `steelix_runtime::script!("app.py")`，开发构建的路径由 build.rs 给出，golden 不再需要替换 `$ROOT`。`sys.argv[0]` 改成和 `__file__` 一样的绝对路径
+- [x] `steelix build` 一条命令转换、`cargo build --release`、组装 `dist/<name>/`（程序、Python 运行时、构建解释器的 site-packages、可选的源文件、`--add-data`），`--archive` 打成 tar.gz，`--python` 选择解释器或 venv
+- [x] 在干净环境里验证：测试用 `bwrap` 只挂载 `/usr` 和分发目录运行 hello、json 项目、`-m json` 和 multiprocessing（容器的 podman 在本机不可用，`bwrap` 起到同样的隔离作用）
+- 只做了 Linux x86_64，macOS 和 Windows 需要的改动记在 §11。标准库 zip 暂不做（文件数少了，但启动慢 6 到 11 ms）
 
 ## M8 推导式与其它 ✅
 

@@ -63,6 +63,10 @@ class Project:
     """The parsed source of the main module and of each module, by `relpath`."""
     notes: list[str] = field(default_factory=list)
     """What was left out and why, for the report."""
+    left_out: set[str] = field(default_factory=set)
+    """Project modules found by the analysis that import from their Python
+    source at run time (excluded, namespace packages, not compiling): their
+    file, or their directory for a package, relative to the project."""
 
     @property
     def run_module(self) -> bool:
@@ -154,6 +158,7 @@ def _parse(project: Project, module: SourceModule, *, required: bool) -> ParsedM
         if required:
             raise
         project.notes.append(f"{module.relpath}: not transpiled, it does not compile: {err}")
+        project.left_out.add(module.relpath)
         return None
     parsed.path = path
     return parsed
@@ -196,6 +201,7 @@ class _Finder:
             if last and (directory / f"{part}.py").is_file():
                 return SourceModule(name, self.relpath(directory / f"{part}.py"), False)
             if (directory / part).is_dir():
+                self.project.left_out.add(self.relpath(directory / part))
                 self.note(
                     ".".join(parts[: i + 1]),
                     f"{self.relpath(directory / part)}/: namespace package, not transpiled",
@@ -226,6 +232,8 @@ class _Finder:
                 return
             if self.is_excluded(prefix):
                 self.note(prefix, f"{found.relpath}: excluded, imports from its Python source")
+                excluded = found.relpath.removesuffix("/__init__.py") if found.package else None
+                self.project.left_out.add(excluded or found.relpath)
                 return
             parsed = self.project.parsed.get(found.relpath)
             if parsed is None:

@@ -401,7 +401,7 @@ const MODULES: &[NativeModule] = &[
 
 **finder 和 loader**（runtime 的 `importer.rs`）。`run_project` 在执行 `__main__` 之前把 `NativeImporter` 放进 `sys.meta_path`，位置在 `PathFinder` 前面，这样 builtin、frozen 模块仍然优先，项目模块的优先级和在 `sys.path[0]` 里一样
 
-- `find_spec` 用 `importlib.util.spec_from_file_location` 按原来的源文件创建 spec，所以 `__file__`（原来的绝对路径）、`__cached__`、`__package__`、包的 `__path__` 和 `submodule_search_locations` 都和从源码 import 时一样。importlib 自己负责创建模块对象、放进 `sys.modules`、设置 `_initializing`、失败时删掉
+- `find_spec` 用 `importlib.util.spec_from_file_location` 按原来的源文件创建 spec，所以 `__file__`（项目目录下的绝对路径，项目目录在运行时确定，分发时是 `src/`，§11）、`__cached__`、`__package__`、包的 `__path__` 和 `submodule_search_locations` 都和从源码 import 时一样。importlib 自己负责创建模块对象、放进 `sys.modules`、设置 `_initializing`、失败时删掉
 - 每个模块一个 `NativeLoader`（`__loader__`），和 `SourceFileLoader` 一样有 `name`、`path`，实现了 `exec_module`、`is_package`、`get_filename`、`get_source`（读原来的源文件，`inspect.getsource` 和 `linecache` 能用）。`exec_module` 通过 importlib 的 `_call_with_frames_removed` 调用生成的 `exec_module`，所以 import 时出错的 traceback 里没有 importlib 的帧，和源码模块一样
 - 表里没有的模块交给后面的 finder，照常从源码 import：标准库、第三方包、`--exclude` 的模块、转换之后才加进来的文件。包的子模块也一样，`PathFinder` 按包的 `__path__` 找得到
 - 循环 import、`importlib.reload`、`importlib.import_module`、删掉 `sys.modules` 里的项之后重新 import 都由 importlib 处理，执行的是同一个生成的 `exec_module`，模块级状态在新的 globals 里，和 CPython 一样。这也是不用 static 保存模块对象的原因（上面）
@@ -903,13 +903,11 @@ m.set_global(
   - `SystemExit` 和未捕获异常交给 `PyErr_Print` 处理，退出码与 CPython 一致。之前和 CPython 的 `flush_io` 一样先 flush `sys.stderr` 和 `sys.stdout`（忽略错误），否则 stdout 和 stderr 重定向到同一个文件时，缓冲区里的输出会排在 traceback 后面
   - 生成的 `Cargo.toml` 在 dev profile 下把 pyo3、pyo3-ffi 和 runtime 设为 `opt-level = 3`，生成的 crate 本身设为 1。没有优化的 PyO3 让每个 Python 操作慢几倍；不用 `package."*"`，因为它也会优化 proc macro，让干净构建的时间翻倍。实测（M3a）一个递归加循环的基准：全部 `opt-level = 0` 时 1.39s，现在的配置 0.40s，而 CPython 是 0.18s；干净构建从 11.5s 增加到 15.3s，改一行后重新构建从 0.5s 增加到 1.0s。转换出来的代码每个操作仍然经过 C API，没有字节码解释的开销但也没有 CPython 的特化和内联缓存，在函数被改写成原生 Rust 之前不会比 CPython 快
   - 只有 crate 是 workspace 根时 profile 才生效，所以只在独立 crate（默认）里生成
-  - build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython
-  - M1 把构建时解释器的路径写死在二进制里，只适合在本机运行。分发到别的机器需要单独设计（见下）
-  - 与 `python app.py` 一致的脚本信息（M2），在转换时确定并写进 `main.rs` 的 `rt::embed::Script`
-    - `sys.argv[0]` 是传给 `steelix transpile` 的脚本路径，保持原样（相对路径仍是相对路径），后面接程序收到的参数。这样 `argparse` 的程序名、按 `argv[0]` 打印的用法说明都和原来一致，相当于在转换时的目录里执行 `python app.py`。二进制自己的真实命令行放在 `sys.orig_argv`
-    - `sys.path[0]` 是脚本所在目录（解析符号链接），所以脚本旁边还没转换的 Python 模块照样能 import，这在 M6 之前很有用
-    - `__main__` 的 `__file__` 是脚本的绝对路径（3.9 起 CPython 也是绝对路径），`__cached__` 是 `None`
-    - 这些路径指向源码位置，和解释器路径一样只适合在本机运行，M7 再处理
+  - 开发构建（在生成的 crate 里 `cargo build`）：build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython，并把构建用的解释器（`PYO3_PYTHON`）和项目目录作为 `STEELIX_PYTHON`、`STEELIX_PROJECT` 交给编译器。程序用这个解释器的安装和 venv，只适合在本机运行。分发用的构建见下面的"分发"
+  - 与 `python app.py` 一致的脚本信息（M2，M7 改成运行时确定）。`main.rs` 里只有脚本相对于项目目录的名字 `steelix_runtime::script!("app.py")`，宏在生成的 crate 里读取 build.rs 给出的两个路径（分发构建时没有），runtime 在启动时算出下面这些路径。所以 `main.rs` 里没有本机的绝对路径，golden 也不用替换路径
+    - `sys.path[0]` 是项目目录（脚本所在目录，解析符号链接），所以脚本旁边还没转换的 Python 模块照样能 import
+    - `__main__` 的 `__file__` 是项目目录加上脚本名，是绝对路径（3.9 起 CPython 也是绝对路径），`__cached__` 是 `None`
+    - `sys.argv[0]` 和 `__file__` 相同，后面接程序收到的参数，相当于 `python /绝对路径/app.py`。M2 到 M6 保留传给 `steelix transpile` 的写法（相对路径仍是相对路径），但程序不一定在转换时的目录里运行，分发之后更不是，相对路径就指错了地方。`argparse` 的程序名只用文件名，不受影响。二进制自己的真实命令行放在 `sys.orig_argv`
   - 已知差异：`__main__` 的 `__loader__` 不是 `SourceFileLoader`
   - 有项目模块时（M6，§7 的"项目"）`main.rs` 多一张模块表，调用 `rt::embed::run_project`，它在执行 `__main__` 之前安装 finder。只有一个模块时生成的代码和以前完全一样，仍然调用 `run_main`
   - `-m pkg`（M6）调用 `rt::embed::run_module(.., "pkg.__main__")`，照 `runpy._run_module_as_main` 的做法：`sys.path[0]` 是项目目录，先 import 父包，`sys.argv[0]` 和 `__file__` 是 `__main__.py` 的绝对路径，`__main__` 的 `__spec__`、`__package__`、`__loader__`、`__cached__` 来自 `pkg.__main__` 的 spec，然后在 `__main__` 模块里执行生成的代码。`argparse` 由此得到和 CPython 一样的程序名 `python -m pkg`。`-m pkg.mod` 运行普通模块也可以
@@ -918,9 +916,59 @@ m.set_global(
   - `--mode ext -m pkg` 生成包形式的扩展模块：`pkg.so` 只导出 `PyInit_pkg`，`init_extension` 给它设置 `__path__`、`__package__` 和 spec 的 `submodule_search_locations`，于是它成了包，相对 import 和 `import pkg.sub` 都能用。包里所有的模块都转换（库的任何子模块都可能被 import），不只是静态 import 到的。扩展模块不能和包的源码目录放在一起，否则 `PathFinder` 先找到源码目录
   - 没有做：ext 模式下的 `python -m pkg`（`NativeLoader` 没有 `get_code`，`runpy` 拿不到代码对象）
 
-### 分发（待设计）
+### 分发（M7）
 
-可执行程序在别的机器上需要找到 libpython、标准库和第三方依赖。可能的方案有：随程序附带 python-build-standalone 加上 venv 的 site-packages，运行时按相对于二进制的路径定位；或者静态链接 libpython 并把纯 Python 依赖打包成 zip 放进 `sys.path`。在 M7 做 spike 再定。
+`steelix build app.py`（参数和 `transpile` 一样，也可以 `-m pkg`）转换程序，用 `cargo build --release` 构建分发版本，再把程序需要的东西放进 `dist/app/`，加 `--archive` 另外打成 `dist/app.tar.gz`。生成的 crate 留在 `build/app/`，再次构建是增量的。目前只支持 Linux x86_64。
+
+```
+dist/app/app                          可执行程序，rpath 是 $ORIGIN/python/lib
+dist/app/python/lib/libpython3.14.so.1.0
+dist/app/python/lib/python3.14/       标准库，预编译成 .pyc
+dist/app/python/lib/python3.14/site-packages/
+dist/app/python/bin/python            sys.executable，指向 ../../app 的符号链接
+dist/app/src/                         项目目录，sys.path[0]
+```
+
+**定位**。`steelix build` 构建时设置环境变量 `STEELIX_DIST`，build.rs 于是只加 `-Wl,-rpath,$ORIGIN/python/lib`，不设置 `STEELIX_PYTHON`、`STEELIX_PROJECT`，程序里没有构建机器的路径。runtime 发现这两个值都没有时，从可执行文件的位置（`/proc/self/exe`，解析符号链接，和 `$ORIGIN` 一致）找 `python/` 和 `src/`，用 `PyConfig.home` 指定 Python 的安装，`sys.prefix` 就是 `dist/app/python`，`site` 照常把它下面的 site-packages 加进 `sys.path`。项目模块的 `__file__`（§7 的 finder）、`__main__` 的 `__file__` 和 `sys.argv[0]` 都在 `dist/app/src/` 下面。panic 信息里的源码位置用 `--remap-path-prefix` 把 cargo registry 和 runtime 的目录换成 `cargo/`、`steelix/`。
+
+- Python 的安装放在 `python/` 并保持 python-build-standalone 原来的 `bin/`、`lib/` 结构，这样 `sys.prefix` 是一个普通的 Python 安装，`sysconfig`、`site` 和看安装布局的工具都不用特殊处理
+- 源码目录叫 `src/` 而不是程序名，因为程序名已经是可执行文件的名字
+- `PYTHONPATH` 等环境变量照常生效，和 `python app.py` 一样。`PYTHONHOME` 被 `PyConfig.home` 覆盖
+- 程序和构建机器的 glibc 链接，目标机器的 glibc 不能比它旧（python-build-standalone 的 libpython 只要求 2.17）。要支持更旧的系统得在旧的系统或容器里构建
+
+**用哪个 Python**。`--python PATH`（默认是 `$PYO3_PYTHON`，再没有就是运行 steelix 的解释器）同时决定构建用的解释器和分发里的内容：它的基础安装（venv 的 `sys.base_prefix`）提供 libpython 和标准库，它自己（通常是 venv）的 purelib、platlib 提供 site-packages。要求版本和 steelix 转换时用的一样（3.14），并且有共享的 libpython（`Py_ENABLE_SHARED`，python-build-standalone 和 uv 的 Python 都是）。
+
+**site-packages**。复制构建解释器的整个 site-packages，按 `importlib.metadata` 的 RECORD 去掉 steelix 自己（构建工具，editable 安装时是一个 `.pth`）和 pip，不复制 `__pycache__`。没有按 import 分析只挑程序用到的包：插件、entry point、字符串的动态 import 都分析不到，少一个包只能到运行时才发现，多复制的只是体积。所以推荐用一个只装了程序依赖的 venv 构建。`.pth` 里指向 site-packages 以外的绝对路径（别的 editable 安装）在别的机器上不存在，构建时给出警告。
+
+**源文件**。默认把转换过的模块的 `.py` 复制到 `src/`，traceback 的源码行、`inspect.getsource`、`linecache` 和 `NativeLoader.get_source` 都要用它。`--no-sources` 不复制，程序照常运行，traceback 只是没有源码行（`tests/test_dist.py` 测了两种情况）。保留为 Python 的代码（§13）编译的是嵌在程序里的字符串，文件名用 `__file__`，不读文件。不管有没有 `--no-sources` 都会复制运行时要从源码 import 的项目文件：项目里每个包目录下其余的 `.py`（转换时没有静态找到、运行时按算出来的名字 import 的子模块），`--exclude` 的模块、命名空间包、编译不过的文件（`Project.left_out`），以及 `--add-data` 指定的文件或目录。项目顶层的其它文件不复制，程序读取的数据文件要用 `--add-data`。
+
+**标准库**。默认不复制 `idlelib`、`tkinter`、`turtle.py`、`turtledemo`、`ensurepip`、`test`（python-build-standalone 的 install_only 本来就没有）、`config-3.14-*`（构建扩展模块用的 Makefile 和 `python.o`）、`lib-dynload/_tkinter*`（Tcl/Tk 没有带上），以及基础安装的 site-packages（pip）。`--full-stdlib` 复制全部。复制之后用构建解释器的 `compileall` 把标准库和 site-packages 编译成 `.pyc`：分发的目录多半不可写，没有 `.pyc` 时每次启动都要重新编译用到的模块。`.pyc` 用默认的时间戳校验，`shutil.copy2` 和 tar 都保留修改时间。
+
+**`sys.executable` 和 multiprocessing**。`sys.executable` 保持是一个 Python 解释器：开发构建是构建用的 venv 的 python，分发里是 `python/bin/python`，它是指向程序本身的符号链接，程序发现自己以 `python`、`python3`、`python3.N` 的名字运行时，用 `parse_argv = 1` 初始化，然后交给 `Py_RunMain`，行为就是 python 解释器（`-c`、`-m`、脚本、交互模式）。这样应用里常见的 `subprocess.run([sys.executable, "-m", ...])`、`[sys.executable, "-c", ...]` 都能用。
+
+- 另一个选择是让 `sys.executable` 就是程序（PyInstaller 的做法），再让程序像 python 一样接受 `-c`、`-m`。但程序自己的参数也可能是 `-c`、`-m`，没法区分，所以只在可执行文件的名字上区分。代价是名为 `python`、`python3` 或 `python3.N` 的程序（脚本叫 `python.py`）不能正常运行
+- multiprocessing 的 spawn 和 forkserver（3.14 在 Linux 上默认是 forkserver）启动的子进程用 `multiprocessing.spawn.get_executable()`，默认是 `sys.executable`，会用 python 重新执行原来的 `.py`。runtime 在 `sys.meta_path` 最前面放一个 `SpawnFinder`，`multiprocessing.spawn` 第一次 import 时由它包装 loader，模块执行完后调用 `set_executable(程序自己)`，再把 `__loader__` 和 `__spec__.loader` 换回原来的。没有在启动时直接 import，因为 `import multiprocessing.spawn` 要 12 ms，而整个程序启动只要 20 ms 左右
+- 程序被 `程序 [解释器选项] -c "from multiprocessing.spawn import spawn_main; ..."`（还有 forkserver 和 resource tracker 的 `-c` 命令）启动时，识别出这是 multiprocessing 的子进程（只看 `-c` 后面的代码是不是这三种开头，程序自己的参数不会是这样），同样按 python 的命令行初始化，安装项目模块的 finder，把 `multiprocessing.spawn` 的 `_fixup_main_from_path`、`_fixup_main_from_name` 换成原生的版本，再交给 `Py_RunMain`。CPython 的这两个函数用 `runpy` 把父进程的 `__main__` 从源文件重新执行一遍，作为 `__mp_main__`，函数和类才能 unpickle。原生的版本在路径（或者 `-m` 时的模块名）是这个程序的 `__main__` 时，新建 `__mp_main__` 模块执行生成的 `exec_module`，再让 `sys.modules["__main__"]` 指向它，别的情况交给原来的函数。所以子进程不需要源文件，开发构建和分发都一样
+- 没有用 `sys.frozen`（PyInstaller 的做法，spawn 改用 `程序 --multiprocessing-fork` 的命令行），因为 forkserver 和 resource tracker 不管 `frozen` 都用 `-c`，而且 `sys.frozen` 会改变别的库的行为
+
+**Spike 的结论**。在本机用 uv 的 python-build-standalone 3.14.9 测量，不下载别的东西。hello 是 `tests/dist_apps/hello`（用到 json、subprocess 和一个第三方包），json 是 `tests/projects/stdlib_json`。启动时间是中位数，分发目录只读。
+
+| 方案 | hello | json | tar.gz | 文件数 | 启动（hello / json） |
+| --- | --- | --- | --- | --- | --- |
+| 精简的标准库加 `.pyc`（默认） | 58.9 MB | 59.5 MB | 19.2 MB | 1137 | 35 ms / 22 ms |
+| 精简的标准库，没有 `.pyc` | 47.6 MB | 48.1 MB | 14.9 MB | 580 | 120 ms / 68 ms |
+| 完整的标准库加 `.pyc` | 64.7 MB | 65.2 MB | 22.3 MB | 1378 | 39 ms / 21 ms |
+| 标准库打包成 `python314.zip`，只有 `.pyc` | 41.7 MB | 42.2 MB | 17.1 MB | 11 | 46 ms / 28 ms |
+| `python314.zip`，`.py` 加 `.pyc` | 44.5 MB | 45.0 MB | 19.8 MB | 11 | 51 ms / 30 ms |
+
+CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms）。体积的大头是 libpython（33.6 MB，python-build-standalone 把 OpenSSL、SQLite 等扩展模块都静态链接在里面，`strip` 也只能减到 32.2 MB），程序本身不到 1 MB。
+
+- **附带 python-build-standalone 加 site-packages**（现在的做法）：可以重定位，扩展模块照常工作，和开发时用的是同一个解释器。默认是去掉 GUI、IDLE、ensurepip 的标准库加 `.pyc`：`.pyc` 多占 11 MB，但只读目录里的启动时间从 120 ms 降到 35 ms
+- **标准库 zip**：文件数从一千多个降到 11 个，体积少 17 MB，代价是启动多 6 到 11 ms，只有 `.pyc` 时标准库的 traceback 没有源码行。文件数只在拷贝和解压时有影响，暂时不做，以后可以作为选项
+- **静态链接 libpython**：python-build-standalone 有静态的变体（本机的 install_only 没有 `libpython3.14.a`）。好处是少一个 `.so` 和 rpath，总体积差不多（libpython 的内容进了程序）。问题是 `lib-dynload` 和第三方的 C 扩展模块要从进程里解析 libpython 的符号，程序必须用 `--export-dynamic` 导出它们；musl 的完全静态版本不能 `dlopen`，根本不能加载扩展模块；PyO3 要用 `PYO3_CONFIG_FILE` 配置静态链接，还要链接 libpython 依赖的静态库。收益小，复杂度高，不做
+- **用系统的 Python**：要求目标机器上正好有同一个次版本的 Python，Debian 系还把标准库拆成多个包，venv 的依赖也要另外安装，没有控制力，不做
+
+**其它平台**（没有实现）。macOS 上 rpath 写成 `@executable_path/python/lib`，libpython 是 `libpython3.14.dylib`，定位可执行文件用 `_NSGetExecutablePath`（Rust 的 `current_exe` 已经处理），还要处理代码签名和公证（复制进来的 dylib 要重新签名）。Windows 没有 rpath，`python314.dll` 放在可执行文件旁边由加载器找到，标准库在 `Lib/`、扩展模块在 `DLLs/`，`sys.executable` 不能是符号链接（要复制一个 `python.exe` 或者用别的方式区分角色），multiprocessing 的 spawn 在 Windows 上用 `_winapi.CreateProcess`，命令行的识别方式一样。runtime 的 `embed` 现在只在 `cfg(unix)` 下编译。
 
 ## 12. 名字卫生与已知语义差异
 
@@ -970,11 +1018,17 @@ m.set_global(
 - 模块级不带参数的 `globals()`、`locals()`、`vars()` 都是模块的 globals 字典，`dir()` 是排好序的名字列表（`m.dir()?`），和 CPython 一样。函数里不带参数的 `locals()`、`vars()`、`dir()` 要读局部变量，所在的函数保留为 Python
 - 项目（§7，M6）的差异
   - 项目模块的 `__loader__` 是 `steelix_runtime.NativeLoader`，不是 `SourceFileLoader`：有 `name`、`path`、`get_source`、`get_filename`、`is_package`，没有 `get_code`、`get_data`、`source_to_code`，依赖它们的工具（`runpy.run_module`、`pkgutil.get_data`）不能用于转换过的模块
-  - 转换时用到的路径（项目目录、`__file__`）写死在程序里，和 `sys.argv[0]` 一样只适合在本机运行（M7）
   - finder 放在 `PathFinder` 前面，项目模块总是优先。CPython 里如果程序自己在 `sys.path` 的 `sys.path[0]` 前面插入了含有同名模块的目录，会 import 到那个目录里的模块
   - import 失败的 traceback：经过 `builtins.__import__`（import 语句）时 importlib 的帧和 CPython 一样被去掉；经过 `importlib.import_module` 时 CPython 保留 importlib 的帧，转换过的模块少一帧 `<frozen importlib._bootstrap_external>` 的 `exec_module`（`NativeLoader.exec_module` 是原生方法，没有帧）
   - `-m` 运行时 traceback 开头没有 `<frozen runpy>` 的两帧
   - 命名空间包里的模块不转换，照常从源码 import
+- 运行和分发（§11，M7）的差异
+  - `sys.argv[0]` 总是脚本的绝对路径（和 `__file__` 相同），相当于 `python /绝对路径/app.py`。用相对路径运行 `python app.py` 时 CPython 的 `sys.argv[0]` 是 `app.py`，只有直接打印 `sys.argv[0]` 时看得出来。入口脚本是符号链接时，`__file__` 是链接指向的文件，CPython 是链接本身的路径
+  - 分发之后项目目录是 `dist/app/src/`，不再是原来的目录名。代码里用 `os.path.dirname(__file__)` 找数据文件不受影响，但依赖目录名本身（比如打印它）的输出会变
+  - `sys.executable` 是 Python 解释器而不是程序：开发构建是构建用的 venv 的 python，分发里是指向程序的 `python/bin/python`。multiprocessing 的子进程由 `sys.meta_path` 最前面的 `steelix_runtime.SpawnFinder` 改成启动程序本身，用户自己调用 `multiprocessing.set_executable` 会覆盖它。子进程里的 `__mp_main__` 就是执行生成代码的那个模块对象，CPython 是把 `runpy` 的结果复制到一个新的模块对象里
+  - 名为 `python`、`python3`、`python3.N` 的程序会被当成 Python 解释器运行
+  - `--no-sources` 的分发里，traceback 没有源码行，`NativeLoader.get_source` 返回 `None`
+  - 分发只带项目里的 Python 文件（§11），程序按 `__file__` 读取的数据文件要用 `--add-data` 加进去
 - 混合模式（§13）的差异：跟在 `;` 后面的保留语句，第一行在 traceback 里的列位置会偏；ext 模式下文件名用模块的 `__file__`，也就是扩展模块的路径，traceback 显示不出源码行
 - 模块级注解（§13 的"模块注解"）：`__annotate__` 的结果和 CPython 一样，剩下的差异是
   - 一段保留代码执行期间，`__annotate__` 和 `__conditional_annotations__` 是这一段自己的（只有这一段的注解），执行完才换回整个模块的。只有同一段代码里读注解（或者它调用的函数读模块的 `__annotations__`）时才看得出来
@@ -1145,7 +1199,8 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
   - 默认模式（没有 marker）另外用一个小 workspace 构建几个有 traceback 的用例（`uncaught`、`tracebacks`、`exceptions_uncaught`、`with_stmt`），要求 stdout、退出码、最后一行相同，traceback 的帧（文件名和函数名）顺序和 CPython 一样，原生帧的行号是 `def` 行
   - 混合模式：保留为 Python 的代码的 traceback 帧必须和 CPython 的最后几帧完全相同（文件名、行号、源码行）。bin 模式下的 panic 必须以退出码 1 结束（用手写的模块文件替换生成的文件来触发）
 - **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式和 `--traceback-lines` 转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
-- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，`main.rs` 里仓库的路径换成 `$ROOT`），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
+- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，M7 起 `main.rs` 里没有绝对路径，不用替换），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
+- **分发**（M7，`tests/test_dist.py`）：`tests/dist_apps/hello` 用到 json、`subprocess.run([sys.executable, "-c", ..])` 和一个第三方包，`tests/dist_apps/mp` 用 spawn 和 forkserver 的 `Pool.map`（模块级的原生函数、`__main__` 里定义的类的实例、在 worker 里抛异常）和 `ProcessPoolExecutor`。构建用的 venv 是 `target/e2e/dist-venv`，用 `python -m venv --without-pip` 创建，`site-packages` 里直接写入一个本地包 `greeting`（加上 dist-info），不需要网络，路径固定，cargo 缓存的依赖在两次测试之间仍然有效。`steelix build` 的结果在 `bwrap` 里运行：只挂载 `/usr`（和 `/lib`、`/bin` 等指向它的链接）、`/etc/ld.so.cache`、`/proc`、`/dev`、空的 `/tmp`，分发目录只读地挂在无关的 `/opt/program`，环境变量只有 `PATH`，看不到 `$HOME`、uv 的 Python、仓库和 venv（测试本身检查这一点）。在里面运行 hello（有源文件和 `--no-sources` 两种，比较输出和 traceback 的帧，有源文件时才有源码行）、json 项目的脚本和 `-m json`（`--no-sources`，和 CPython 比较 stdout、退出码和最后一行 stderr）、mp（`--no-sources`，和 CPython 的输出完全相同）。另外检查程序里没有构建机器的路径、`--archive` 解压后的布局和链接，以及开发构建的 mp 在源文件删掉之后仍然正确。没有 `bwrap` 时这些测试跳过。dist 的组装、`project_files`、`inspect_python` 有单元测试，runtime 识别 multiprocessing 命令行的 Rust 单元测试也由 pytest 运行
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
 - **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试

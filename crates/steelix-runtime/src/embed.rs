@@ -1,9 +1,10 @@
 //! Running a transpiled program as an executable that embeds libpython.
 
 use std::any::Any;
-use std::ffi::{CString, c_char};
+use std::ffi::{CString, OsString, c_char};
 use std::mem::MaybeUninit;
-use std::os::unix::ffi::OsStringExt;
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 use std::process::ExitCode;
 
 use std::panic::{self, AssertUnwindSafe};
@@ -15,25 +16,135 @@ use pyo3::prelude::*;
 
 pub use crate::importer::ExecModule;
 use crate::importer::{NativeImporter, NativeLoader, NativeModule};
+use crate::multiprocessing::{self, Main};
 
-/// The Python script a program was transpiled from, as `python app.py` would
-/// see it.
+/// The Python script a program was transpiled from, as `python app.py`
+/// would see it. Use [`script!`](crate::script) to create it.
+///
+/// A development build (`cargo build` of the generated crate) runs with the
+/// interpreter it was built against and the project directory it was
+/// transpiled from. A build for distribution (`steelix build`) has neither
+/// and finds both next to the executable (design §11):
+///
+/// ```text
+/// dist/app/app                   the executable
+/// dist/app/python/               the Python installation (`sys.prefix`)
+/// dist/app/python/bin/python     `sys.executable`, a link to the executable
+/// dist/app/src/                  the project directory (`sys.path[0]`)
+/// ```
 pub struct Script {
-    /// `sys.argv[0]`: the script path as it was given to `steelix transpile`.
-    pub argv0: &'static str,
-    /// `__file__` of `__main__`: the absolute path of the script.
+    /// The script's path relative to the project directory: `app.py`, or
+    /// `pkg/__main__.py` for `python -m pkg`.
     pub file: &'static str,
-    /// `sys.path[0]`: the directory of the script, with symlinks resolved.
-    pub dir: &'static str,
+    /// The interpreter of a development build (`PYO3_PYTHON`), whose
+    /// installation and virtual environment provide the standard library
+    /// and `site-packages`.
+    pub python: Option<&'static str>,
+    /// The project directory of a development build.
+    pub project: Option<&'static str>,
+}
+
+/// The [`Script`] for the file `$file` of the project, with the interpreter
+/// and project directory that the crate's build script recorded for a
+/// development build (`STEELIX_PYTHON`, `STEELIX_PROJECT`), or none for a
+/// build for distribution.
+#[macro_export]
+macro_rules! script {
+    ($file:literal) => {
+        $crate::embed::Script {
+            file: $file,
+            python: ::std::option_env!("STEELIX_PYTHON"),
+            project: ::std::option_env!("STEELIX_PROJECT"),
+        }
+    };
+}
+
+/// The Python installation of a distribution, relative to the executable's
+/// directory.
+pub const DIST_PYTHON: &str = "python";
+/// `sys.executable` of a distribution: a link to the program's executable,
+/// which runs as the Python interpreter when it is called by this name.
+pub const DIST_EXECUTABLE: &str = "python/bin/python";
+/// The project directory of a distribution.
+pub const DIST_PROJECT: &str = "src";
+
+/// Where a program finds Python and its project when it runs.
+struct Paths {
+    /// The program's own executable, which `multiprocessing` starts for its
+    /// child processes.
+    program: String,
+    /// `sys.executable`: the interpreter of a development build, the link
+    /// to the program of a distribution.
+    executable: String,
+    /// The Python installation of a distribution (`PyConfig.home`). A
+    /// development build lets CPython find it from `executable`.
+    home: Option<String>,
+    /// The project directory: `sys.path[0]`, and where the project's
+    /// modules have their `__file__`.
+    project: String,
+    /// The script's `__file__`, which is also `sys.argv[0]`.
+    file: String,
+}
+
+impl Paths {
+    fn locate(script: &Script) -> Self {
+        let program = match std::env::current_exe() {
+            Ok(program) => program,
+            Err(err) => fatal(&format!("can not locate the executable: {err}")),
+        };
+        let dist = program.parent().unwrap_or(Path::new("/"));
+        let (executable, home) = match script.python {
+            Some(python) => (python.to_owned(), None),
+            None => {
+                let home = dist.join(DIST_PYTHON);
+                if !home.is_dir() {
+                    fatal(&format!(
+                        "no Python installation in {}: run the program from the directory \
+                         `steelix build` created",
+                        home.display()
+                    ));
+                }
+                (
+                    path_string(&dist.join(DIST_EXECUTABLE)),
+                    Some(path_string(&home)),
+                )
+            }
+        };
+        let project = match script.project {
+            Some(project) => project.to_owned(),
+            None => path_string(&dist.join(DIST_PROJECT)),
+        };
+        let file = format!("{project}/{}", script.file);
+        Self {
+            program: path_string(&program),
+            executable,
+            home,
+            project,
+            file,
+        }
+    }
+}
+
+fn path_string(path: &Path) -> String {
+    match path.to_str() {
+        Some(text) => text.to_owned(),
+        None => fatal(&format!("path is not valid UTF-8: {}", path.display())),
+    }
+}
+
+/// Reports a problem with the program's installation and exits.
+fn fatal(message: &str) -> ! {
+    eprintln!("steelix: {message}");
+    std::process::exit(1)
 }
 
 /// Initializes Python, runs `exec_module` as the `__main__` module and shuts
 /// the interpreter down again, like `python app.py` does.
 ///
-/// `executable` is the interpreter whose installation (and virtual
-/// environment) provides the standard library and `site-packages`.
-/// `sys.argv` is the script path followed by the program's arguments, and the
-/// real command line is in `sys.orig_argv`.
+/// `sys.executable` is a Python interpreter, as for `python app.py`, so that
+/// `subprocess.run([sys.executable, ...])` works (see [`Script`] for which
+/// one). `sys.argv` is the script's path followed by the program's
+/// arguments, and the real command line is in `sys.orig_argv`.
 ///
 /// The exit code follows CPython: `SystemExit` exits with its code, any other
 /// uncaught exception prints a traceback and exits with 1, and a failure while
@@ -44,11 +155,14 @@ pub struct Script {
 /// A Rust panic (a bug in hand-written code, or in steelix) is reported like
 /// an uncaught Python exception, as PyO3's `PanicException`, and also exits
 /// with 1 instead of Rust's usual 101.
-pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> ExitCode {
-    run(executable, script, |main| {
-        prepare_main(main, script)?;
-        exec_module(&crate::Module::new(main))
-    })
+///
+/// The executable has two more roles, chosen by its command line:
+/// `multiprocessing` starts it for its child processes (spawn and
+/// forkserver, which run the transpiled code of `__main__`), and called as
+/// `python` (the `sys.executable` of a distribution) it is the Python
+/// interpreter.
+pub fn run_main(script: &Script, exec_module: ExecModule) -> ExitCode {
+    run(script, &[], Main::Script(exec_module))
 }
 
 /// Like [`run_main`], for a script that imports other modules of its
@@ -57,45 +171,108 @@ pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> E
 /// own module may be one of them, for `import app` from inside the program,
 /// which creates a second module object like CPython does.
 pub fn run_project(
-    executable: &str,
     script: &Script,
     modules: &'static [NativeModule],
     exec_module: ExecModule,
 ) -> ExitCode {
-    run(executable, script, |main| {
-        prepare_main(main, script)?;
-        crate::install_importer(main.py(), script.dir, modules)?;
-        exec_module(&crate::Module::new(main))
-    })
+    run(script, modules, Main::Script(exec_module))
 }
 
-/// Like `python -m name` run in the project directory `script.dir`: imports
-/// the parent packages of the module `name` (for `python -m pkg`, `name` is
+/// Like `python -m name` run in the project directory: imports the parent
+/// packages of the module `name` (for `python -m pkg`, `name` is
 /// `pkg.__main__`), then runs the module's generated code as `__main__`
-/// with the module's spec, like `runpy` does. `name` is one of `modules`.
-/// `script.argv0` is the module's source file.
+/// with the module's spec, like `runpy` does. `name` is one of `modules`,
+/// and `script.file` its source file.
 pub fn run_module(
-    executable: &str,
     script: &Script,
     modules: &'static [NativeModule],
-    name: &str,
+    name: &'static str,
 ) -> ExitCode {
-    run(executable, script, |main| {
-        let py = main.py();
-        py.import("sys")?
-            .getattr("path")?
-            .call_method1("insert", (0, script.dir))?;
-        let importer = crate::install_importer(py, script.dir, modules)?;
-        run_module_as_main(main, &importer, name)
-    })
+    run(script, modules, Main::Module(name))
 }
 
-/// `runpy._run_module_as_main` for a transpiled module.
-fn run_module_as_main(
-    main: &Bound<'_, PyModule>,
-    importer: &Bound<'_, NativeImporter>,
+/// What the command line asks the executable to be.
+enum Role {
+    /// The transpiled program.
+    Program,
+    /// A child process of `multiprocessing`.
+    Child,
+    /// The Python interpreter.
+    Python,
+}
+
+fn role(args: &[OsString]) -> Role {
+    let name = args
+        .first()
+        .and_then(|arg0| Path::new(arg0).file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let version = name.strip_prefix("python3").unwrap_or("x");
+    if name == "python" || version.is_empty() || version.starts_with('.') {
+        Role::Python
+    } else if multiprocessing::is_child_command(args) {
+        Role::Child
+    } else {
+        Role::Program
+    }
+}
+
+fn run(script: &Script, modules: &'static [NativeModule], main: Main) -> ExitCode {
+    let paths = Paths::locate(script);
+    let args: Vec<OsString> = std::env::args_os().collect();
+    match role(&args) {
+        Role::Program => run_program(&paths, &args, |main_module| {
+            let py = main_module.py();
+            multiprocessing::install_spawn_hook(py, &paths.program)?;
+            py.import("sys")?
+                .getattr("path")?
+                .call_method1("insert", (0, &paths.project))?;
+            let importer = if modules.is_empty() {
+                None
+            } else {
+                Some(crate::install_importer(py, &paths.project, modules)?)
+            };
+            match main {
+                Main::Script(exec_module) => {
+                    let globals = main_module.dict();
+                    globals.set_item("__file__", &paths.file)?;
+                    globals.set_item("__cached__", py.None())?;
+                    exec_module(&crate::Module::new(main_module))
+                }
+                Main::Module(name) => {
+                    let Some(importer) = importer else {
+                        let message = format!("No module named '{name}'");
+                        return Err(pyo3::exceptions::PyImportError::new_err(message));
+                    };
+                    init_module_as_main(main_module, &importer, name)?
+                        .get()
+                        .exec_native(main_module)
+                }
+            }
+        }),
+        Role::Child => run_python(&paths, &args, |py| {
+            let importer = if modules.is_empty() {
+                None
+            } else {
+                Some(crate::install_importer(py, &paths.project, modules)?)
+            };
+            multiprocessing::install_main_fixups(py, main, &paths.file, importer)?;
+            py.import("multiprocessing.spawn")?
+                .call_method1("set_executable", (&paths.program,))?;
+            Ok(())
+        }),
+        Role::Python => run_python(&paths, &args, |_| Ok(())),
+    }
+}
+
+/// `runpy._run_module_as_main` up to running the code: imports the parent
+/// packages of `name` and gives `main` the module's spec and attributes.
+/// Returns the module's loader, which runs its transpiled code.
+pub(crate) fn init_module_as_main<'py>(
+    main: &Bound<'py, PyModule>,
+    importer: &Bound<'py, NativeImporter>,
     name: &str,
-) -> PyResult<()> {
+) -> PyResult<Bound<'py, NativeLoader>> {
     let py = main.py();
     if let Some((package, _)) = name.rsplit_once('.') {
         py.import(package)?;
@@ -126,19 +303,46 @@ fn run_module_as_main(
     globals.set_item("__loader__", spec.getattr("loader")?)?;
     globals.set_item("__package__", spec.getattr("parent")?)?;
     globals.set_item("__spec__", &spec)?;
-    let loader = spec.getattr("loader")?.cast_into::<NativeLoader>()?;
-    loader.get().exec_native(main)
+    Ok(spec.getattr("loader")?.cast_into::<NativeLoader>()?)
+}
+
+/// Initializes Python with the program's own command line as a Python
+/// command line (`python [options] -c command ...`), runs `setup` and then
+/// the command, like the `python` executable does. Returns its exit code.
+fn run_python(
+    paths: &Paths,
+    args: &[OsString],
+    setup: impl FnOnce(Python<'_>) -> PyResult<()>,
+) -> ExitCode {
+    // SAFETY: called once, before anything else touches the interpreter.
+    unsafe { initialize(paths, args, true) };
+    let ready = Python::attach(|py| match setup(py) {
+        Ok(()) => true,
+        Err(err) => {
+            err.print(py);
+            false
+        }
+    });
+    if !ready {
+        // SAFETY: the main thread still holds the GIL taken by initialization.
+        unsafe { ffi::Py_FinalizeEx() };
+        return ExitCode::FAILURE;
+    }
+    // SAFETY: the interpreter is initialized from a configuration with the
+    // command line, which is what `Py_RunMain` runs; it also finalizes.
+    let code = unsafe { ffi::Py_RunMain() };
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
 /// Initializes Python, runs `body` with the `__main__` module and shuts the
 /// interpreter down again, with the exit code CPython would use.
-fn run(
-    executable: &str,
-    script: &Script,
+fn run_program(
+    paths: &Paths,
+    args: &[OsString],
     body: impl FnOnce(&Bound<'_, PyModule>) -> PyResult<()>,
 ) -> ExitCode {
     // SAFETY: called once, before anything else touches the interpreter.
-    unsafe { initialize(executable, script) };
+    unsafe { initialize(paths, args, false) };
     let mut interrupted = false;
     let failed = Python::attach(|py| {
         let run = || body(&py.import("__main__")?);
@@ -213,31 +417,43 @@ fn flush_io(py: Python<'_>) {
 /// Initializes the interpreter with `PyConfig` instead of PyO3's
 /// `auto-initialize`, so that `sys.executable`, `sys.path` and `sys.argv`
 /// look like they do for `python app.py`.
-unsafe fn initialize(executable: &str, script: &Script) {
+///
+/// With `python_args` the command line is parsed like the `python`
+/// executable's (options, `-c`, `-m`, a script), for [`run_python`].
+/// Otherwise the arguments belong to the program, and `sys.argv` is the
+/// script's path followed by them, as for `python app.py args...`.
+unsafe fn initialize(paths: &Paths, args: &[OsString], python_args: bool) {
     let mut config = MaybeUninit::<ffi::PyConfig>::uninit();
     // SAFETY: `PyConfig_InitPythonConfig` fully initializes the struct.
     unsafe {
         ffi::PyConfig_InitPythonConfig(config.as_mut_ptr());
         let config = config.assume_init_mut();
-        // The program's own arguments belong to the program, not to Python.
-        config.parse_argv = 0;
+        config.parse_argv = python_args.into();
 
-        let executable = CString::new(executable).expect("interpreter path contains NUL");
+        let executable = c_string(paths.executable.as_bytes());
         check(ffi::PyConfig_SetBytesString(
             config,
             &mut config.executable,
             executable.as_ptr(),
         ));
+        if let Some(home) = &paths.home {
+            let home = c_string(home.as_bytes());
+            check(ffi::PyConfig_SetBytesString(
+                config,
+                &mut config.home,
+                home.as_ptr(),
+            ));
+        }
 
-        let orig_args: Vec<CString> = std::env::args_os()
-            .map(|arg| CString::new(arg.into_vec()).expect("argument contains NUL"))
-            .collect();
-        let script_name = CString::new(script.argv0).expect("script path contains NUL");
-        // `sys.argv` as for `python app.py args...`: the script replaces the
-        // executable's own path.
-        let mut argv: Vec<*const c_char> = std::iter::once(script_name.as_ptr())
-            .chain(orig_args.iter().skip(1).map(|arg| arg.as_ptr()))
-            .collect();
+        let orig_args: Vec<CString> = args.iter().map(|arg| c_string(arg.as_bytes())).collect();
+        let script_name = c_string(paths.file.as_bytes());
+        let mut argv: Vec<*const c_char> = if python_args {
+            orig_args.iter().map(|arg| arg.as_ptr()).collect()
+        } else {
+            std::iter::once(script_name.as_ptr())
+                .chain(orig_args.iter().skip(1).map(|arg| arg.as_ptr()))
+                .collect()
+        };
         check(ffi::PyConfig_SetBytesArgv(
             config,
             argv.len() as ffi::Py_ssize_t,
@@ -264,17 +480,11 @@ unsafe fn initialize(executable: &str, script: &Script) {
     }
 }
 
-/// Sets up `sys.path[0]` and the `__main__` globals that `python app.py`
-/// provides before running the script.
-fn prepare_main(main: &Bound<'_, PyModule>, script: &Script) -> PyResult<()> {
-    let py = main.py();
-    py.import("sys")?
-        .getattr("path")?
-        .call_method1("insert", (0, script.dir))?;
-    let globals = main.dict();
-    globals.set_item("__file__", script.file)?;
-    globals.set_item("__cached__", py.None())?;
-    Ok(())
+fn c_string(bytes: &[u8]) -> CString {
+    match CString::new(bytes) {
+        Ok(text) => text,
+        Err(_) => fatal("a path or argument contains a NUL character"),
+    }
 }
 
 /// Exits the process like CPython does when initialization fails.

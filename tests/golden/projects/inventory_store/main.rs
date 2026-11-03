@@ -24,10 +24,6 @@ const MODULES: &[NativeModule] = &[
 ];
 
 fn main() -> std::process::ExitCode {
-    let script = steelix_runtime::embed::Script {
-        argv0: "$ROOT/tests/projects/inventory/store/__main__.py",
-        file: "$ROOT/tests/projects/inventory/store/__main__.py",
-        dir: "$ROOT/tests/projects/inventory",
-    };
-    steelix_runtime::embed::run_module(env!("STEELIX_PYTHON"), &script, MODULES, "store.__main__")
+    let script = steelix_runtime::script!("store/__main__.py");
+    steelix_runtime::embed::run_module(&script, MODULES, "store.__main__")
 }

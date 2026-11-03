@@ -2,8 +2,7 @@
 
 Each project is transpiled from its entry script (or `-m module`) together
 with the project modules it imports. The generated crate is a golden
-snapshot (`tests/golden/projects/<name>/`, every file under `src/`, with the
-repository's path in `main.rs` replaced by `$ROOT`), builds without warnings
+snapshot (`tests/golden/projects/<name>/`, every file under `src/`), builds without warnings
 and clippy lints, and the program behaves like CPython running the same
 sources: stdout, exit code, and full tracebacks with file names.
 """
@@ -112,15 +111,12 @@ def generate(
 
 
 def generated_sources(crate: Path) -> dict[str, str]:
-    """The files under `src/` of a crate, with this checkout's path in
-    `main.rs` replaced, by path relative to `src/`."""
-    files = {}
-    for path in sorted((crate / "src").rglob("*.rs")):
-        text = path.read_text()
-        if path.name == "main.rs" and path.parent == crate / "src":
-            text = text.replace(str(ROOT), "$ROOT")
-        files[path.relative_to(crate / "src").as_posix()] = text
-    return files
+    """The files under `src/` of a crate, by path relative to `src/`. They
+    do not depend on where the project is (`build.rs` has its directory)."""
+    return {
+        path.relative_to(crate / "src").as_posix(): path.read_text()
+        for path in sorted((crate / "src").rglob("*.rs"))
+    }
 
 
 @pytest.mark.parametrize("name", list(BY_NAME))

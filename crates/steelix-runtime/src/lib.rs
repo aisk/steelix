@@ -33,6 +33,8 @@ pub mod generator;
 mod import;
 mod importer;
 mod module;
+#[cfg(unix)]
+mod multiprocessing;
 mod ops;
 #[doc(hidden)]
 pub mod python;

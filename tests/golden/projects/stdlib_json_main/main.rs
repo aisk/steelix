@@ -20,10 +20,6 @@ const MODULES: &[NativeModule] = &[
 ];
 
 fn main() -> std::process::ExitCode {
-    let script = steelix_runtime::embed::Script {
-        argv0: "$ROOT/tests/projects/stdlib_json/json/__main__.py",
-        file: "$ROOT/tests/projects/stdlib_json/json/__main__.py",
-        dir: "$ROOT/tests/projects/stdlib_json",
-    };
-    steelix_runtime::embed::run_module(env!("STEELIX_PYTHON"), &script, MODULES, "json.__main__")
+    let script = steelix_runtime::script!("json/__main__.py");
+    steelix_runtime::embed::run_module(&script, MODULES, "json.__main__")
 }

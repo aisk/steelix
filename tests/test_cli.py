@@ -23,20 +23,27 @@ def test_transpile_writes_bin_crate(tmp_path: Path) -> None:
         "src/main.rs",
     ]
     main_rs = (out / "src" / "main.rs").read_text()
-    assert "steelix_runtime::embed::run_main" in main_rs
-    # `sys.argv[0]`, `__file__` and `sys.path[0]` as `python app.py` sets them.
-    assert f'argv0: "{source}",' in main_rs
-    assert f'file: "{source}",' in main_rs
-    assert f'dir: "{tmp_path}",' in main_rs
+    # The script is named relative to its project directory, which the
+    # runtime locates: the build script has the directory for development.
+    assert 'let script = steelix_runtime::script!("app.py");' in main_rs
+    assert "steelix_runtime::embed::run_main(&script, app::exec_module)" in main_rs
+    assert str(tmp_path) not in main_rs
+    build_rs = (out / "build.rs").read_text()
+    assert f'const PROJECT: &str = "{tmp_path}";' in build_rs
+    assert "STEELIX_PROJECT={PROJECT}" in build_rs
+    assert "$ORIGIN/python/lib" in build_rs
 
 
-def test_script_path_is_kept_as_given(tmp_path: Path, monkeypatch) -> None:
-    (tmp_path / "app.py").write_text("print(1)\n")
+def test_symlinked_script_runs_from_its_target(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "tool.py").write_text("print(1)\n")
+    (tmp_path / "app.py").symlink_to(tmp_path / "real" / "tool.py")
     monkeypatch.chdir(tmp_path)
-    assert main(["transpile", "app.py", "-o", "out"]) == 0
+    assert main(["transpile", "app.py", "-o", "out", "-q"]) == 0
     main_rs = (tmp_path / "out" / "src" / "main.rs").read_text()
-    assert 'argv0: "app.py",' in main_rs
-    assert f'file: "{tmp_path / "app.py"}",' in main_rs
+    assert 'steelix_runtime::script!("tool.py")' in main_rs
+    build_rs = (tmp_path / "out" / "build.rs").read_text()
+    assert f'const PROJECT: &str = "{tmp_path / "real"}";' in build_rs
 
 
 def test_traceback_lines_flag(tmp_path: Path) -> None:

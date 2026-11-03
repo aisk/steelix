@@ -78,6 +78,11 @@ impl NativeImporter {
         self.modules.iter().find(|module| module.name == fullname)
     }
 
+    /// Whether `fullname` is one of the transpiled modules.
+    pub(crate) fn contains(&self, fullname: &str) -> bool {
+        self.get(fullname).is_some()
+    }
+
     /// The absolute path of a module's source file, its `__file__`.
     fn location(&self, module: &NativeModule) -> String {
         format!("{}/{}", self.root, module.path())
