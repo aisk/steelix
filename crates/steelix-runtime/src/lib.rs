@@ -634,38 +634,47 @@ macro_rules! function {
             $crate::function!(@call target(module; $($c),*; $($p,)* $($v,)? $($k,)* $($vk,)?))
         })
     };
-    // A coroutine or generator: the Rust fn is an `async fn`, and the
-    // closure returns a future that owns the arguments and awaits it.
+    // A coroutine or generator: the Rust fn is an `async fn`. At the call,
+    // `capture` reads the captured variables; the coroutine object keeps
+    // them with the module and the arguments (`rt::coroutine::Locals`), and
+    // `start` returns a future that keeps an `Rc` of them and awaits the fn
+    // with references into it.
     (@body $kind:ident, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*],
         [$($p:ident)*], [$($v:ident)?], [$($k:ident)*], [$($vk:ident)?]) => {
-        $crate::function!(@kind $kind)(|module, closure, args| {
-            let target = $f;
-            let mut closure = closure.into_iter();
-            $(let $c = closure.next().expect("the closure has one cell per captured variable");)*
-            $($crate::function!(@captured_owned $ck $c, $cn);)*
-            let mut args = args.into_iter();
-            $(let $p = args.next().expect("`Function` binds one value per parameter");)*
-            $(let $v = $crate::function::into_tuple(args.next().expect("`*args` is bound"));)?
-            $(let $k = args.next().expect("`Function` binds one value per parameter");)*
-            $(let $vk = $crate::function::into_dict(args.next().expect("`**kwargs` is bound"));)?
-            let future: $crate::coroutine::BodyFuture<'_> = ::std::boxed::Box::pin(async move {
-                $crate::function!(@call_async target(module; $($c),*; $($p,)* $($v,)? $($k,)* $($vk,)?))
-                    .await
-            });
-            ::std::result::Result::Ok(future)
+        $crate::function!(@kind $kind)($crate::coroutine::AsyncBody {
+            capture: |closure| {
+                let [$($c),*] = closure else {
+                    unreachable!("the closure has one cell per captured variable")
+                };
+                ::std::result::Result::Ok(::std::vec![$($crate::function!(@capture_async $ck $c, $cn)),*])
+            },
+            start: |locals| {
+                let target = $f;
+                ::std::boxed::Box::pin(async move {
+                    let [$($c),*] = &locals.closure[..] else {
+                        unreachable!("one value per captured variable")
+                    };
+                    $(let $c = $crate::function!(@captured_ref $ck $c);)*
+                    let [$($p,)* $($v,)? $($k,)* $($vk,)?] = &locals.args[..] else {
+                        unreachable!("`Function` binds one value per parameter")
+                    };
+                    $(let $v = $crate::function::as_tuple($v);)?
+                    $(let $vk = $crate::function::as_dict($vk);)?
+                    target(&locals.module, $($c,)* $($p,)* $($v,)? $($k,)* $($vk,)?).await
+                })
+            },
         })
     };
     (@kind coroutine) => { $crate::function::Kind::Coroutine };
     (@kind generator) => { $crate::function::Kind::Generator };
-    (@captured_owned value $c:ident, $cn:expr) => {
-        let $c = $crate::function::cell_contents(&$c, $cn)?;
+    (@capture_async value $c:ident, $cn:expr) => {
+        $crate::coroutine::Captured::Value($crate::function::cell_contents($c, $cn)?)
     };
-    (@captured_owned cell $c:ident, $cn:expr) => {
-        let $c = $crate::Cell::free(&$c, $cn);
+    (@capture_async cell $c:ident, $cn:expr) => {
+        $crate::coroutine::Captured::Cell($crate::Cell::free($c, $cn))
     };
-    (@call_async $f:ident($module:ident; $($c:ident),*; $($p:ident,)*)) => {
-        $f(&$module, $(&$c,)* $(&$p),*)
-    };
+    (@captured_ref value $c:ident) => { $c.value() };
+    (@captured_ref cell $c:ident) => { $c.cell() };
     (@name $id:ident) => { stringify!($id) };
     (@name $id:ident $n:literal) => { $n };
     (@capture value $c:ident) => { $crate::function::capture(&$c)? };

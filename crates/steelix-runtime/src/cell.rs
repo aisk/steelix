@@ -68,6 +68,11 @@ impl<'py> Cell<'py> {
         self.cell.clone()
     }
 
+    /// The cell object, borrowed (for the GC's `__traverse__`).
+    pub(crate) fn as_object(&self) -> &Bound<'py, PyAny> {
+        &self.cell
+    }
+
     /// Reads the variable, raising `UnboundLocalError` (or `NameError` for a
     /// captured variable) like CPython if it is not assigned.
     pub fn get(&self) -> PyResult<Bound<'py, PyAny>> {

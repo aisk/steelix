@@ -27,9 +27,6 @@ POC = ROOT / "tests" / "poc_async"
 KNOWN_DIFFERENCES: dict[str, str | None] = {
     # Native coroutines are not `types.CoroutineType` (design §12).
     "inspect.iscoroutine True": "inspect.iscoroutine False",
-    # The GC does not see the objects a suspended native coroutine holds, so
-    # a cycle through them is not collected (design §12).
-    "cleanup finally holder": None,
 }
 
 

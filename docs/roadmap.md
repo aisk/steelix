@@ -306,15 +306,21 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 - [x] `rt::frame!` 接受 `async` 闭包，未开始时 `throw` 的异常在帧里抛出；`frame.with_async`；协程自己的异常状态（`sys.exception()` 跨过暂停）
 - [x] 终结：补上 `tp_finalize` 和先调用终结器的 `tp_dealloc`，释放时 `close()`，从没开始的协程发出 `never awaited` 警告，出错经过 `sys.unraisablehook`
 - [x] `tests/test_poc_async.py`：asyncio（`sleep`、直接 await 原生 future、经过函数对象、await Python 协程、`gather`、取消时 `finally` 里再 await、经过原生和 Python 协程的取消、traceback）、手动驱动（`send`/`throw`/`close`、ignored GeneratorExit、重入、重用、PEP 479、await 非 awaitable、never awaited、`del` 和 GC 时的终结顺序）、生成器（迭代、`send`、`throw`、`close`、`yield from` 委托、`with` 里的生成器、递归的 `Box::pin`）、`inspect`/`asyncio` 的判断、不用 asyncio 的 trampoline。和 CPython 的差异记在 §12
-- [ ] lowering：`async def` 和含 `yield` 的函数生成 `async fn`，`try` 的闭包换成 `async` 块，`with` 换成 `frame.with_async`，golden 和 `tests/cases/` 的用例
-- [ ] 原生 `async def` 之间满足直接调用条件的 `await f(x)` 直接 await，递归的加 `Box::pin`，`RecursionGuard` 只包住每一次 poll
+- [x] PoC 的 review 修复（`tests/test_poc_async.py` 都和 CPython 比较）
+  - [x] 让 GC 看到暂停的协程：协程对象持有模块、捕获的变量和参数（`Locals`，future 只借用），`rt::await_` 委托的迭代器和帧对象放在协程对象里（`Held`），`Frame` 借用 globals，加上 `tp_clear`。测试：退出时 globals 里从没开始的生成器、暂停的生成器和协程、处理过异常后暂停的协程，经过 `self` 的方法生成器和 `self.task = create_task(self.run())`。局部变量和语句的临时值仍然看不到（§12）
+  - [x] 在 `except` 里暂停时 `throw`、`close`、取消送进来的异常的 `__context__`
+  - [x] `RuntimeError: coroutine is being awaited already`（Python 的 `await` 和 `rt::await_`，原生的和 CPython 的协程）
+  - [x] 递归深度：每次 poll `rt::frame!` 的函数体算一层 Python 递归（3.14 的 `py_recursion_remaining`），每次 poll 和 `send` 检查 C 栈，`yield from`、`await` 的链和 `Box::pin` 的递归在和 CPython 相同的深度抛 `RecursionError`
+  - [x] 文档：future 的 `Send` 前提和改写时的规则、`join!`/`select!` 的限制（§15）
+  - [x] 原生生成器之间满足直接调用条件的 `yield from g(x)` 可以直接 await 内层的 future
+- [ ] lowering：`async def` 和含 `yield` 的函数生成 `async fn`，`try` 的闭包换成 `async` 块，`with` 换成 `frame.with_async`，被 await 的表达式会留下临时值时先用 `let` 绑定（§8 "GC 看得到的东西"），golden 和 `tests/cases/` 的用例
+- [ ] 原生 `async def` 之间满足直接调用条件的 `await f(x)`、原生生成器之间的 `yield from g(x)` 直接 await，递归的加 `Box::pin`（递归深度已经按 poll 计数）
 - [ ] `async with`、`async for` 的 helper
 - [ ] 嵌套的 `async def`、生成器和 lambda 的捕获（宏已支持，没有测试）
-- [ ] 让 GC 看到暂停的协程持有的参数（§12 的循环引用）
 - [ ] 改写后的代码 await Rust 生态 future 的桥接 helper（只在需要时）
 - 保留为 Python：异步生成器、异步推导式
 
-runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_` 等），下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
+runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_` 等，`rt::Frame` 多了一个生命周期参数 `Frame<'a, 'py>`），下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
 
 ## M14 match 语句（计划）
 

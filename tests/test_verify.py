@@ -97,7 +97,7 @@ def test_closure_parameter_is_in_scope() -> None:
     closure = rs.Closure(("file",), rs.Block((), rs.MethodCall(p("file"), "is_truthy")))
     assert not problems(
         rs.ExprStmt(rs.MethodCall(p("frame"), "with", (p("py"), closure))),
-        params=(rs.Param("frame", "&rt::Frame<'py>"),),
+        params=(rs.Param("frame", "&rt::Frame<'_, 'py>"),),
     )
     [problem] = problems(
         rs.ExprStmt(rs.Call(rs.Closure(("file",), rs.Block()), (p("py"),))),

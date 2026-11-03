@@ -1188,21 +1188,6 @@ pub fn as_dict<'a, 'py>(value: &'a Bound<'py, PyAny>) -> &'a Bound<'py, PyDict> 
         .expect("`Function` passes `**kwargs` as a dict")
 }
 
-/// [`as_tuple`] for a coroutine or generator, which owns its arguments.
-#[doc(hidden)]
-pub fn into_tuple(value: Bound<'_, PyAny>) -> Bound<'_, PyTuple> {
-    value
-        .cast_into()
-        .expect("`Function` passes `*args` as a tuple")
-}
-
-#[doc(hidden)]
-pub fn into_dict(value: Bound<'_, PyAny>) -> Bound<'_, PyDict> {
-    value
-        .cast_into()
-        .expect("`Function` passes `**kwargs` as a dict")
-}
-
 unsafe extern "C" {
     /// `types.MethodType(function, instance)`.
     fn PyMethod_New(

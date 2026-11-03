@@ -205,6 +205,79 @@ def closing_value():
         return "closed value"
 
 
+def inner_items(n):
+    try:
+        for i in range(n):
+            received = yield i
+            if received is not None:
+                print("inner_items received", received)
+    finally:
+        print("inner_items finally")
+    return "inner_items done"
+
+
+def outer_items():
+    result = yield from inner_items(3)
+    print("outer_items got", result)
+    yield result
+
+
+def walk(n):
+    if n:
+        yield from walk(n - 1)
+    yield n
+
+
+async def chain(n):
+    if n == 0:
+        return 0
+    return 1 + await chain(n - 1)
+
+
+def in_except():
+    try:
+        raise KeyError("in_except")
+    except KeyError:
+        yield "in except"
+
+
+async def sleep_in_except():
+    try:
+        raise KeyError("sleep_in_except")
+    except KeyError:
+        await asyncio.sleep(10)
+
+
+async def native_awaits(awaitable):
+    return await awaitable
+
+
+def owner_values(self):
+    try:
+        for value in self.values:
+            yield value
+    finally:
+        print("owner_values finally", self.tag)
+
+
+async def owner_run(self):
+    try:
+        await self.event.wait()
+    finally:
+        print("owner_run finally", self.tag)
+
+
+async def recovered(tag):
+    try:
+        raise KeyError(tag)
+    except KeyError:
+        pass
+    try:
+        await Suspend(tag)
+    finally:
+        print("recovered finally", tag)
+
+
 # --- kept as Python ---
 
 
@@ -517,3 +590,136 @@ try:
     next(p)
 except RuntimeError as e:
     print(e, repr(e.__cause__))
+
+print("--- direct await of a native generator (yield from)")
+o = outer_items()
+print(next(o), o.send("sent"), next(o), next(o))
+try:
+    next(o)
+except StopIteration:
+    print("outer_items done")
+o = outer_items()
+next(o)
+o.close()
+print("outer_items closed")
+o = outer_items()
+next(o)
+try:
+    o.throw(KeyError("into inner"))
+except KeyError as e:
+    print("thrown through", repr(e), [name for name, _ in frames(e)])
+
+print("--- recursion depth")
+for n in (100, 2000):
+    for name, run in (
+        ("walk", lambda: len(list(walk(n)))),
+        ("chain", lambda: asyncio.run(chain(n))),
+        ("countdown", lambda: asyncio.run(countdown(n))),
+    ):
+        try:
+            print(name, n, run())
+        except RecursionError as e:
+            print(name, n, type(e).__name__, e)
+
+print("--- context of thrown exceptions")
+g = in_except()
+print(next(g))
+try:
+    g.throw(ValueError("thrown"))
+except ValueError as e:
+    print("thrown context", repr(e.__context__))
+
+
+async def cancel_in_except():
+    task = asyncio.create_task(sleep_in_except())
+    await asyncio.sleep(0)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError as e:
+        chain = []
+        while e is not None:
+            chain.append(repr(e))
+            e = e.__context__
+        print("cancelled chain", chain)
+
+
+asyncio.run(cancel_in_except())
+
+print("--- awaited already")
+
+
+async def awaited_already():
+    for make in (lambda: add_later(1, 2), lambda: py_double(1)):
+        c = make()
+        task = asyncio.ensure_future(c)
+        await asyncio.sleep(0)
+        for waiter in (py_awaits, native_awaits):
+            try:
+                await waiter(c)
+            except RuntimeError as e:
+                print("awaited already:", e, c.cr_suspended)
+        print("task result", await task)
+
+
+asyncio.run(awaited_already())
+
+print("--- cycles through self")
+
+
+class Owner:
+    values_of = owner_values
+    run = owner_run
+
+    def __init__(self, tag):
+        self.tag = tag
+        self.values = [1, 2]
+
+    def __del__(self):
+        print("del owner", self.tag)
+
+
+owner = Owner("generator")
+owner.generator = owner.values_of()
+print(next(owner.generator))
+del owner
+gc.collect()
+print("after collecting an owner and its generator")
+
+
+def report(loop, context):
+    print("exception handler:", context["message"])
+
+
+async def owner_task():
+    asyncio.get_running_loop().set_exception_handler(report)
+    owner = Owner("task")
+    owner.event = asyncio.Event()
+    owner.task = asyncio.create_task(owner.run())
+    await asyncio.sleep(0)
+    del owner
+    gc.collect()
+    print("after collecting an owner and its task")
+
+
+asyncio.run(owner_task())
+
+print("--- at exit")
+# The hook is a function of this module: it would keep the globals alive.
+sys.unraisablehook = sys.__unraisablehook__
+
+
+class Last:
+    def __del__(self):
+        print("del last")
+
+
+never_started = count_up(3)
+suspended_generator = with_finally()
+next(suspended_generator)
+suspended_coroutine = cleanup("at exit")
+suspended_coroutine.send(None)
+after_an_error = recovered("after an error")
+after_an_error.send(None)
+last = Last()
+print("end of script")

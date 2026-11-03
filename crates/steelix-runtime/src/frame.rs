@@ -88,15 +88,20 @@ impl Code {
 
 /// The traceback frame of one call of a native function, or of the module
 /// body. Created by [`frame!`](crate::frame).
-pub struct Frame<'py> {
-    globals: Bound<'py, PyDict>,
+pub struct Frame<'a, 'py> {
+    /// Borrowed from the module: the frame of a suspended coroutine adds no
+    /// reference to the globals that the GC can not see.
+    globals: &'a Bound<'py, PyDict>,
     /// The namespace of a class body, which runs in its own frame.
-    class_namespace: Option<Bound<'py, PyAny>>,
+    class_namespace: Option<&'a Bound<'py, PyAny>>,
     code: &'static Code,
     line: Cell<u32>,
     /// The frame object, created when the first exception needs it and
     /// shared by all entries of this call, like a Python frame.
-    object: RefCell<Option<Bound<'py, PyAny>>>,
+    object: RefCell<FrameObject<'py>>,
+    /// The frame of the body of a native coroutine or generator, which
+    /// keeps its frame object in the coroutine object (see `object`).
+    suspends: bool,
     /// An exception that already has its entry for this frame: raised here
     /// with [`Frame::raise`], or re-raised. It gets no second entry when it
     /// reaches a handler or leaves the function.
@@ -118,6 +123,15 @@ pub struct Frame<'py> {
 /// can only have reached this frame from a callee, so the head of its
 /// traceback is another frame: whenever an exception gets an entry for this
 /// frame, `entered` is updated.
+/// Where a [`Frame`] keeps its frame object.
+enum FrameObject<'py> {
+    None,
+    Owned(Bound<'py, PyAny>),
+    /// In the coroutine whose body the frame belongs to, where the GC sees
+    /// it, when the frame suspends with it.
+    Held(crate::coroutine::Held),
+}
+
 #[derive(Clone, Copy)]
 struct Entered {
     exception: *mut ffi::PyObject,
@@ -197,9 +211,9 @@ impl<'py> Scope<'py> for crate::Namespace<'py> {
 pub fn run<'py, T>(
     scope: &impl Scope<'py>,
     code: &'static Code,
-    body: impl FnOnce(&Frame<'py>) -> PyResult<T>,
+    body: impl FnOnce(&Frame<'_, 'py>) -> PyResult<T>,
 ) -> PyResult<T> {
-    let frame = Frame::new(scope, code);
+    let frame = Frame::new(scope, code, false);
     body(&frame).map_err(|err| PyErr::from_value(frame.catch(err)))
 }
 
@@ -210,27 +224,44 @@ pub fn run<'py, T>(
 /// exception gets one entry for it however often the body was resumed. An
 /// exception thrown in before the body started is raised here, before the
 /// first statement, like CPython does.
+///
+/// Each poll of the body counts as one level of Python recursion, as each
+/// resumption of a CPython generator's frame does, so chains of coroutines
+/// awaiting each other (directly or through Python objects) raise
+/// `RecursionError` at CPython's depth.
 pub async fn run_async<'py, T>(
     scope: &impl Scope<'py>,
     code: &'static Code,
-    body: impl AsyncFnOnce(&Frame<'py>) -> PyResult<T>,
+    body: impl AsyncFnOnce(&Frame<'_, 'py>) -> PyResult<T>,
 ) -> PyResult<T> {
-    let frame = Frame::new(scope, code);
-    let result = match crate::coroutine::thrown_at_start().await {
-        Some(err) => Err(err),
-        None => body(&frame).await,
-    };
-    result.map_err(|err| PyErr::from_value(frame.catch(err)))
+    let py = scope.globals().py();
+    let mut run = std::pin::pin!(async {
+        let frame = Frame::new(scope, code, true);
+        let result = match crate::coroutine::thrown_at_start().await {
+            Some(err) => Err(err),
+            None => body(&frame).await,
+        };
+        result.map_err(|err| PyErr::from_value(frame.catch(err)))
+    });
+    std::future::poll_fn(|cx| {
+        let _depth = match crate::coroutine::Depth::enter(py) {
+            Ok(depth) => depth,
+            Err(err) => return std::task::Poll::Ready(Err(err)),
+        };
+        run.as_mut().poll(cx)
+    })
+    .await
 }
 
-impl<'py> Frame<'py> {
-    fn new(scope: &impl Scope<'py>, code: &'static Code) -> Self {
+impl<'f, 'py> Frame<'f, 'py> {
+    fn new(scope: &'f impl Scope<'py>, code: &'static Code, suspends: bool) -> Self {
         Frame {
-            globals: scope.globals().clone(),
-            class_namespace: scope.class_namespace().cloned(),
+            globals: scope.globals(),
+            class_namespace: scope.class_namespace(),
             code,
             line: Cell::new(code.first_line),
-            object: RefCell::new(None),
+            object: RefCell::new(FrameObject::None),
+            suspends,
             entered: Cell::new(Entered::NONE),
         }
     }
@@ -498,10 +529,18 @@ impl<'py> Frame<'py> {
     }
 
     fn object(&self) -> PyResult<Bound<'py, PyAny>> {
-        if let Some(frame) = self.object.borrow().as_ref() {
-            return Ok(frame.clone());
-        }
         let py = self.py();
+        match &*self.object.borrow() {
+            FrameObject::Owned(frame) => return Ok(frame.clone()),
+            // Gone if the coroutine was cleared (or this is not its
+            // poll): a new one then.
+            FrameObject::Held(held) => {
+                if let Some(frame) = held.get(py) {
+                    return Ok(frame);
+                }
+            }
+            FrameObject::None => {}
+        }
         let module = Module::from_globals(self.globals.clone());
         let code = self.code.object(&module, self.class_namespace.is_some())?;
         let locals = if let Some(namespace) = &self.class_namespace {
@@ -525,7 +564,18 @@ impl<'py> Frame<'py> {
                 .cast(),
             )?
         };
-        *self.object.borrow_mut() = Some(frame.clone());
+        let held = if self.suspends {
+            crate::coroutine::Held::in_current(&frame)
+        } else {
+            None
+        };
+        let slot = match held {
+            Some(held) => FrameObject::Held(held),
+            None => FrameObject::Owned(frame.clone()),
+        };
+        // The old one (if the coroutine lost it) is dropped after the borrow.
+        let old = std::mem::replace(&mut *self.object.borrow_mut(), slot);
+        drop(old);
         Ok(frame)
     }
 
@@ -551,7 +601,7 @@ impl<'py> Frame<'py> {
                 code.getattr("co_qualname")?.eq(self.code.qualname)?
                     && code.getattr("co_flags")?.extract::<u32>()? & 0x1 == 0
             };
-            Ok(frame.getattr("f_globals")?.is(&self.globals) && same_code)
+            Ok(frame.getattr("f_globals")?.is(self.globals) && same_code)
         };
         head().unwrap_or(false)
     }
@@ -560,7 +610,7 @@ impl<'py> Frame<'py> {
 /// The rest of a `try` statement after its `finally` block: see
 /// [`Frame::finally`].
 pub struct Finally<'a, 'py, T> {
-    frame: &'a Frame<'py>,
+    frame: &'a Frame<'a, 'py>,
     outcome: Result<T, Bound<'py, PyAny>>,
     _handling: Option<Handling<'py>>,
 }

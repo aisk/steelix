@@ -152,7 +152,11 @@ pub async fn cleanup<'py>(
     let py = m.py();
     rt::frame!(m, "cleanup", 86, async |frame| {
         let result: PyResult<()> = async {
-            rt::await_(m.global("Suspend")?.call1((tag,))?).await?;
+            // The awaitable is bound first: the temporaries of a statement
+            // (here the class `Suspend`) live across its `.await`, where the
+            // GC does not see them.
+            let suspend = m.global("Suspend")?.call1((tag,))?;
+            rt::await_(suspend).await?;
             Ok(())
         }
         .await;
@@ -413,6 +417,192 @@ pub async fn closing_value<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
     })
 }
 
+// coroutines.py:208
+pub async fn inner_items<'py>(
+    m: &rt::Module<'py>,
+    n: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "inner_items", 208, async |frame| {
+        let result: PyResult<()> = async {
+            for i in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
+                let i = i?;
+                let received = rt::yield_(&i).await?;
+                if !received.is_none() {
+                    rt::builtin(py, "print")?.call1(("inner_items received", &received))?;
+                }
+                py.check_signals()?;
+            }
+            Ok(())
+        }
+        .await;
+        let finally = frame.finally(result);
+        rt::builtin(py, "print")?.call1(("inner_items finally",))?;
+        finally.resume()?;
+        Ok(rt::str(py, "inner_items done"))
+    })
+}
+
+// coroutines.py:219
+pub async fn outer_items<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "outer_items", 219, async |_| {
+        // `yield from` a native generator that qualifies for a direct call
+        // awaits its future: its yields go to this generator's caller, and
+        // `send`, `throw` and `close` reach it.
+        let result = inner_items(m, &rt::int(py, 3)).await?;
+        rt::builtin(py, "print")?.call1(("outer_items got", &result))?;
+        rt::yield_(&result).await?;
+        Ok(rt::none(py))
+    })
+}
+
+// coroutines.py:225
+pub async fn walk<'py>(
+    m: &rt::Module<'py>,
+    n: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "walk", 225, async |_| {
+        if n.is_truthy()? {
+            // Through the function object, like a call that does not
+            // qualify for a direct one.
+            rt::yield_from(m.global("walk")?.call1((n.sub(1)?,))?).await?;
+        }
+        rt::yield_(n).await?;
+        Ok(rt::none(py))
+    })
+}
+
+// coroutines.py:231
+pub async fn chain<'py>(
+    m: &rt::Module<'py>,
+    n: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "chain", 231, async |_| {
+        if n.eq(0)? {
+            return Ok(rt::int(py, 0));
+        }
+        let rest = rt::await_(m.global("chain")?.call1((n.sub(1)?,))?).await?;
+        rt::int(py, 1).add(rest)
+    })
+}
+
+// coroutines.py:237
+pub async fn in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "in_except", 237, async |frame| {
+        let result: PyResult<()> = Err(frame.raise(PyKeyError::new_err(("in_except",))));
+        match result {
+            Ok(()) => {}
+            Err(err) if err.is_instance_of::<PyKeyError>(py) => {
+                let _handling = rt::Handling::new(&frame.catch(err));
+                rt::yield_(rt::str(py, "in except")).await?;
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(rt::none(py))
+    })
+}
+
+// coroutines.py:244
+pub async fn sleep_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "sleep_in_except", 244, async |frame| {
+        let result: PyResult<()> = Err(frame.raise(PyKeyError::new_err(("sleep_in_except",))));
+        match result {
+            Ok(()) => {}
+            Err(err) if err.is_instance_of::<PyKeyError>(py) => {
+                let _handling = rt::Handling::new(&frame.catch(err));
+                rt::await_(m.global("asyncio")?.method1("sleep", (10,))?).await?;
+            }
+            Err(err) => return Err(err),
+        }
+        Ok(rt::none(py))
+    })
+}
+
+// coroutines.py:251
+pub async fn native_awaits<'py>(
+    m: &rt::Module<'py>,
+    awaitable: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "native_awaits", 251, async |_| {
+        rt::await_(awaitable).await
+    })
+}
+
+// coroutines.py:255
+pub async fn owner_values<'py>(
+    m: &rt::Module<'py>,
+    slf: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "owner_values", 255, async |frame| {
+        let result: PyResult<()> = async {
+            for value in slf.attr("values")?.try_iter()? {
+                rt::yield_(value?).await?;
+                py.check_signals()?;
+            }
+            Ok(())
+        }
+        .await;
+        let finally = frame.finally(result);
+        rt::builtin(py, "print")?.call1(("owner_values finally", slf.attr("tag")?))?;
+        finally.resume()?;
+        Ok(rt::none(py))
+    })
+}
+
+// coroutines.py:263
+pub async fn owner_run<'py>(
+    m: &rt::Module<'py>,
+    slf: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "owner_run", 263, async |frame| {
+        let result: PyResult<()> = async {
+            let wait = slf.attr("event")?.method0("wait")?;
+            rt::await_(wait).await?;
+            Ok(())
+        }
+        .await;
+        let finally = frame.finally(result);
+        rt::builtin(py, "print")?.call1(("owner_run finally", slf.attr("tag")?))?;
+        finally.resume()?;
+        Ok(rt::none(py))
+    })
+}
+
+// coroutines.py:270
+pub async fn recovered<'py>(
+    m: &rt::Module<'py>,
+    tag: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "recovered", 270, async |frame| {
+        let result: PyResult<()> = Err(frame.raise(PyKeyError::new_err((tag.clone().unbind(),))));
+        match result {
+            Ok(()) => {}
+            Err(err) if err.is_instance_of::<PyKeyError>(py) => {
+                let _handling = rt::Handling::new(&frame.catch(err));
+            }
+            Err(err) => return Err(err),
+        }
+        let result: PyResult<()> = async {
+            let suspend = m.global("Suspend")?.call1((tag,))?;
+            rt::await_(suspend).await?;
+            Ok(())
+        }
+        .await;
+        let finally = frame.finally(result);
+        rt::builtin(py, "print")?.call1(("recovered finally", tag))?;
+        finally.resume()?;
+        Ok(rt::none(py))
+    })
+}
+
 /// Executes the body of `coroutines.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::frame!(m, "<module>", 1, |_| {
@@ -471,9 +661,19 @@ class Suspend:
         rt::def!(m, gen pep479())?;
         rt::def!(m, gen bad_finally())?;
         rt::def!(m, gen closing_value())?;
+        rt::def!(m, gen inner_items(n))?;
+        rt::def!(m, gen outer_items())?;
+        rt::def!(m, gen walk(n))?;
+        rt::def!(m, async chain(n))?;
+        rt::def!(m, gen in_except())?;
+        rt::def!(m, async sleep_in_except())?;
+        rt::def!(m, async native_awaits(awaitable))?;
+        rt::def!(m, gen owner_values(slf as "self"))?;
+        rt::def!(m, async owner_run(slf as "self"))?;
+        rt::def!(m, async recovered(tag))?;
         rt::exec_python!(
             m,
-            line = 208,
+            line = 281,
             r#"
 # --- kept as Python ---
 
@@ -787,6 +987,139 @@ try:
     next(p)
 except RuntimeError as e:
     print(e, repr(e.__cause__))
+
+print("--- direct await of a native generator (yield from)")
+o = outer_items()
+print(next(o), o.send("sent"), next(o), next(o))
+try:
+    next(o)
+except StopIteration:
+    print("outer_items done")
+o = outer_items()
+next(o)
+o.close()
+print("outer_items closed")
+o = outer_items()
+next(o)
+try:
+    o.throw(KeyError("into inner"))
+except KeyError as e:
+    print("thrown through", repr(e), [name for name, _ in frames(e)])
+
+print("--- recursion depth")
+for n in (100, 2000):
+    for name, run in (
+        ("walk", lambda: len(list(walk(n)))),
+        ("chain", lambda: asyncio.run(chain(n))),
+        ("countdown", lambda: asyncio.run(countdown(n))),
+    ):
+        try:
+            print(name, n, run())
+        except RecursionError as e:
+            print(name, n, type(e).__name__, e)
+
+print("--- context of thrown exceptions")
+g = in_except()
+print(next(g))
+try:
+    g.throw(ValueError("thrown"))
+except ValueError as e:
+    print("thrown context", repr(e.__context__))
+
+
+async def cancel_in_except():
+    task = asyncio.create_task(sleep_in_except())
+    await asyncio.sleep(0)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError as e:
+        chain = []
+        while e is not None:
+            chain.append(repr(e))
+            e = e.__context__
+        print("cancelled chain", chain)
+
+
+asyncio.run(cancel_in_except())
+
+print("--- awaited already")
+
+
+async def awaited_already():
+    for make in (lambda: add_later(1, 2), lambda: py_double(1)):
+        c = make()
+        task = asyncio.ensure_future(c)
+        await asyncio.sleep(0)
+        for waiter in (py_awaits, native_awaits):
+            try:
+                await waiter(c)
+            except RuntimeError as e:
+                print("awaited already:", e, c.cr_suspended)
+        print("task result", await task)
+
+
+asyncio.run(awaited_already())
+
+print("--- cycles through self")
+
+
+class Owner:
+    values_of = owner_values
+    run = owner_run
+
+    def __init__(self, tag):
+        self.tag = tag
+        self.values = [1, 2]
+
+    def __del__(self):
+        print("del owner", self.tag)
+
+
+owner = Owner("generator")
+owner.generator = owner.values_of()
+print(next(owner.generator))
+del owner
+gc.collect()
+print("after collecting an owner and its generator")
+
+
+def report(loop, context):
+    print("exception handler:", context["message"])
+
+
+async def owner_task():
+    asyncio.get_running_loop().set_exception_handler(report)
+    owner = Owner("task")
+    owner.event = asyncio.Event()
+    owner.task = asyncio.create_task(owner.run())
+    await asyncio.sleep(0)
+    del owner
+    gc.collect()
+    print("after collecting an owner and its task")
+
+
+asyncio.run(owner_task())
+
+print("--- at exit")
+# The hook is a function of this module: it would keep the globals alive.
+sys.unraisablehook = sys.__unraisablehook__
+
+
+class Last:
+    def __del__(self):
+        print("del last")
+
+
+never_started = count_up(3)
+suspended_generator = with_finally()
+next(suspended_generator)
+suspended_coroutine = cleanup("at exit")
+suspended_coroutine.send(None)
+after_an_error = recovered("after an error")
+after_an_error.send(None)
+last = Last()
+print("end of script")
 "#
         )?;
         Ok(())
