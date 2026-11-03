@@ -282,6 +282,8 @@ golden 里属性和方法调用的写法都变了（`slf.getattr("x")?` 变成 `
 
 runtime 的宏变了（`rt::def!` 的装饰器和 `as`、`rt::class!` 的 `future_annotations`），生成的代码要配合新版本的 `steelix-runtime`。
 
+顺带：生成的 `Cargo.toml` 加了 release profile（`lto = "fat"`、`codegen-units = 1`），skime 的 fib 22 快约 8%，release 构建慢约一半（§11）。
+
 ## M12 改写流程（计划）
 
 M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext 两个 crate 之间手工复制，只为了能用项目自己的 pytest 测原生代码。不做"一个 crate 同时产出 bin 和 ext"，改为直接用 bin 跑测试：程序以 `python` 的名字启动时就是完整的解释器，并且安装了原生 importer（M7a），`import` 项目模块得到的就是原生代码。

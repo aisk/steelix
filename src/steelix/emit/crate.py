@@ -70,6 +70,16 @@ opt-level = 3
 opt-level = 3
 """
 
+# Generated code calls many small runtime functions (`attr`, `global`,
+# `frame::run`, ..) that only get inlined across the crate boundary with LTO:
+# about 8% faster on an interpreter-like program, for a release build that
+# takes around half again as long. Behaviour does not change.
+RELEASE_PROFILE = """\
+[profile.release]
+lto = "fat"
+codegen-units = 1
+"""
+
 
 class Mode(Enum):
     BIN = "bin"
@@ -412,7 +422,7 @@ def cargo_toml(module_name: str, options: CrateOptions) -> str:
         lines += ["[build-dependencies]", f'pyo3-build-config = "{PYO3_VERSION}"', ""]
     if options.standalone:
         # Cargo only reads profiles from the workspace root.
-        lines += [DEV_PROFILE, "[workspace]", ""]
+        lines += [DEV_PROFILE, RELEASE_PROFILE, "[workspace]", ""]
     return "\n".join(lines)
 
 

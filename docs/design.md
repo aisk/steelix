@@ -985,6 +985,7 @@ m.set_global(
   - 以 `__main__` 身份执行模块。结束时调用 `Py_FinalizeEx`，这样会 flush stdout 并执行 atexit
   - `SystemExit` 和未捕获异常交给 `PyErr_Print` 处理，退出码与 CPython 一致。之前和 CPython 的 `flush_io` 一样先 flush `sys.stderr` 和 `sys.stdout`（忽略错误），否则 stdout 和 stderr 重定向到同一个文件时，缓冲区里的输出会排在 traceback 后面
   - 生成的 `Cargo.toml` 在 dev profile 下把 pyo3、pyo3-ffi 和 runtime 设为 `opt-level = 3`，生成的 crate 本身设为 1。没有优化的 PyO3 让每个 Python 操作慢几倍；不用 `package."*"`，因为它也会优化 proc macro，让干净构建的时间翻倍。实测（M3a）一个递归加循环的基准：全部 `opt-level = 0` 时 1.39s，现在的配置 0.40s，而 CPython 是 0.18s；干净构建从 11.5s 增加到 15.3s，改一行后重新构建从 0.5s 增加到 1.0s。转换出来的代码每个操作仍然经过 C API，没有字节码解释的开销但也没有 CPython 的特化和内联缓存，在函数被改写成原生 Rust 之前不会比 CPython 快
+  - release profile 打开 `lto = "fat"` 和 `codegen-units = 1`。生成代码调用大量很小的 runtime 函数（`attr`、`global`、`frame::run` 等），没有 LTO 时它们跨 crate 内联不了。skime 的 fib 22（release）从 0.92s 降到 0.85s（CPython 0.41s），二进制小 7%。代价是 release 构建变慢：改生成代码后重新构建从 33s 到 51s，干净构建从 44s 到 62s。只影响编译方式，不改变行为和生成的代码
   - 只有 crate 是 workspace 根时 profile 才生效，所以只在独立 crate（默认）里生成
   - 开发构建（在生成的 crate 里 `cargo build`）：build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython，并把构建用的解释器（`PYO3_PYTHON`）和项目目录作为 `STEELIX_PYTHON`、`STEELIX_PROJECT` 交给编译器。程序用这个解释器的安装和 venv，只适合在本机运行。分发用的构建见下面的"分发"
   - 与 `python app.py` 一致的脚本信息（M2，M7 改成运行时确定）。`main.rs` 里只有脚本相对于项目目录的名字 `steelix_runtime::script!("app.py")`，宏在生成的 crate 里读取 build.rs 给出的两个路径（分发构建时没有），runtime 在启动时算出下面这些路径。所以 `main.rs` 里没有本机的绝对路径，golden 也不用替换路径
