@@ -242,6 +242,41 @@ pop(&ctx)
 9. **模块常量是全局查找。** `INSN_TAGS` 生成 25 行 `&m.global("TAG_CTX_SWITCH")?.bitor(m.global("TAG_CTRL_FLOW")?)?`。这是正确的（Python 里可以重新赋值），改写时直接换成 Rust 常量
 10. **Python 和 Rust 的字符分类不同。** `str.isdigit`、`isspace`、`isalpha` 和 `char` 的方法在非 ASCII 字符上不一致（`isspace` 多了 U+001C 到 U+001F），要逐个决定。和 logsum 的 `int()` 一样，§15 的"转换要与原来的 Python 语义对齐"说得对，但每次都要重新查
 
+M12 补上了第 2 到第 7 条：design §15 加了"被多个模块共享的类"、"适配层构造别的模块的类、抛项目自己的异常"、"内联别的类的方法"、"Python 源码本身是生成的"几节，runtime 加了 `m.error("ParseError", (..,))`（第 4 条），第 6 条要的表由 `steelix attrs` 列出。在 skime 上运行（0.4 s，51 个类）
+
+```
+uv run steelix attrs -m skime --root tests/projects/skime --class Context
+```
+
+```
+class skime.ctx.Context  (skime/ctx.py:1, top level)
+  constructed in: Context.clone (skime/ctx.py:22), Form.eval (skime/form.py:28), invoke (skime/invoke.py:41), VM.__init__ (skime/vm.py:25)
+  instance attributes
+    ip
+      write  skime/ctx.py:13  Context.__init__  self.ip
+      read   skime/ctx.py:23  Context.clone     self.ip
+      write  skime/ctx.py:23  Context.clone     ctx.ip  [inferred: ctx = Context(..)]
+      read   skime/ctx.py:59  Context.__str__   self.ip
+    ..
+
+instance attributes of project classes used through receivers of unknown class
+  ip  (skime.compiler.builder.Builder, skime.ctx.Context; 30 accesses in 27 functions: skime.call_cc, skime.insns)
+    augmented  skime/call_cc.py:4  Continuation.__init__       self.ctx.ip
+    augmented  skime/insns.py:22   op_call                     ctx.ip
+    ..
+methods of project classes used through receivers of unknown class
+  push  (skime.ctx.Context; 15 accesses in 15 functions: skime.insns, skime.invoke)
+    read  skime/insns.py:14   op_ret                pctx.push
+    ..
+```
+
+完整的输出是 `tests/golden/attrs/skime_context.txt`，`--pyclass skime.ctx.Context` 的草稿是 `tests/golden/attrs/skime_context.rs`。从中可以看出
+
+- `Context` 本身没有升级的结构性障碍：只继承 object，没有子类、metaclass、装饰器、类体逻辑、`__slots__` 和动态访问（整个 skime 没有一处 `getattr`/`setattr`/`vars`/`__dict__`），草稿开头的事实只剩"共享"这一类
+- 类的方法以外，没有一处访问能确定接收者是 `Context`：`insns.py` 的 `ctx` 是没有注解的参数，`invoke()` 的 `ctx` 先后绑定 `Context(..)` 和 `proc.ctx.clone()`，`Continuation` 经过 `self.ctx`。这些访问都按名字落在未知接收者那两节里。M10 的第 6 条靠 grep 估计了五个模块，表给出的是更准确的答案：直接读写属性或调用方法的是 `insns.py`（28 个函数）、`invoke.py`（`invoke`）和 `call_cc.py`（`Continuation.__init__`），`form.py` 和 `vm.py` 只构造它（`#[new]` 保持签名就够），`vm.py` 自己不碰它的属性
+- `ip`、`push`、`pop_n`、`top`、`clone` 这些名字几乎只属于 `Context`（`ip` 另有 `Builder`，`pop` 另有 `Parser` 和 list 的 `pop`），列出来的访问基本都是它的。`env`、`parent`、`bytecode` 同时是 9 个、2 个、4 个类的属性，那几节里混着 `Builder`、`Environment`、`Procedure` 的访问，要按接收者的名字（`ctx`、`pctx`）挑出来。给 `op_*` 的参数加上 `ctx: Context` 注解之后，这些访问就会直接记在 `Context` 下面
+- 所以 `Context` 的第二步等于改写 `insns.py` 的全部 28 个指令函数、`invoke` 和 `Continuation`，而 `form.py`、`vm.py` 只需要照旧能调用 `Context(..)`。M10 改写的主循环和 `op_*` 已经覆盖了其中大部分
+
 没有遇到的：改写没有动到任何无关的生成代码，`main.rs` 和模块表不用改，调用方不用改，`rt::frame!` 保留两行包装就够了，`cargo test` 能直接测 `native.rs`（bin crate 也可以）。
 
 ## 7. 性能
@@ -325,7 +360,7 @@ fib 22 分步看：只换 runtime（vectorcall、method descriptor、快速路�
 
 1. **降低调用原生函数的开销（性能里程碑，M11 已做，见第 7 节）。** `Function` 实现 vectorcall（PEP 590），加 `Py_TPFLAGS_METHOD_DESCRIPTOR` 让 `obj.method()` 不创建 bound method，参数绑定在只有位置参数时走快速路径；生成代码里的字面量属性名用 intern 的字符串（`pyo3::intern!` 或 runtime 的缓存，要兼顾可读性，例如 `rt` 提供带缓存的 `attr`/`set_attr`/`call_method`）。目标是像 skime 这样的程序不再比 CPython 慢几倍，单是 intern 就有 1.8 倍
 2. **一个 crate 同时出 bin 和 ext（M12 换了做法，用 bin 的解释器角色跑测试，见第 3 节）。** 生成的 crate 同时有 `[lib]`（cdylib）和 `[[bin]]`，或者 `steelix` 提供把一个 crate 的模块文件用于另一种模式的命令，让项目自己的测试套件能直接测改写后的代码。顺带写一份"用项目自己的 pytest 测原生代码"的做法（这次最有用的验证手段），并修好 ext 模式的 `python -m pkg`
-3. **补充 §15。** 加上这次遇到的几种情况：用原生函数取代一个类的用途（保留还是删除类）、适配层构造别的模块的类的实例（按 import 的别名取 globals）、抛项目自己的异常类（并在 runtime 里加一个小工具）、内联别的类的方法时的语义变化、Python 源码本身是生成的时候怎么保持单一来源
-4. **为第二步提供"属性读写索引"。** 静态列出项目里每个类的每个实例属性被哪些函数读写（`ctx.ip` 这类），作为 `steelix coverage` 或单独命令的输出。改写 `Context` 这样被五个模块共享的类之前，没有这张表只能靠 grep
+3. **补充 §15（M12 已做，见第 6 节）。** 加上这次遇到的几种情况：用原生函数取代一个类的用途（保留还是删除类）、适配层构造别的模块的类的实例（按 import 的别名取 globals）、抛项目自己的异常类（并在 runtime 里加一个小工具）、内联别的类的方法时的语义变化、Python 源码本身是生成的时候怎么保持单一来源
+4. **为第二步提供"属性读写索引"（M12 已做，`steelix attrs`，见第 6 节）。** 静态列出项目里每个类的每个实例属性被哪些函数读写（`ctx.ip` 这类），作为 `steelix coverage` 或单独命令的输出。改写 `Context` 这样被五个模块共享的类之前，没有这张表只能靠 grep
 5. **generator。** skime 里剩下的唯一一个保留函数，和 `coverage.md` 的结论一致
 6. **分发的小问题。** 复制包目录时可以排除开发用的文件（`--exclude-data` 或按 `pyproject.toml` 的打包配置），`type(f).__module__` 返回字符串

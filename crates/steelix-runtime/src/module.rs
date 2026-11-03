@@ -1,6 +1,7 @@
 //! `Module`: the context every generated function receives.
 
-use pyo3::exceptions::{PyNameError, PyTypeError};
+use pyo3::call::PyCallArgs;
+use pyo3::exceptions::{PyBaseException, PyNameError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -56,6 +57,31 @@ impl<'py> Module<'py> {
             return Ok(value);
         }
         crate::builtin(self.py(), name)
+    }
+
+    /// The exception `name(*args)`, for native code to return: `name` is a
+    /// global of the module that holds an exception class, usually one of
+    /// the project's own exceptions under the name the module imports it as.
+    ///
+    /// ```ignore
+    /// native::parse(&text).map_err(|err| m.error("ParseError", (err.to_string(),)))?
+    /// ```
+    ///
+    /// When looking the class up or calling it fails, or it returns something
+    /// that is not an exception, that error is returned instead, like `raise`
+    /// does. The exception gets its traceback entries from the native frames
+    /// it propagates through (the adapter's `rt::frame!`, if it keeps one),
+    /// and no `__context__`: use `frame.raise` inside a handler.
+    pub fn error(&self, name: &'static str, args: impl PyCallArgs<'py>) -> PyErr {
+        match self.global(name).and_then(|class| class.call1(args)) {
+            Ok(exception) if exception.is_instance_of::<PyBaseException>() => {
+                PyErr::from_value(exception)
+            }
+            Ok(_) => crate::raised(PyTypeError::new_err(
+                "exceptions must derive from BaseException",
+            )),
+            Err(err) => err,
+        }
     }
 
     /// Binds a global, like an assignment at module level.
@@ -118,5 +144,33 @@ impl<'py> Module<'py> {
         let names = self.globals.keys();
         names.sort()?;
         Ok(names.into_any())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_creates_the_exception_named_by_a_global() {
+        Python::initialize();
+        Python::attach(|py| {
+            let globals = PyDict::new(py);
+            let source = c"class ParseError(Exception): pass\nNotAnError = int\n";
+            py.run(source, Some(&globals), None).unwrap();
+            let m = Module::from_globals(globals);
+            let err = m.error("ParseError", ("bad input",));
+            assert_eq!(
+                err.value(py).repr().unwrap().to_string(),
+                "ParseError('bad input')"
+            );
+            // Builtins are found too, and failures become the error.
+            assert!(
+                m.error("ValueError", ())
+                    .is_instance_of::<pyo3::exceptions::PyValueError>(py)
+            );
+            assert!(m.error("Missing", ()).is_instance_of::<PyNameError>(py));
+            assert!(m.error("NotAnError", ()).is_instance_of::<PyTypeError>(py));
+        });
     }
 }

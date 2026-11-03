@@ -1,0 +1,91 @@
+class shapes.Point  (shapes.py:7, top level)
+  subclasses: shapes.Point3 (shapes.py:31)
+  used outside its methods by 5 functions in 2 modules: app, shapes
+  constructed in: Point3.flat (shapes.py:37), origin (app.py:15), maybe (app.py:21), closure (app.py:28), <module> (app.py:54)
+  instance attributes
+    _Point__secret
+      write  shapes.py:14  Point.__init__  self._Point__secret
+      read   shapes.py:28  Point.later     self._Point__secret
+    label  (not in __static_attributes__)
+      write  app.py:16  origin  o.label  [inferred: o = P(..)]
+    x
+      write      shapes.py:12  Point.__init__  self.x
+      read       shapes.py:18  Point.norm      self.x
+      augmented  shapes.py:21  Point.move      self.x
+      read       shapes.py:37  Point3.flat     self.x
+      augmented  app.py:10     scale           p.x  [inferred: p: P]
+    y
+      write  shapes.py:13  Point.__init__              self.y
+      read   shapes.py:18  Point.norm                  self.y
+      read   shapes.py:26  Point.later.<locals>.inner  self.y
+      read   shapes.py:37  Point3.flat                 self.y
+      read   app.py:11     scale                       p.y  [inferred: p: P]
+      write  app.py:11     scale                       p.y  [inferred: p: P]
+      read   app.py:43     configure                   getattr(p, 'y')  [inferred: p: 'P | None']
+  class attributes
+    count  (class body line 9)
+      augmented  shapes.py:15  Point.__init__  Point.count
+      write      app.py:49     reset           shapes.Point.count
+  dynamic access
+    vars     app.py:43  configure  vars(p)  [inferred: p: 'P | None']
+    setattr  app.py:45  configure  setattr(p, ..)  [inferred: p: 'P | None']
+
+class shapes.Point3  (shapes.py:31, top level)
+  bases: Point
+  instance attributes
+    z
+      write  shapes.py:34  Point3.__init__  self.z
+
+class shapes.Size  (shapes.py:41, top level)
+  decorators: @dataclass
+  constructed in: <module> (app.py:53)
+  instance attributes
+    height  (class default at line 43)
+    width
+
+class shapes.Meta  (shapes.py:46, top level)
+  bases: type
+  instance attributes: none
+
+class shapes.Base  (shapes.py:50, top level)
+  subclasses: shapes.Odd (shapes.py:54)
+  instance attributes: none
+
+class shapes.Odd  (shapes.py:54, top level)
+  bases: Base, metaclass=Meta
+  used outside its methods by 1 function in 1 module: app
+  constructed in: Odd.make (shapes.py:74), Odd.build (shapes.py:79)
+  attribute hooks: __getattr__
+  __slots__: a, _b
+  instance attributes
+    _b
+      write  shapes.py:62  Odd.__init__  self._b
+      read   shapes.py:66  Odd.b         self._b
+      write  shapes.py:70  Odd.b         self._b
+    a
+      write  shapes.py:61  Odd.__init__  self.a
+  class attributes
+    LIMIT  (class body line 56)
+      write  shapes.py:78  Odd.build  cls.LIMIT
+      del    app.py:50     reset      shapes.Odd.LIMIT
+  dynamic access
+    vars      shapes.py:83  Odd.cached       vars(self)
+    __dict__  shapes.py:89  Odd.__getattr__  self.__dict__
+
+instance attributes of project classes used through receivers of unknown class
+  width  (shapes.Size; 1 access in 1 function: app)
+    read  app.py:39  show  thing.width
+  x  (shapes.Point; 3 accesses in 3 functions: app, other)
+    read  app.py:24   maybe  q.x
+    read  app.py:39   show   thing.x
+    read  other.py:9  far    p.x
+  y  (shapes.Point; 2 accesses in 2 functions: app, other)
+    read  app.py:35   closure  r.y
+    read  other.py:9  far      p.y
+
+methods of project classes used through receivers of unknown class
+  none
+
+dynamic access through receivers of unknown class
+  getattr  app.py:39     show             getattr(thing, ..)
+  getattr  shapes.py:89  Odd.__getattr__  getattr(self.__dict__, ..)

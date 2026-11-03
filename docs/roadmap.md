@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12（进行中）→ M13 PoC ✅（lowering 计划中）→ M14（计划）。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12 ✅ → M13 PoC ✅（lowering 计划中）→ M14（计划）。
 
 ## M0 项目骨架 ✅
 
@@ -284,15 +284,15 @@ runtime 的宏变了（`rt::def!` 的装饰器和 `as`、`rt::class!` 的 `futur
 
 顺带：生成的 `Cargo.toml` 加了 release profile（`lto = "fat"`、`codegen-units = 1`），skime 的 fib 22 快约 8%，release 构建慢约一半（§11）。
 
-## M12 改写流程（计划）
+## M12 改写流程 ✅
 
 M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext 两个 crate 之间手工复制，只为了能用项目自己的 pytest 测原生代码。不做"一个 crate 同时产出 bin 和 ext"，改为直接用 bin 跑测试：程序以 `python` 的名字启动时就是完整的解释器，并且安装了原生 importer（M7a），`import` 项目模块得到的就是原生代码。
 
 - [x] 提供用生成的程序以解释器身份运行项目测试的入口：`steelix test CRATE [pytest 参数]` 构建 crate，通过名为 `python` 的链接以解释器角色运行 `python -m pytest`，`STEELIX_NATIVE_IMPORTS=1` 让解释器回答所有转换过的模块的 import（项目目录不在 `sys.path` 上也一样），pytest 插件 `steelix_native` 报告原生导入的模块数，转换过的模块从源码 import 时运行失败（§15）
 - [x] 用 skime 的 108 个测试验证这条路径，替代 M10 的 ext 复制脚本：测试目录（skime 0.3.1 的原样副本）放在 `tests/projects/skime/tests`，`tests/test_projects.py` 在一个和项目无关的目录里运行它们，108 个全部通过，24 个模块都是原生的（`m10-skime.md` 第 3 节）。`inventory` 的 `store` 另有测试覆盖包里的测试文件和从源码 import 的检查
-- [ ] 补充 §15：被多个模块共享读写的类（如 skime 的 `Context`）怎么改写，适配层怎样构造别的模块的类、抛项目自己的异常类，Python 源码本身是生成出来的时候怎么保持单一来源
-- [ ] 属性读写索引：列出每个实例属性被哪些函数读写，改写共享的类之前先看这张表
-- [ ] `#[pyclass]` 改写草稿（只在用户指定某个类时生成，不接入构建）：字段取自 `__static_attributes__`，类型先留成 `Py<PyAny>` 加 TODO，并且和属性读写索引一起报告这个类是否被继承、有没有动态 `setattr`/`getattr`、`__dict__`/`vars` 的使用、装饰器和 metaclass，作为 §15 第二步的起点。不做自动升级（§10）
+- [x] 补充 §15：被多个模块共享读写的类（如 skime 的 `Context`）怎么改写，适配层怎样构造别的模块的类、抛项目自己的异常类（runtime 加了 `m.error("ParseError", (..,))`），内联别的类的方法时的语义变化，Python 源码本身是生成出来的时候怎么保持单一来源
+- [x] 属性读写索引：列出每个实例属性被哪些函数读写，改写共享的类之前先看这张表。`steelix attrs`（选择程序的参数和 `transpile` 一样，`--class`、`--json`），接收者是 `self`/`cls`、注解为这个类的参数、只由构造这个类的调用绑定的局部变量和类对象本身时记在类下面，其余按属性名和方法名列出，动态访问按类或函数列出（§15）。在 skime 上的结果见 `m10-skime.md` 第 6 节
+- [x] `#[pyclass]` 改写草稿（只在用户指定某个类时生成，不接入构建）：字段取自 `__static_attributes__`，类型先留成 `Py<PyAny>` 加 TODO，并且和属性读写索引一起报告这个类是否被继承、有没有动态 `setattr`/`getattr`、`__dict__`/`vars` 的使用、装饰器和 metaclass，作为 §15 第二步的起点。不做自动升级（§10）。`steelix attrs --pyclass NAME`，桩能通过 PyO3 的类型检查（`tests/test_attrs.py`）
 - [x] ext 模式下 `python -m pkg`（M6 遗留）：改写流程不再需要它，但发布的库也可能有 `__main__`。扩展模块安装成 `pkg/__init__.so` 时 import 之前就是包，`runpy` 能找到 `pkg.__main__`，`init_extension` 据此把项目目录提到包目录外面（§11）
 - [x] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程：§11、§15、README 改成用 bin 的解释器角色跑项目自己的测试
 

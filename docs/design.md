@@ -74,6 +74,8 @@ steelix/
 │   ├── cli.py                 命令行入口 `steelix transpile`
 │   ├── coverage.py            转换覆盖率报告
 │   ├── project.py             找出项目里的模块（§7）
+│   ├── attrs.py               属性读写索引 `steelix attrs`（§15）
+│   ├── pyclass.py             `#[pyclass]` 草稿 `steelix attrs --pyclass`（§15）
 │   ├── diagnostics.py         诊断信息、源码位置、UnsupportedError
 │   ├── frontend/              解析、作用域分析、绑定分析
 │   ├── lower/                 Python AST → Rust AST
@@ -86,7 +88,8 @@ steelix/
     ├── cases/                 端到端用例（*.py），同时作为 golden 输入
     ├── apps/                  从标准库复制的真实命令行工具（混合模式）
     ├── projects/              多模块的程序（M6）：测试应用和标准库 json 包的副本
-    ├── golden/                期望生成的 .rs（快照测试），projects/ 下是项目的整个 src/
+    ├── attrs/                 属性读写索引的测试项目
+    ├── golden/                期望生成的 .rs（快照测试），projects/ 下是项目的整个 src/，attrs/ 下是索引和草稿
     └── test_*.py
 ```
 
@@ -1015,7 +1018,7 @@ m.set_global(
 ### 不选的方案
 
 - `types.new_class` 的语义和 `__build_class__` 相同，但类体要以 Python 回调的形式传进去，`__qualname__`、`__module__`、`__firstlineno__`、`__classcell__` 和类体的帧都要在回调外另外处理。直接复刻 `__build_class__` 的 C 代码，求值顺序和报错更容易对齐
-- `#[pyclass]` 不作为默认方案（已验证）：不能继承 Python 定义的类（TestCase、Enum、NamedTuple、Thread 等），不支持 pickle/copy，和 Exception 混合继承会出现 layout conflict，类体内的逻辑、条件定义的类、局部类都无法表达。它是手工改写时的升级路径（第 15 节）。自动升级符合条件的类（只继承 object 或原生类型、有类型注解）也不做：注解不强制，字段的 Rust 类型在运行时可能放不下 Python 实际传进来的值，`#[pyclass]` 还会改变 pickle、`__dict__`、被 Python 类继承等可见的行为，要保持语义就需要两套实现
+- `#[pyclass]` 不作为默认方案（已验证）：不能继承 Python 定义的类（TestCase、Enum、NamedTuple、Thread 等），不支持 pickle/copy，和 Exception 混合继承会出现 layout conflict，类体内的逻辑、条件定义的类、局部类都无法表达。它是手工改写时的升级路径（第 15 节）。自动升级符合条件的类（只继承 object 或原生类型、有类型注解）也不做：注解不强制，字段的 Rust 类型在运行时可能放不下 Python 实际传进来的值，`#[pyclass]` 还会改变 pickle、`__dict__`、被 Python 类继承等可见的行为，要保持语义就需要两套实现。M12 的 `steelix attrs --pyclass` 只为用户指定的类写一份草稿，列出阻碍升级的事实，留给人完成（§15）
 - 方法级混合模式的另一种做法是把保留的方法单独编译成函数，再放进命名空间。没有这样做，因为 `super()`、`__class__`、私有名字改编、`__qualname__` 都依赖编译器把它当作类体的一部分编译。现在的做法见 §13
 
 ## 11. 输出模式
@@ -1357,6 +1360,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
   - 混合模式：保留为 Python 的代码的 traceback 帧必须和 CPython 的最后几帧完全相同（文件名、行号、源码行）。bin 模式下的 panic 必须以退出码 1 结束（用手写的模块文件替换生成的文件来触发）
 - **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式和 `--traceback-lines` 转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
 - **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。`skime`（M10）是一个 Scheme 实现（MIT 许可，约 4800 行）的原样副本（M12 起加上它的测试目录 `tests/`，steelix 自己的 pytest 不收集它）加驱动脚本 `app.py`，把 `programs/` 下的 Scheme 程序喂给它的 REPL 或用嵌入 API 加载，覆盖尾递归、call/cc、宏、向量和字符串，以及从 VM 深处抛出的未捕获异常。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，M7 起 `main.rs` 里没有绝对路径，不用替换；skime 的有 1.5 万行，不做 golden），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试（M12 起也以 `pkg/__init__.so` 运行 `python -m store`），`steelix test` 的测试（`inventory` 的 `store` 和 skime 自己的 108 个测试，§15），以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
+- **属性读写索引**（M12，`tests/test_attrs.py`）：`tests/attrs/shapes` 是一个小项目，覆盖 `self`、继承的属性、嵌套函数里的 `self`、私有名字改编、import 别名、注解和构造推断出的接收者、不确定时当作未知的几种情况（局部变量重新绑定、`nonlocal`、模块里绑定两次的类名）、类属性的写入、动态访问、dataclass、`__slots__`、metaclass 和类体里的逻辑。索引的文本和几个类的 `#[pyclass]` 草稿是 golden（`tests/golden/attrs/`，`--update-golden` 更新），另外对 skime 的 `Context` 检查实例属性和未知接收者所在的模块，并把它的索引和草稿也做成 golden。草稿的桩在一个只依赖 PyO3 的 crate 里 `cargo check`（marker `cargo`），runtime 的 `Module::error` 有 Rust 单元测试
 - **分发**（M7，`tests/test_dist.py`）：`tests/dist_apps/hello` 用到 json、`subprocess.run([sys.executable, "-c", ..])` 和一个第三方包，`tests/dist_apps/mp` 用 spawn 和 forkserver 的 `Pool.map`（模块级的原生函数、`__main__` 里定义的类的实例、在 worker 里抛异常）和 `ProcessPoolExecutor`。构建用的 venv 是 `target/e2e/dist-venv`，用 `python -m venv --without-pip` 创建，`site-packages` 里直接写入一个本地包 `greeting`（加上 dist-info），不需要网络，路径固定，cargo 缓存的依赖在两次测试之间仍然有效。`steelix build` 的结果在 `bwrap` 里运行：只挂载 `/usr`（和 `/lib`、`/bin` 等指向它的链接）、`/etc/ld.so.cache`、`/proc`、`/dev`、空的 `/tmp`，分发目录只读地挂在无关的 `/opt/program`，环境变量只有 `PATH`，看不到 `$HOME`、uv 的 Python、仓库和 venv（测试本身检查这一点）。在里面运行 hello（有源文件和 `--no-sources` 两种，比较输出和 traceback 的帧，有源文件时才有源码行）、json 项目的脚本和 `-m json`（`--no-sources`，和 CPython 比较 stdout、退出码和最后一行 stderr）、mp（`--no-sources`，和 CPython 的输出完全相同，worker 里也调用项目的包 `mptools` 的函数；另外以 `-m mptools.cli` 构建，`src/` 里没有 `mptools` 目录，spawn 和 forkserver 的子进程仍然能 import 转换过的子模块）、`tests/dist_apps/pkgapp`（`--no-sources`，包里的数据文件经过 `importlib.resources` 和 `pkgutil.get_data`，附带的解释器在项目目录里运行 `-m pkg.cli`，在别的目录里 import 不到项目模块，构建时对没有复制的顶层模块 `dyn.py` 给出警告）。M7a 加了几个回归测试：程序收到 multiprocessing 子进程的命令行时和 CPython 一样把它当作参数（分发和开发构建都测），分发在 bwrap 外面用假的 `HOME`（里面有 `usercustomize.py`）和 `PYTHONPATH` 等变量运行，输出不变，`STEELIX_PYTHON_ENV=1` 时生效，标准库和 site-packages 的 `.pyc` 头部是 unchecked-hash。另外检查程序里没有构建机器的路径、`--archive` 解压后的布局和链接，以及开发构建的 mp 在源文件删掉之后仍然正确。没有 `bwrap` 时这些测试跳过。dist 的组装、`project_files`（包里的数据文件）、没有复制的顶层模块的警告、`compile_tree`（`.pyc` 的校验方式、编译不过的文件、`compileall` 失败）、`inspect_python`（包括没有 `METADATA` 的 `.dist-info` 和 `include-system-site-packages = true` 的 venv）、rustflags 有单元测试，runtime 识别 multiprocessing 命令行和开发构建子进程标记的 Rust 单元测试也由 pytest 运行。ext 模式的测试另外用 `python -m store.__main__` 检查 `NativeLoader.get_code`
 - **协程和生成器的 PoC**（M13，`tests/test_poc_async.py`）：`tests/poc_async/coroutines.py` 里的协程和生成器函数在 `src/coroutines.rs` 里按以后生成的样子手写成原生代码（`rt::def!(m, async ..)`、`rt::def!(m, gen ..)`），驱动它们的代码保留为 Python（`rt::exec_python!`）。crate 由 `emit_crate` 生成后换上这个文件，要求 clippy 干净，输出、stderr（没被 await 的协程的警告）和退出码和 CPython 运行同一份源码相同，文档化的差异（§12）在测试里逐行列出
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
@@ -1467,7 +1471,7 @@ steelix test out/ -- tests/ -x
 每个类生成一个 mod（§10），改写也以 mod 为单位，两步和上面对应：
 
 1. **方法逐个改写，实例状态留在 `__dict__` 里。** 方法的 fn 就是适配层，签名 `(m, slf, ..)` 和普通函数一样不改。方法体可以把属性读出来转成原生类型，调用原生模块里的函数，再写回 `slf.setattr(..)`。只要读写的属性名和值的类型不变，同一个类的其他方法、子类和 Python 代码都不受影响。`rt::class!` 那一行和 `body` 不用动。也可以手工把类里保留为 Python 的方法改成原生的：在 mod 里加一个 fn，把 `body` 里的 `rt::exec_python!(ns, ..)?;` 换成 `rt::def!(ns, name(slf as "self", ..))?;`，方法里用了 `super()` 时在 `body` 开头 `let __class__ = ns.class_cell();` 并按闭包捕获它（照着同一个文件里生成的方法写）
-2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。这一步不自动生成，原因见 §10
+2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。这一步不自动生成，原因见 §10。`steelix attrs --pyclass` 可以写一份草稿作为起点，属性被别的模块读写时先看下面的"被多个模块共享的类"
 
 和函数一样，`self.method()` 在生成代码里总是动态调用，改写成原生代码之后，同一个结构体的方法之间可以直接调用，不经过 Python。
 
@@ -1479,6 +1483,168 @@ steelix test out/ -- tests/ -x
 - **Python 侧的形状要写明。** 字段的原生类型和 Python 一侧看到的值不一定一一对应。例如原来是 tuple 的属性存成 `Vec<String>` 或 `[f64; 2]` 时，`#[pyo3(get)]` 会转成 list，`p.coords == (1.0, 2.0)` 就变成 False，`hash(p.coords)` 直接报错。这类属性要手写 getter，每次重新构造 tuple（`PyTuple::new(py, &self.coords)`），setter 同样按原来接受的类型转换。改写前先列出每个属性在 Python 一侧的类型，改写后逐个对照
 - **`__module__`、`__qualname__` 和 pickle。** `#[pyclass(module = "app", name = "Point")]` 写明模块名和类名，否则 `__module__` 是 `builtins`，`repr`、错误信息和 pickle 都会出错。嵌套类的 `__qualname__` 要和原来的 `Outer.Inner` 一致。pickle 和 `copy` 需要 `__reduce__`（返回类本身和构造参数），并且类要能通过 `module.qualname` 找到，也就是 `exec_module` 里照旧 `m.set_global("Point", ..)`
 - **`__repr__` 要手写。** 原来没有定义 `__repr__` 的类，`repr` 是 `<app.Point object at 0x..>`，`#[pyclass]` 默认的也类似，但原来用 `@dataclass` 生成的 `Point(x=1, y=2)` 要手写 `__repr__` 照原样格式化（字段顺序、`repr()` 每个字段、嵌套对象调用它们自己的 `repr`）。`__eq__`、`__hash__`、排序这些 dataclass 生成的方法同样要手写，`__eq__` 遇到别的类型返回 `NotImplemented`
+
+### 被多个模块共享的类（M12）
+
+上面的第二步假定读写实例属性的都是类自己的方法。真实项目里不一定：M10 改写 skime 时，`Context`（`skime/ctx.py`）的 `ip`、`stack`、`env`、`parent`、`bytecode` 被 `insns.py`、`invoke.py`、`call_cc.py` 等模块直接读写，`push`、`pop` 也在这些模块里调用。改写这样的类之前，先用属性读写索引列出谁读写了它的哪些属性
+
+```
+steelix attrs -m skime --root . --class Context     # 一个类，文本
+steelix attrs app.py --json                         # 所有类，JSON
+```
+
+选择程序的参数和 `steelix transpile` 一样（入口脚本或 `-m`，`--root`、`--include`、`--exclude`），分析的是同一组模块，不生成 crate。每个类列出子类、在类的方法以外读写它的函数个数和模块、在哪里构造它，然后是每个实例属性的每次读、写、增量赋值和 `del`（`file:line`、所在函数、接收者），以及类属性、在实例或类上用到的方法和动态访问
+
+```
+class shapes.Point  (shapes.py:7, top level)
+  subclasses: shapes.Point3 (shapes.py:31)
+  used outside its methods by 5 functions in 2 modules: app, shapes
+  instance attributes
+    label  (not in __static_attributes__)
+      write  app.py:16  origin  o.label  [inferred: o = P(..)]
+    x
+      write      shapes.py:12  Point.__init__  self.x
+      augmented  shapes.py:21  Point.move      self.x
+      read       shapes.py:37  Point3.flat     self.x
+      augmented  app.py:10     scale           p.x  [inferred: p: P]
+```
+
+只有接收者的类能保守地确定时，访问才记在这个类下面（`attrs.py`）
+
+- 方法的 `self`（类体里函数的第一个参数，和 `__static_attributes__` 的规则一样，staticmethod 除外）、classmethod 的 `cls`，包括没有重新绑定它们的嵌套函数和 lambda。子类的方法读继承来的属性时记在定义它的基类下面
+- 注解为这个类的参数（`p: Point`、`p: "Point"`、`Point | None`、`Optional[Point]`），以及每个绑定都是 `x = Point(..)` 或 `x: Point = ..` 的局部变量。注解不强制，这两种标成 inferred
+- 类对象本身：`Point.count`、`cls.count`、`type(self).count`、`self.__class__.count`
+- 名字只有在模块只绑定它一次（`class` 语句或 `from .. import`，可以经过 re-export），模块没有 `import *`、`globals()` 这类看不见的绑定，别的模块也没有给它赋值时，才认为是这个类。局部变量还有别的绑定、被嵌套函数 `nonlocal` 改写，都当作未知
+
+其余接收者的类未知。属性名是某个项目类的实例属性的访问单独列在一节里，方法名同样另列一节，审查时只需要看这两节，不用 grep 整个项目。skime 的 `insns.py` 里 `ctx` 是没有注解的参数，`ctx.ip`、`ctx.push(..)` 都在这里，结果见 `m10-skime.md` 第 6 节。动态访问（名字不是字面量的 `getattr`/`setattr`/`hasattr`/`delattr`、`vars(x)`、`x.__dict__`、`object.__setattr__`）在接收者已知时记在类下面，否则按函数列出。`getattr(p, "x")` 这样的字面量名字按普通的读写处理。没有做的推断：属性的类型（`self.ctx.ip` 里 `self.ctx` 的类）、返回值的类型（`ctx = proc.ctx.clone()`），项目以外的代码（测试、插件）也看不到。
+
+有了这张表，共享的类按下面的顺序改写
+
+1. **用原生函数取代类的用途时，改写入口，保留类。** M10 的读取器只改写了 `parse`，逻辑所在的 `Parser` 类仍是生成的代码。索引显示 `Parser` 只在 `parse` 里构造，方法以外没有读写方，就能确定改写后 skime 自己不再用它，留给直接使用它的 Python 代码
+2. **共享的状态先停在第一步。** 属性留在 `__dict__` 里，各个模块的读写方各自改成对原来的 Python 对象的具体操作，按索引逐个改。只要属性名和值的类型不变，没改写的读写方不受影响
+
+    ```rust
+    // op_push_local: `ctx.push(loc)`, inlined (next section)
+    let stack = ctx.getattr(intern!(py, "stack"))?.cast_into::<PyList>()?;
+    stack.append(loc)?;
+    ```
+
+3. **索引里的读写方全部改写之后，再做第二步。** 包括未知接收者那两节里确实是这个类的访问。改写前可以让 steelix 写一份 `#[pyclass]` 草稿
+
+```
+steelix attrs -m skime --root . --pyclass skime.ctx.Context > context.rs
+```
+
+草稿只是给人的建议：不接入构建，不自动生成，函数体都是 `todo!()`（不自动升级的原因见 §10）。文件开头列出索引发现的会阻碍或增加升级难度的事实：项目里的子类、object 以外的基类、metaclass、类装饰器（dataclass 等）、类体里 def 和常量赋值以外的逻辑、`__getattr__` 这类 hook、`__slots__`、动态访问和 `__dict__`/`vars` 的使用、被重新赋值的类属性、在类的方法以外赋值的属性，以及类的方法以外的读写方和同名的未知接收者。后面是结构体，字段来自实例属性（`__static_attributes__`、dataclass 的字段、`__slots__` 和在别处赋值的属性），类型是 `Py<PyAny>` 加 TODO，注释写明哪些函数读写它；`#[pymethods]` 里每个方法一个桩，带 Python 的签名和它取代的生成的 fn（`context::push` in `src/skime/ctx.rs`），`__init__` 变成 `#[new]`（注释列出构造它的地方），property、staticmethod、classmethod 换成对应的属性；dataclass 另有 `__init__`、`__repr__`、`__eq__` 的桩，常量类属性是 `#[classattr]`，最后是 pickle 和 `copy` 的提醒
+
+```rust
+// What blocks or complicates the upgrade:
+// - names of its attributes are also used through receivers of unknown class: ..
+//   `ip` 30x in skime.call_cc, skime.insns; ..
+// - names of its methods are called through receivers of unknown class: `clone`,
+//   `insert`, `pop`, `pop_n`, `push`, `top` (inlining them in the callers changes
+//   what a subclass override does).
+
+#[pyclass(module = "skime.ctx", name = "Context")]
+pub struct Context {
+    /// `self.ip`, assigned in Context.__init__, Context.clone, read in Context.clone,
+    /// Context.__str__.
+    // TODO: choose the Rust type (and `#[pyo3(get, set)]` if Python reads it).
+    ip: Py<PyAny>,
+    ..
+}
+
+#[pymethods]
+impl Context {
+    /// `def push(self, val)` (line 27), generated as `context::push` in src/skime/ctx.rs.
+    fn push<'py>(&self, py: Python<'py>, val: &Bound<'py, PyAny>) -> PyResult<Py<PyAny>> {
+        todo!()
+    }
+}
+```
+
+桩本身能通过 PyO3 的类型检查（`tests/test_attrs.py` 检查这一点），可以从能编译的代码开始，逐个换成真正的字段类型和方法体。
+
+### 适配层构造别的模块的类、抛项目自己的异常（M12）
+
+- **构造别的模块的类。** 类是 globals 里的一个名字，名字是这个模块 import 它时的别名：skime 的 `parser.py` 写的是 `from ..types.pair import Pair as pair`，所以是 `m.global("pair")?.call1((car, cdr))?`，不是 `"Pair"`。照着 `exec_module` 里的 import 或者同一个文件里生成的代码写。模块没有 import 这个类时用 `py.import("skime.types.pair")?.getattr("Pair")?`，转换过的模块 import 到的就是原生模块。要构造很多个时在适配层开头取一次，放进一个结构体里传给转换代码（M10 的 `Objects::new(m)?`），不要放进 `static`，`importlib.reload` 和测试替换模块属性之后会过期（§7）
+
+    ```rust
+    struct Objects<'py> {
+        pair: Bound<'py, PyAny>,
+        symbol: Bound<'py, PyAny>,
+    }
+
+    impl<'py> Objects<'py> {
+        fn new(m: &rt::Module<'py>) -> PyResult<Self> {
+            Ok(Self { pair: m.global("pair")?, symbol: m.global("sym")? })
+        }
+    }
+    ```
+
+- **抛项目自己的异常类。** `m.error("ParseError", (message,))` 按 globals 里的名字（同样是 import 的别名）构造异常，返回 `PyErr`，可以直接用在 `map_err` 里。查找、构造失败或者得到的不是异常时，返回的就是那个错误，和 `raise` 一样。异常的 traceback 由它经过的原生帧补上，适配层保留 `rt::frame!` 时有这一帧。它不设置 `__context__`，在 `except` 块里抛异常时仍用生成代码的写法 `frame.raise(m.global("ParseError")?.call1((..,))?)`
+
+    ```rust
+    let datum = native::parse(&text).map_err(|err| match err {
+        native::Error::Empty => m.error("ParseError", ("Nothing to be parsed.",)),
+        native::Error::Syntax { line, message } => m.error("ParseError", (format!("{name}:{line} {message}"),)),
+        native::Error::NotAFloat(text) => PyValueError::new_err(format!("could not convert string to float: '{text}'")),
+    })?;
+    ```
+
+    不用这个 helper 的写法是 `PyErr::from_value`，查找失败的错误要另外处理，M10 的读取器就自己写了这样一个函数
+
+    ```rust
+    fn parse_error(m: &rt::Module<'_>, message: String) -> PyErr {
+        match m.global("ParseError").and_then(|class| class.call1((message,))) {
+            Ok(exception) => PyErr::from_value(exception),
+            Err(err) => err,
+        }
+    }
+    ```
+
+    内置的异常照常用 `PyValueError::new_err(..)`
+
+### 内联别的类的方法（M12）
+
+生成代码里 `ctx.push(x)` 总是动态调用（§10）。M10 改写主循环时把 `Context` 的 `push`、`pop`、`top` 内联成对 `ctx.stack` 这个 list 的操作，省掉了 Python 的方法调用，代价是下面这些不再成立，每一条都要确认并写进注释
+
+- **子类覆盖。** `Context` 的子类重写 `push` 时，内联的代码不调用它。索引的 `subclasses` 列出项目里的子类（`Context` 没有），项目以外的子类看不到
+- **替换方法。** `Context.push = ..`、`mock.patch.object(Context, "push", ..)` 对内联的代码不起作用，和 §12 里跨模块替换函数一样。项目里对类属性的赋值索引会列出
+- **实例上的同名属性和 hook。** Python 的 `ctx.push` 先查实例的 `__dict__`，还经过 `__getattribute__`、`__getattr__`
+- **方法依赖的属性。** 内联代码直接读写 `stack`，这个属性名和它的类型从此也是两边的契约，改 `Context` 时要同时改这里。索引会把这些访问列在未知接收者那一节
+- **帧和异常。** 空栈时 `list.pop` 抛的 `IndexError: pop from empty list` 和原来一样，但 traceback 里少了 `Context.pop` 那一帧
+
+接收者不一定是这个类时（`ctx` 也可能是子类或者别的对象），可以只对确切的类型走内联的路径，其余照旧动态调用，语义就和原来一样
+
+```rust
+let context = m.global("Context")?;
+if ctx.get_type().is(&context) {
+    push(ctx, &loc)?; // inlined `Context.push`
+} else {
+    ctx.call_method1(intern!(py, "push"), (&loc,))?;
+}
+```
+
+### Python 源码本身是生成的（M12）
+
+skime 的 `insns.py`、`iset.py` 由 `iset_gen.py` 从 `iset.yml` 生成（文件开头写着不要手改），改写后 `insns/native.rs` 里的 `Insn` 枚举是第二份指令表。原则是只保留一个来源，其余的由它生成或者和它对照
+
+1. 最好让原来的生成器同时写出 Rust：`iset_gen.py` 再生成一个 `src/skime/insns/table.rs`（枚举、`from_opcode`、标签），`native.rs` 用 `mod table;` 引入，开头同样写明由谁生成。改指令只改 `iset.yml`
+2. 改不了生成器时，加一个两份表不一致就失败的检查，例如 `native.rs` 里读同一份 `iset.yml` 的单元测试
+
+    ```rust
+    #[test]
+    fn opcodes_follow_iset_yml() {
+        // The project is next to the crate (`steelix transpile -m skime -o out`).
+        let yml = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../skime/iset.yml"));
+        let names: Vec<&str> = yml.lines().filter_map(|l| l.trim().strip_prefix("name: ")).collect();
+        let native: Vec<&str> = (0..names.len()).map(|op| Insn::from_opcode(op).unwrap().name()).collect();
+        assert_eq!(native, names);
+    }
+    ```
+
+3. 改写过的模块文件由人维护（下一节）。生成的 Python 变了（`iset.yml` 加了指令）时，把它重新转换到别的目录，和改写过的文件对照合并，第 2 条的检查会提醒这一步
 
 ### 改写之后不再成立的东西
 

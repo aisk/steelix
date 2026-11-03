@@ -1,0 +1,173 @@
+class skime.ctx.Context  (skime/ctx.py:1, top level)
+  constructed in: Context.clone (skime/ctx.py:22), Form.eval (skime/form.py:28), invoke (skime/invoke.py:41), VM.__init__ (skime/vm.py:25)
+  instance attributes
+    bytecode
+      write  skime/ctx.py:15  Context.__init__  self.bytecode
+      write  skime/ctx.py:17  Context.__init__  self.bytecode
+    env
+      write  skime/ctx.py:4   Context.__init__  self.env
+      read   skime/ctx.py:22  Context.clone     self.env
+    form
+      write  skime/ctx.py:3   Context.__init__  self.form
+      read   skime/ctx.py:14  Context.__init__  self.form
+      read   skime/ctx.py:22  Context.clone     self.form
+    ip
+      write  skime/ctx.py:13  Context.__init__  self.ip
+      read   skime/ctx.py:23  Context.clone     self.ip
+      write  skime/ctx.py:23  Context.clone     ctx.ip  [inferred: ctx = Context(..)]
+      read   skime/ctx.py:59  Context.__str__   self.ip
+    parent
+      write  skime/ctx.py:5   Context.__init__  self.parent
+      read   skime/ctx.py:22  Context.clone     self.parent
+    stack
+      write  skime/ctx.py:18  Context.__init__  self.stack
+      read   skime/ctx.py:24  Context.clone     self.stack
+      write  skime/ctx.py:24  Context.clone     ctx.stack  [inferred: ctx = Context(..)]
+      read   skime/ctx.py:29  Context.push      self.stack
+      read   skime/ctx.py:33  Context.pop       self.stack
+      read   skime/ctx.py:38  Context.pop_n     self.stack
+      read   skime/ctx.py:42  Context.top       self.stack
+      read   skime/ctx.py:49  Context.insert    self.stack
+      read   skime/ctx.py:56  Context.insert_n  self.stack
+      read   skime/ctx.py:59  Context.__str__   self.stack
+    vm
+      write  skime/ctx.py:7   Context.__init__  self.vm
+      write  skime/ctx.py:9   Context.__init__  self.vm
+      read   skime/ctx.py:22  Context.clone     self.vm
+
+instance attributes of project classes used through receivers of unknown class
+  bytecode  (skime.ctx.Context, skime.form.Form, skime.proc.ProcedureTemplate, skime.proc.Procedure; 6 accesses in 5 functions: skime.compiler.disasm, skime.ctx, skime.insns, skime.proc)
+    read  skime/compiler/disasm.py:5  disasm              form.bytecode
+    read  skime/ctx.py:15             Context.__init__    form.bytecode
+    read  skime/insns.py:274          get_param           ctx.bytecode
+    read  skime/insns.py:278          run                 ctx.bytecode
+    read  skime/insns.py:279          run                 ctx.bytecode
+    read  skime/proc.py:35            Procedure.__init__  template.bytecode
+  env  (skime.compiler.builder.Builder, skime.ctx.Context, skime.env.Location, skime.form.Form, skime.macro.SyntaxRule, skime.macro.ClosureFactory, skime.proc.ProcedureTemplate, skime.proc.Procedure, skime.vm.VM; 22 accesses in 15 functions: skime.compiler.compiler, skime.compiler.disasm, skime.env, skime.form, skime.insns, skime.invoke, skime.proc)
+    read  skime/compiler/compiler.py:70   Compiler.get_macro               loc.env
+    read  skime/compiler/compiler.py:179  Compiler.generate_expr           bdr.env
+    read  skime/compiler/compiler.py:180  Compiler.generate_expr           bdr.env
+    read  skime/compiler/compiler.py:191  Compiler.generate_expr           bdr.env
+    read  skime/compiler/compiler.py:201  Compiler.generate_expr           bdr.env
+    read  skime/compiler/compiler.py:762  Compiler.generate_define_syntax  bdr.env
+    read  skime/compiler/compiler.py:763  Compiler.generate_define_syntax  bdr.env
+    read  skime/compiler/disasm.py:6      disasm                           form.env
+    read  skime/env.py:18                 Location.__eq__                  other.env
+    read  skime/form.py:18                Form.__init__                    builder.env
+    read  skime/insns.py:50               op_push_local                    ctx.env
+    read  skime/insns.py:58               op_set_local                     ctx.env
+    read  skime/insns.py:66               op_push_local_depth              ctx.env
+    read  skime/insns.py:80               op_set_local_depth               ctx.env
+    read  skime/insns.py:151              op_fix_lexical                   ctx.env
+    read  skime/insns.py:153              op_fix_lexical                   ctx.env
+    read  skime/insns.py:160              op_fix_lexical_pop               ctx.env
+    read  skime/insns.py:167              op_fix_lexical_depth             ctx.env
+    read  skime/invoke.py:41              invoke                           proc.env
+    read  skime/invoke.py:43              invoke                           ctx.env
+    read  skime/invoke.py:48              invoke                           ctx.env
+    read  skime/proc.py:13                ProcedureTemplate.__init__       builder.env
+  form  (skime.ctx.Context, skime.macro.DynamicClosure; 3 accesses in 3 functions: skime.compiler.compiler, skime.insns)
+    write  skime/compiler/compiler.py:205  Compiler.generate_expr  dc.form
+    read   skime/insns.py:90               op_push_literal         ctx.form
+    read   skime/insns.py:181              op_dynamic_eval         dc.form
+  ip  (skime.compiler.builder.Builder, skime.ctx.Context; 30 accesses in 27 functions: skime.call_cc, skime.insns)
+    augmented  skime/call_cc.py:4  Continuation.__init__       self.ctx.ip
+    augmented  skime/insns.py:22   op_call                     ctx.ip
+    augmented  skime/insns.py:30   op_tail_call                ctx.ip
+    augmented  skime/insns.py:39   op_call_cc                  ctx.ip
+    augmented  skime/insns.py:45   op_pop                      ctx.ip
+    augmented  skime/insns.py:52   op_push_local               ctx.ip
+    augmented  skime/insns.py:59   op_set_local                ctx.ip
+    augmented  skime/insns.py:72   op_push_local_depth         ctx.ip
+    augmented  skime/insns.py:85   op_set_local_depth          ctx.ip
+    augmented  skime/insns.py:92   op_push_literal             ctx.ip
+    augmented  skime/insns.py:97   op_push_0                   ctx.ip
+    augmented  skime/insns.py:102  op_push_1                   ctx.ip
+    augmented  skime/insns.py:107  op_push_nil                 ctx.ip
+    augmented  skime/insns.py:112  op_push_true                ctx.ip
+    augmented  skime/insns.py:117  op_push_false               ctx.ip
+    augmented  skime/insns.py:122  op_dup                      ctx.ip
+    write      skime/insns.py:127  op_goto                     ctx.ip
+    write      skime/insns.py:134  op_goto_if_not_false        ctx.ip
+    augmented  skime/insns.py:136  op_goto_if_not_false        ctx.ip
+    write      skime/insns.py:143  op_goto_if_false            ctx.ip
+    augmented  skime/insns.py:145  op_goto_if_false            ctx.ip
+    augmented  skime/insns.py:155  op_fix_lexical              ctx.ip
+    augmented  skime/insns.py:161  op_fix_lexical_pop          ctx.ip
+    augmented  skime/insns.py:176  op_fix_lexical_depth        ctx.ip
+    augmented  skime/insns.py:184  op_dynamic_eval             ctx.ip
+    augmented  skime/insns.py:194  op_dynamic_set_local        ctx.ip
+    augmented  skime/insns.py:208  op_dynamic_set_local_depth  ctx.ip
+    read       skime/insns.py:274  get_param                   ctx.ip
+    read       skime/insns.py:278  run                         ctx.ip
+    read       skime/insns.py:279  run                         ctx.ip
+  parent  (skime.ctx.Context, skime.env.Environment; 12 accesses in 12 functions: skime.compiler.builder, skime.compiler.compiler, skime.compiler.disasm, skime.env, skime.insns, skime.invoke, skime.proc)
+    read   skime/compiler/builder.py:165  Builder.find_local_depth     env.parent
+    read   skime/compiler/compiler.py:61  Compiler.calc_env_distance   descendant.parent
+    read   skime/compiler/disasm.py:24    disasm                       penv.parent
+    read   skime/env.py:131               Environment.lookup_location  env.parent
+    read   skime/insns.py:12              op_ret                       ctx.parent
+    read   skime/insns.py:68              op_push_local_depth          penv.parent
+    read   skime/insns.py:82              op_set_local_depth           penv.parent
+    read   skime/insns.py:169             op_fix_lexical_depth         env.parent
+    read   skime/insns.py:205             op_dynamic_set_local_depth   env.parent
+    read   skime/insns.py:292             make_call                    ctx.parent
+    write  skime/invoke.py:60             invoke                       ctx.parent
+    write  skime/proc.py:25               ProcedureTemplate.close      env.parent
+  vm  (skime.ctx.Context; 3 accesses in 3 functions: skime.ctx, skime.insns)
+    read  skime/ctx.py:7      Context.__init__  parent.vm
+    read  skime/insns.py:183  op_dynamic_eval   ctx.vm
+    read  skime/insns.py:296  make_call         ctx.vm
+
+methods of project classes used through receivers of unknown class
+  clone  (skime.ctx.Context; 2 accesses in 2 functions: skime.call_cc, skime.invoke)
+    read  skime/call_cc.py:3  Continuation.__init__  ctx.clone
+    read  skime/invoke.py:58  invoke                 proc.ctx.clone
+  insert  (skime.ctx.Context; 2 accesses in 2 functions: skime.ctx, skime.insns)
+    read  skime/ctx.py:49    Context.insert  self.stack.insert
+    read  skime/insns.py:36  op_call_cc      ctx.insert
+  pop  (skime.compiler.parser.Parser, skime.ctx.Context; 19 accesses in 17 functions: skime.compiler.parser, skime.ctx, skime.insns, skime.macro)
+    read  skime/compiler/parser.py:152  Parser.parse_list                elems.pop
+    read  skime/ctx.py:33               Context.pop                      self.stack.pop
+    read  skime/insns.py:13             op_ret                           ctx.pop
+    read  skime/insns.py:44             op_pop                           ctx.pop
+    read  skime/insns.py:57             op_set_local                     ctx.pop
+    read  skime/insns.py:78             op_set_local_depth               ctx.pop
+    read  skime/insns.py:132            op_goto_if_not_false             ctx.pop
+    read  skime/insns.py:141            op_goto_if_false                 ctx.pop
+    read  skime/insns.py:149            op_fix_lexical                   ctx.pop
+    read  skime/insns.py:159            op_fix_lexical_pop               ctx.pop
+    read  skime/insns.py:166            op_fix_lexical_depth             ctx.pop
+    read  skime/insns.py:180            op_dynamic_eval                  ctx.pop
+    read  skime/insns.py:189            op_dynamic_set_local             ctx.pop
+    read  skime/insns.py:190            op_dynamic_set_local             ctx.pop
+    read  skime/insns.py:200            op_dynamic_set_local_depth       ctx.pop
+    read  skime/insns.py:201            op_dynamic_set_local_depth       ctx.pop
+    read  skime/insns.py:283            run                              ctx.pop
+    read  skime/insns.py:287            make_call                        ctx.pop
+    read  skime/macro.py:578            SequenceTemplate.expand_flatten  idx.pop
+  pop_n  (skime.ctx.Context; 2 accesses in 2 functions: skime.call_cc, skime.insns)
+    read  skime/call_cc.py:6  Continuation.__init__  self.ctx.pop_n
+    read  skime/insns.py:289  make_call              ctx.pop_n
+  push  (skime.ctx.Context; 15 accesses in 15 functions: skime.insns, skime.invoke)
+    read  skime/insns.py:14   op_ret                pctx.push
+    read  skime/insns.py:51   op_push_local         ctx.push
+    read  skime/insns.py:71   op_push_local_depth   ctx.push
+    read  skime/insns.py:91   op_push_literal       ctx.push
+    read  skime/insns.py:96   op_push_0             ctx.push
+    read  skime/insns.py:101  op_push_1             ctx.push
+    read  skime/insns.py:106  op_push_nil           ctx.push
+    read  skime/insns.py:111  op_push_true          ctx.push
+    read  skime/insns.py:116  op_push_false         ctx.push
+    read  skime/insns.py:121  op_dup                ctx.push
+    read  skime/insns.py:154  op_fix_lexical        ctx.push
+    read  skime/insns.py:175  op_fix_lexical_depth  ctx.push
+    read  skime/insns.py:183  op_dynamic_eval       ctx.push
+    read  skime/insns.py:299  make_call             parent.push
+    read  skime/invoke.py:59  invoke                ctx.push
+  top  (skime.ctx.Context; 2 accesses in 2 functions: skime.insns)
+    read  skime/insns.py:121  op_dup     ctx.top
+    read  skime/insns.py:288  make_call  ctx.top
+
+dynamic access through receivers of unknown class
+  none

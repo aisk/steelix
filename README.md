@@ -118,6 +118,7 @@ steelix transpile -m pkg --root src/ -o out/   # the same for `python -m pkg`
 steelix build app.py                           # transpile, build and assemble a relocatable dist/app/
 steelix test out/ -- tests/                    # run the project's pytest suite against the native modules
 steelix coverage app.py                        # how much of the code becomes Rust
+steelix attrs app.py --class Point             # who reads and writes the attributes of a class
 ```
 
 When building a generated crate yourself, point PyO3 at the interpreter whose packages the program uses: `PYO3_PYTHON=/path/to/venv/bin/python cargo build`.
@@ -131,6 +132,8 @@ Each generated function keeps its Python calling convention, so it can be rewrit
 Python containers can stay as they are at first (a `PyDict` is fine in Rust code), so the first step only changes the logic, not the data model.
 
 The project's own tests check each step. `steelix test out/ -- tests/` builds the crate and runs `python -m pytest tests/` with the generated executable acting as the Python interpreter: every import of a transpiled module gets the native code, wherever the project directory is, and the run fails if a transpiled module was imported from its Python source instead. pytest comes from the environment of the interpreter the crate is built with (`--python`, default `$PYO3_PYTHON`).
+
+Classes are rewritten the same way, method by method, with the instance state left in `__dict__`. Turning a class into a `#[pyclass]` struct has to wait until every function that reads or writes its attributes is rewritten, and in real projects those are often spread over several modules. `steelix attrs app.py` lists, for every class, each attribute and the functions that read, write or delete it (file and line), the accesses whose receiver's class it can not tell but whose name matches, and dynamic access such as `setattr` with a computed name. `steelix attrs app.py --pyclass pkg.mod.Point` prints a draft `#[pyclass]` for one class, with fields, method stubs and a header listing what complicates the change (subclasses, metaclasses, decorators, class body logic, dynamic access, reassigned class attributes). The draft is advice, never part of the build.
 
 `--mode ext` builds a PyO3 extension module instead of an executable, for publishing a transpiled library. Install a package as `pkg/__init__.so` so that `python -m pkg` works.
 

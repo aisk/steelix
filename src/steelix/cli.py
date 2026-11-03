@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="arguments for pytest (after `--` if they could be taken for steelix's)",
     )
 
+    attrs = sub.add_parser(
+        "attrs",
+        help="list who reads and writes the attributes of the project's classes, or draft "
+        "a #[pyclass] for one of them",
+        description="A static index of the attributes of every class in the program's "
+        "modules: which functions read, write, augment or delete each instance attribute "
+        "(file:line), accesses through receivers of unknown class whose name matches, and "
+        "dynamic access (getattr/setattr with computed names, vars(), __dict__). Use it "
+        "before rewriting a class that several modules share (design §15).",
+    )
+    add_discovery_arguments(attrs)
+    attrs.add_argument(
+        "--class",
+        dest="classes",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="only report this class (`Point`, `shapes.Point` or `pkg.shapes.Point`); repeatable",
+    )
+    attrs.add_argument("--json", action="store_true", help="print the index as JSON")
+    attrs.add_argument(
+        "--pyclass",
+        metavar="NAME",
+        default=None,
+        help="print a draft #[pyclass] for this class instead, with what blocks or "
+        "complicates the upgrade (advice, never part of the build)",
+    )
+    attrs.add_argument(
+        "-o", "--output", type=Path, default=None, help="write to this file instead of stdout"
+    )
+
     coverage = sub.add_parser(
         "coverage",
         help="report what is native and what stays Python, without writing crates",
@@ -145,6 +177,30 @@ def build_parser() -> argparse.ArgumentParser:
 def add_program_arguments(parser: argparse.ArgumentParser) -> None:
     """The arguments that select and transpile a program, shared by `transpile`
     and `build`."""
+    add_discovery_arguments(parser)
+    parser.add_argument(
+        "--no-fallback",
+        dest="fallback",
+        action="store_false",
+        help="fail on unsupported constructs instead of keeping them as Python source",
+    )
+    parser.add_argument(
+        "--traceback-lines",
+        action="store_true",
+        help="mark the line of every statement that may raise, so tracebacks of native "
+        "frames show statement lines instead of the def line (more verbose Rust)",
+    )
+    parser.add_argument(
+        "--runtime-path",
+        type=Path,
+        default=None,
+        help="path of the steelix-runtime crate (default: the one in this source checkout)",
+    )
+
+
+def add_discovery_arguments(parser: argparse.ArgumentParser) -> None:
+    """The arguments that select a program and the project modules it
+    imports, shared by `transpile`, `build` and `attrs`."""
     parser.add_argument(
         "input",
         type=Path,
@@ -180,24 +236,6 @@ def add_program_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="MODULE",
         help="leave this module (and its submodules) as Python source; repeatable",
     )
-    parser.add_argument(
-        "--no-fallback",
-        dest="fallback",
-        action="store_false",
-        help="fail on unsupported constructs instead of keeping them as Python source",
-    )
-    parser.add_argument(
-        "--traceback-lines",
-        action="store_true",
-        help="mark the line of every statement that may raise, so tracebacks of native "
-        "frames show statement lines instead of the def line (more verbose Rust)",
-    )
-    parser.add_argument(
-        "--runtime-path",
-        type=Path,
-        default=None,
-        help="path of the steelix-runtime crate (default: the one in this source checkout)",
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -210,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
         return test(args)
     if args.command == "coverage":
         return coverage(args)
+    if args.command == "attrs":
+        return attrs(args)
     return 0
 
 
@@ -262,6 +302,28 @@ def emit_program(args: argparse.Namespace, mode: str, output: Path | None):
         emit_project,
         project_name,
     )
+    from steelix.project import ProjectError
+
+    runtime = args.runtime_path or default_runtime_path()
+    options = CrateOptions(
+        mode=Mode(mode),
+        runtime_path=runtime.resolve() if runtime else None,
+        fallback=args.fallback,
+        traceback_lines=args.traceback_lines,
+    )
+    project = discover_project(args, run_main=options.mode is Mode.BIN)
+    try:
+        crate = output if output is not None else args.build_dir / project_name(project)
+        lowered = emit_project(project, crate, options)
+    except ProjectError as err:
+        raise CommandError(str(err), 2) from err
+    except (UnsupportedError, SyntaxError, UnicodeDecodeError, OSError) as err:
+        raise CommandError(str(err)) from err
+    return project, crate, lowered
+
+
+def discover_project(args: argparse.Namespace, run_main: bool = True):
+    """The project selected by the discovery arguments."""
     from steelix.project import ProjectError, find_project
 
     if (args.input is None) == (args.module is None):
@@ -270,29 +332,61 @@ def emit_program(args: argparse.Namespace, mode: str, output: Path | None):
         raise CommandError(
             "pass the entry script, or -m PACKAGE to run a package like `python -m`", 2
         )
-    runtime = args.runtime_path or default_runtime_path()
-    options = CrateOptions(
-        mode=Mode(mode),
-        runtime_path=runtime.resolve() if runtime else None,
-        fallback=args.fallback,
-        traceback_lines=args.traceback_lines,
-    )
     try:
-        project = find_project(
+        return find_project(
             args.input,
             module=args.module,
             root=args.root,
             include=args.include,
             exclude=args.exclude,
-            run_main=options.mode is Mode.BIN,
+            run_main=run_main,
         )
-        crate = output if output is not None else args.build_dir / project_name(project)
-        lowered = emit_project(project, crate, options)
     except ProjectError as err:
         raise CommandError(str(err), 2) from err
-    except (UnsupportedError, SyntaxError, UnicodeDecodeError, OSError) as err:
+    except (SyntaxError, UnicodeDecodeError, OSError) as err:
         raise CommandError(str(err)) from err
-    return project, crate, lowered
+
+
+def attrs(args: argparse.Namespace) -> int:
+    """`steelix attrs`: the attribute index, or a `#[pyclass]` draft (design §15)."""
+    from steelix.attrs import build_index, format_text, select, to_json
+    from steelix.pyclass import draft
+
+    try:
+        project = discover_project(args)
+        index = build_index(project)
+        classes = select(index, args.classes) if args.classes else None
+        if args.pyclass is not None:
+            (cls,) = select(index, [args.pyclass])
+            words = ["steelix", "attrs", *selection_arguments(args), "--pyclass", cls.full_name]
+            text = draft(index, cls, shlex.join(words))
+        elif args.json:
+            text = json.dumps(to_json(index, classes), indent=2) + "\n"
+        else:
+            text = format_text(index, classes)
+    except LookupError as err:
+        print(f"steelix: {err.args[0]}", file=sys.stderr)
+        return 2
+    except CommandError as err:
+        print(f"steelix: {err}", file=sys.stderr)
+        return err.code
+    if args.output is not None:
+        args.output.write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def selection_arguments(args: argparse.Namespace) -> list[str]:
+    """The discovery arguments as given on the command line."""
+    words = [str(args.input)] if args.input is not None else ["-m", args.module]
+    if args.root is not None:
+        words += ["--root", str(args.root)]
+    for item in args.include:
+        words += ["--include", item]
+    for item in args.exclude:
+        words += ["--exclude", item]
+    return words
 
 
 def print_report(args: argparse.Namespace, project, lowered: list) -> list:
