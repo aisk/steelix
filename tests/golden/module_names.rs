@@ -54,11 +54,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "__doc__",
             "Module level functions named like the locals of the generated module code.",
         )?;
-        rt::def!(m, m_(x), name = "m")?;
-        rt::def!(m, py_(), name = "py")?;
+        rt::def!(m, m_ as "m"(x))?;
+        rt::def!(m, py_ as "py"())?;
         rt::def!(m, globals(a, b = 2))?;
-        rt::def!(m, exec_module_(), name = "exec_module")?;
-        rt::def!(m, module_(x), name = "module")?;
+        rt::def!(m, exec_module_ as "exec_module"())?;
+        rt::def!(m, module_ as "module"(x))?;
         rt::def!(m, match_length(text))?;
         m.global("print")?.call1((
             m.global("m")?.call1((1,))?,

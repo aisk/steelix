@@ -167,10 +167,9 @@ pub mod json_encoder {
             )?;
             ns.set("item_separator", ", ")?;
             ns.set("key_separator", ": ")?;
-            ns.set("__init__", rt::function!(
+            rt::def!(
                 ns,
                 __init__(slf as "self", *, skipkeys = false, ensure_ascii = true, check_circular = true, allow_nan = true, sort_keys = false, indent = py.None(), separators = py.None(), default = py.None()),
-                qualname = "JSONEncoder.__init__",
                 doc = "Constructor for JSONEncoder, with sensible defaults.\n\
                     \n\
                     If skipkeys is false, then it is a TypeError to attempt\n\
@@ -211,61 +210,49 @@ pub mod json_encoder {
                     that can't otherwise be serialized.  It should return a JSON\n\
                     encodable version of the object or raise a ``TypeError``.\n\
                     \n"
-            )?)?;
-            ns.set(
-                "default",
-                rt::function!(
-                    ns,
-                    default(slf as "self", o),
-                    qualname = "JSONEncoder.default",
-                    doc = "Implement this method in a subclass such that it returns\n\
-                        a serializable object for ``o``, or calls the base implementation\n\
-                        (to raise a ``TypeError``).\n\
-                        \n\
-                        For example, to support arbitrary iterators, you could\n\
-                        implement default like this::\n\
-                        \n\
-                        \x20   def default(self, o):\n\
-                        \x20       try:\n\
-                        \x20           iterable = iter(o)\n\
-                        \x20       except TypeError:\n\
-                        \x20           pass\n\
-                        \x20       else:\n\
-                        \x20           return list(iterable)\n\
-                        \x20       # Let the base class default method raise the TypeError\n\
-                        \x20       return super().default(o)\n\
-                        \n"
-                )?,
             )?;
-            ns.set(
-                "encode",
-                rt::function!(
-                    ns,
-                    encode(slf as "self", o),
-                    qualname = "JSONEncoder.encode",
-                    doc = "Return a JSON string representation of a Python data structure.\n\
-                        \n\
-                        >>> from json.encoder import JSONEncoder\n\
-                        >>> JSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\n\
-                        '{\"foo\": [\"bar\", \"baz\"]}'\n\
-                        \n"
-                )?,
+            rt::def!(
+                ns,
+                default(slf as "self", o),
+                doc = "Implement this method in a subclass such that it returns\n\
+                    a serializable object for ``o``, or calls the base implementation\n\
+                    (to raise a ``TypeError``).\n\
+                    \n\
+                    For example, to support arbitrary iterators, you could\n\
+                    implement default like this::\n\
+                    \n\
+                    \x20   def default(self, o):\n\
+                    \x20       try:\n\
+                    \x20           iterable = iter(o)\n\
+                    \x20       except TypeError:\n\
+                    \x20           pass\n\
+                    \x20       else:\n\
+                    \x20           return list(iterable)\n\
+                    \x20       # Let the base class default method raise the TypeError\n\
+                    \x20       return super().default(o)\n\
+                    \n"
             )?;
-            ns.set(
-                "iterencode",
-                rt::function!(
-                    ns,
-                    iterencode(slf as "self", o, _one_shot = false),
-                    qualname = "JSONEncoder.iterencode",
-                    doc = "Encode the given object and yield each string\n\
-                        representation as available.\n\
-                        \n\
-                        For example::\n\
-                        \n\
-                        \x20   for chunk in JSONEncoder().iterencode(bigobject):\n\
-                        \x20       mysocket.write(chunk)\n\
-                        \n"
-                )?,
+            rt::def!(
+                ns,
+                encode(slf as "self", o),
+                doc = "Return a JSON string representation of a Python data structure.\n\
+                    \n\
+                    >>> from json.encoder import JSONEncoder\n\
+                    >>> JSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\n\
+                    '{\"foo\": [\"bar\", \"baz\"]}'\n\
+                    \n"
+            )?;
+            rt::def!(
+                ns,
+                iterencode(slf as "self", o, _one_shot = false),
+                doc = "Encode the given object and yield each string\n\
+                    representation as available.\n\
+                    \n\
+                    For example::\n\
+                    \n\
+                    \x20   for chunk in JSONEncoder().iterencode(bigobject):\n\
+                    \x20       mysocket.write(chunk)\n\
+                    \n"
             )?;
             Ok(())
         })

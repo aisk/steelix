@@ -24,14 +24,7 @@ pub mod point {
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Point", 51, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", x),
-                    qualname = "Point.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", x))?;
             Ok(())
         })
     }
@@ -89,7 +82,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     rt::fstring(m.py(), (rt::format(n, "")?, " (many)"))
                 })
             }
-            m.set_global("describe", rt::function!(m, describe(n))?)?;
+            rt::def!(m, describe(n))?;
         } else {
             m.set_global("mode", "few")?;
             // mixed_nested.py:19
@@ -109,10 +102,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     )
                 })
             }
-            m.set_global(
-                "describe",
-                rt::function!(m, describe_(n), name = "describe")?,
-            )?;
+            rt::def!(m, describe_ as "describe"(n))?;
             rt::builtins::print(py, ("native branch", m.global("mode")?))?;
         }
         for item in rt::builtin(py, "range")?.call1((4,))?.try_iter()? {

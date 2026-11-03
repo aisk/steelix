@@ -97,7 +97,26 @@ pub struct FunctionDef<'py> {
     /// The `__classdict__` cell of the class body defining a method, where
     /// its annotations look names up first.
     pub classdict: Option<Bound<'py, PyAny>>,
+    /// The qualified name of the class whose body defines the function: a
+    /// method's qualified name is `<class>.<name>` unless `qualname` says
+    /// otherwise.
+    pub class_qualname: Option<&'static str>,
     pub body: Body,
+}
+
+/// The `__name__` of a function created by `function!`: `name`, or the last
+/// part of `qualname`, or the Rust name without `r#`.
+#[doc(hidden)]
+pub fn def_name(
+    name: Option<&'static str>,
+    qualname: Option<&'static str>,
+    rust_name: &'static str,
+) -> &'static str {
+    match (name, qualname) {
+        (Some(name), _) => name,
+        (None, Some(qualname)) => qualname.rsplit('.').next().unwrap_or(qualname),
+        (None, None) => python_name(rust_name),
+    }
 }
 
 /// Where a `def` or `lambda` runs: in module (or function) code, or in a
@@ -107,6 +126,13 @@ pub trait Definer<'py> {
     fn module(&self) -> &Module<'py>;
     /// The `__classdict__` cell, for a function with annotations.
     fn classdict(&self) -> Option<Bound<'py, PyAny>>;
+    /// The qualified name of the class whose body this is.
+    fn class_qualname(&self) -> Option<&'static str>;
+    /// Reads a name like the code there does: `LOAD_GLOBAL` in a module,
+    /// `LOAD_NAME` in a class body. For the decorators of `def!`.
+    fn lookup(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>>;
+    /// Binds the name of a `def`, in the globals or the class namespace.
+    fn bind(&self, name: &'static str, value: Bound<'py, PyAny>) -> PyResult<()>;
 }
 
 impl<'py> Definer<'py> for Module<'py> {
@@ -116,6 +142,15 @@ impl<'py> Definer<'py> for Module<'py> {
     fn classdict(&self) -> Option<Bound<'py, PyAny>> {
         None
     }
+    fn class_qualname(&self) -> Option<&'static str> {
+        None
+    }
+    fn lookup(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
+        self.global(name)
+    }
+    fn bind(&self, name: &'static str, value: Bound<'py, PyAny>) -> PyResult<()> {
+        self.set_global(name, value)
+    }
 }
 
 impl<'py> Definer<'py> for crate::Namespace<'py> {
@@ -123,7 +158,18 @@ impl<'py> Definer<'py> for crate::Namespace<'py> {
         crate::Namespace::module(self)
     }
     fn classdict(&self) -> Option<Bound<'py, PyAny>> {
-        Some(crate::Namespace::classdict(self).clone())
+        // With `from __future__ import annotations` methods have no
+        // annotation scopes, and CPython creates no `__classdict__` cell.
+        (!self.future_annotations()).then(|| crate::Namespace::classdict(self).clone())
+    }
+    fn class_qualname(&self) -> Option<&'static str> {
+        Some(self.qualname())
+    }
+    fn lookup(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
+        self.get(name)
+    }
+    fn bind(&self, name: &'static str, value: Bound<'py, PyAny>) -> PyResult<()> {
+        self.set(name, value)
     }
 }
 
@@ -163,12 +209,12 @@ impl Function {
     pub fn create<'py>(module: &Module<'py>, def: FunctionDef<'py>) -> PyResult<Bound<'py, PyAny>> {
         let py = module.py();
         let globals = module.globals();
-        let name = match (def.name, def.qualname) {
-            (Some(name), _) => name,
-            (None, Some(qualname)) => qualname.rsplit('.').next().unwrap_or(qualname),
-            (None, None) => python_name(def.rust_name),
+        let name = def_name(def.name, def.qualname, def.rust_name);
+        let qualname = match (def.qualname, def.class_qualname) {
+            (Some(qualname), _) => qualname.to_owned(),
+            (None, Some(class)) => format!("{class}.{name}"),
+            (None, None) => name.to_owned(),
         };
-        let qualname = def.qualname.unwrap_or(name);
         let defaults = (!def.defaults.is_empty())
             .then(|| PyTuple::new(py, def.defaults))
             .transpose()?;
@@ -198,7 +244,7 @@ impl Function {
         };
         let meta = Meta {
             name: PyString::new(py, name).unbind(),
-            qualname: PyString::new(py, qualname).unbind(),
+            qualname: PyString::new(py, &qualname).unbind(),
             doc: def.doc.into_py_any(py)?,
             module: match globals.get_item("__name__")? {
                 Some(module) => module.unbind(),
@@ -1100,13 +1146,6 @@ pub fn as_dict<'a, 'py>(value: &'a Bound<'py, PyAny>) -> &'a Bound<'py, PyDict> 
     value
         .cast()
         .expect("`Function` passes `**kwargs` as a dict")
-}
-
-/// Binds a function created by `function!` to its name in the module.
-#[doc(hidden)]
-pub fn bind_global(module: &Module<'_>, function: Bound<'_, PyAny>) -> PyResult<()> {
-    let name = function.getattr("__name__")?;
-    module.globals().set_item(name, function)
 }
 
 unsafe extern "C" {

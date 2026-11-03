@@ -17,14 +17,7 @@ pub mod item {
                 "tags",
                 rt::call!(ns.get("field")?, default_factory = ns.get("list")?)?,
             )?;
-            ns.set(
-                "total",
-                rt::function!(
-                    ns,
-                    total(slf as "self", quantity: "int") -> "float",
-                    qualname = "Item.total"
-                )?,
-            )?;
+            rt::def!(ns, total(slf as "self", quantity: "int") -> "float")?;
             Ok(())
         })
     }
@@ -49,14 +42,7 @@ pub mod version {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Version", 19, |_| {
             ns.set("minor", 0)?;
-            ns.set(
-                "bump",
-                rt::function!(
-                    ns,
-                    bump(slf as "self") -> "'Version'",
-                    qualname = "Version.bump"
-                )?,
-            )?;
+            rt::def!(ns, bump(slf as "self") -> "'Version'")?;
             Ok(())
         })
     }
@@ -79,14 +65,7 @@ pub mod node {
         rt::frame!(ns, "Node", 40, |_| {
             ns.set("parent", m.py().None())?;
             ns.set("alias", ns.get("int")?)?;
-            ns.set(
-                "link",
-                rt::function!(
-                    ns,
-                    link(slf as "self", other: "Node") -> "alias",
-                    qualname = "Node.link"
-                )?,
-            )?;
+            rt::def!(ns, link(slf as "self", other: "Node") -> "alias")?;
             Ok(())
         })
     }
@@ -129,10 +108,7 @@ pub mod slotted {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Slotted", 78, |_| {
             ns.set("y", 2)?;
-            ns.set(
-                "total",
-                rt::function!(ns, total(slf as "self"), qualname = "Slotted.total")?,
-            )?;
+            rt::def!(ns, total(slf as "self"))?;
             Ok(())
         })
     }
@@ -154,13 +130,9 @@ pub mod child {
         rt::frame!(ns, "Child", 91, |_| {
             let __class__ = ns.class_cell();
             ns.set("color", "red")?;
-            ns.set(
-                "total",
-                rt::function!(
-                    ns,
-                    total[&__class__](slf as "self", quantity: "int") -> "float",
-                    qualname = "Child.total"
-                )?,
+            rt::def!(
+                ns,
+                total[&__class__](slf as "self", quantity: "int") -> "float"
             )?;
             Ok(())
         })

@@ -55,7 +55,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         rt::def!(m, r#type(r#match, r#loop))?;
         rt::def!(m, r#mod(py_ as "py", globals, slf as "self"))?;
-        rt::def!(m, exec_module_(Some_ as "Some"), name = "exec_module")?;
+        rt::def!(m, exec_module_ as "exec_module"(Some_ as "Some"))?;
         rt::def!(m, maybe(flag))?;
         rt::builtins::print(
             py,

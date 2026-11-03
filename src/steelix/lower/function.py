@@ -22,7 +22,7 @@ from steelix.frontend.scope import (
     comprehension_variables,
     walrus_targets,
 )
-from steelix.lower.context import Context, FunctionInfo, ModuleContext
+from steelix.lower.context import NAMESPACE, Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
 from steelix.lower.names import FUNCTION_RESERVED, Renamer, context_name, rust_ident
 from steelix.lower.rustflow import fallible, returns_as_tail, statement_line
@@ -245,8 +245,11 @@ def signature_text(
     rust_name: str,
     defaults: list[rs.Expr],
     comprehension_names: dict[str, str],
+    named: bool = False,
 ) -> rs.Tokens:
-    """`name[captures](params) -> "ret"` as written in `rt::function!`.
+    """`name[captures](params) -> "ret"` as written in `rt::function!`, with
+    `name as "python"` for a `def` whose Rust fn has another name, unless
+    the options give the name (`named`).
 
     The Rust fn, the captured variables and the defaults are expressions of
     the result; parameter names only name the macro's own bindings.
@@ -265,6 +268,8 @@ def signature_text(
             annotations[param] = string_literal(source)
 
     out: list[str | rs.Expr] = [rs.Path(rust_name)]
+    if isinstance(node, ast.FunctionDef) and not named:
+        out.append(_as(rust_name, scope.name))
 
     def separate(index: int) -> None:
         if index:
@@ -468,16 +473,24 @@ def _as(rust: str, python: str) -> str:
     return "" if rust.removeprefix("r#") == python else f" as {string_literal(python)}"
 
 
-def function_options(ctx: Context, scope: FunctionScope, rust_name: str) -> list[rs.Tokens]:
-    """`qualname = ".."`, `name = ".."` and `doc = ".."` for `rt::function!`."""
+def function_options(
+    ctx: Context, scope: FunctionScope, rust_name: str, definer: rs.Expr
+) -> list[rs.Tokens]:
+    """`qualname = ".."` and `doc = ".."` for `rt::function!`. A function
+    defined in a class body (`definer` is its namespace) is a method, whose
+    qualified name the runtime derives from the class's."""
     node = scope.node
     assert node is not None
     options = []
-    if scope.qualname != scope.name:
+    derived = scope.name
+    if definer == rs.Path(NAMESPACE):
+        class_body = ctx.class_body
+        assert class_body is not None
+        derived = f"{class_body.scope.qualname}.{scope.name}"
+    if scope.qualname != derived:
         options.append(rs.Tokens((f"qualname = {string_literal(scope.qualname)}",)))
-    elif rust_name.removeprefix("r#") != scope.name:
-        key = "name" if isinstance(node, ast.FunctionDef) else "qualname"
-        options.append(rs.Tokens((f"{key} = {string_literal(scope.name)}",)))
+    elif isinstance(node, ast.Lambda) and rust_name.removeprefix("r#") != scope.name:
+        options.append(rs.Tokens((f"qualname = {string_literal(scope.name)}",)))
     if isinstance(node, ast.FunctionDef):
         doc = docstring(node, ctx.module.filename)
         if doc is not None:

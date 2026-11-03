@@ -21,14 +21,7 @@ pub mod out_of_stock {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "OutOfStock", 8, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](slf as "self", name, wanted),
-                    qualname = "OutOfStock.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__[&__class__](slf as "self", name, wanted))?;
             Ok(())
         })
     }

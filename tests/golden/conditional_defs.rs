@@ -46,10 +46,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     x.mul(scale)?.add(m.global("counter")?)
                 })
             }
-            m.set_global(
-                "helper",
-                rt::function!(m, helper(x, scale = 2), doc = "Doc of helper.")?,
-            )?;
+            rt::def!(m, helper(x, scale = 2), doc = "Doc of helper.")?;
             // conditional_defs.py:13
             fn recurse<'py>(
                 m: &rt::Module<'py>,
@@ -64,7 +61,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     })
                 })
             }
-            m.set_global("recurse", rt::function!(m, recurse(n))?)?;
+            rt::def!(m, recurse(n))?;
         } else {
             // conditional_defs.py:16
             fn helper_<'py>(
@@ -74,10 +71,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::int(m.py(), -1))
             }
-            m.set_global(
-                "helper",
-                rt::function!(m, helper_(x, scale = 2), name = "helper")?,
-            )?;
+            rt::def!(m, helper_ as "helper"(x, scale = 2))?;
         }
         for item in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
             m.set_global("i", item?)?;
@@ -88,7 +82,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ) -> PyResult<Bound<'py, PyAny>> {
                 Ok(y.clone())
             }
-            m.set_global("in_loop", rt::function!(m, in_loop(y = m.global("i")?))?)?;
+            rt::def!(m, in_loop(y = m.global("i")?))?;
             rt::builtins::print(
                 py,
                 (
@@ -114,7 +108,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .into_any())
                 })
             }
-            m.set_global("in_try", rt::function!(m, in_try())?)?;
+            rt::def!(m, in_try())?;
             Ok(())
         })();
         let finally = frame.finally(result);
@@ -129,7 +123,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             fn f_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "conditional"))
             }
-            m.set_global("f", rt::function!(m, f_(), name = "f")?)?;
+            rt::def!(m, f_ as "f"())?;
         }
         rt::def!(m, g())?;
         rt::builtins::print(

@@ -278,22 +278,11 @@ pub mod discounted {
         rt::frame!(ns, "Discounted", 33, |_| {
             let __class__ = ns.class_cell();
             ns.set("__doc__", "A subclass of a class from another module.")?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](slf as "self", name, price, quantity, percent),
-                    qualname = "Discounted.__init__"
-                )?,
+            rt::def!(
+                ns,
+                __init__[&__class__](slf as "self", name, price, quantity, percent)
             )?;
-            ns.set(
-                "unit_price",
-                rt::function!(
-                    ns,
-                    unit_price[&__class__](slf as "self"),
-                    qualname = "Discounted.unit_price"
-                )?,
-            )?;
+            rt::def!(ns, unit_price[&__class__](slf as "self"))?;
             Ok(())
         })
     }

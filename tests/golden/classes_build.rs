@@ -139,14 +139,7 @@ pub mod logged {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Logged", 37, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__setitem__",
-                rt::function!(
-                    ns,
-                    __setitem__[&__class__](slf as "self", key, value),
-                    qualname = "Logged.__setitem__"
-                )?,
-            )?;
+            rt::def!(ns, __setitem__[&__class__](slf as "self", key, value))?;
             Ok(())
         })
     }
@@ -176,31 +169,9 @@ pub mod meta {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Meta", 43, |_| {
             let __class__ = ns.class_cell();
-            {
-                let decorator = ns.get("classmethod")?;
-                let function = rt::function!(
-                    ns,
-                    __prepare__(mcls, name, bases, **kwargs),
-                    qualname = "Meta.__prepare__"
-                )?;
-                ns.set("__prepare__", decorator.call1((function,))?)?;
-            }
-            ns.set(
-                "__new__",
-                rt::function!(
-                    ns,
-                    __new__[&__class__](mcls, name, bases, ns, **kwargs),
-                    qualname = "Meta.__new__"
-                )?,
-            )?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](cls, name, bases, ns, **kwargs),
-                    qualname = "Meta.__init__"
-                )?,
-            )?;
+            rt::def!(ns, @classmethod __prepare__(mcls, name, bases, **kwargs))?;
+            rt::def!(ns, __new__[&__class__](mcls, name, bases, ns, **kwargs))?;
+            rt::def!(ns, __init__[&__class__](cls, name, bases, ns, **kwargs))?;
             Ok(())
         })
     }
@@ -281,14 +252,7 @@ pub mod with_meta {
             let __class__ = ns.class_cell();
             ns.set("__doc__", "Doc.")?;
             ns.set("a", 1)?;
-            ns.set(
-                "method",
-                rt::function!(
-                    ns,
-                    method[&__class__](slf as "self"),
-                    qualname = "WithMeta.method"
-                )?,
-            )?;
+            rt::def!(ns, method[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -318,13 +282,9 @@ pub mod plugin {
         rt::frame!(ns, "Plugin", 70, |_| {
             let __class__ = ns.class_cell();
             ns.set("registry", PyList::empty(py))?;
-            ns.set(
-                "__init_subclass__",
-                rt::function!(
-                    ns,
-                    __init_subclass__[&__class__](cls, /, name = py.None(), **kwargs),
-                    qualname = "Plugin.__init_subclass__"
-                )?,
+            rt::def!(
+                ns,
+                __init_subclass__[&__class__](cls, /, name = py.None(), **kwargs)
             )?;
             Ok(())
         })
@@ -387,22 +347,8 @@ pub mod field {
     /// The body of `class Field`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Field", 90, |_| {
-            ns.set(
-                "__set_name__",
-                rt::function!(
-                    ns,
-                    __set_name__(slf as "self", owner, name),
-                    qualname = "Field.__set_name__"
-                )?,
-            )?;
-            ns.set(
-                "__get__",
-                rt::function!(
-                    ns,
-                    __get__(slf as "self", obj, objtype = m.py().None()),
-                    qualname = "Field.__get__"
-                )?,
-            )?;
+            rt::def!(ns, __set_name__(slf as "self", owner, name))?;
+            rt::def!(ns, __get__(slf as "self", obj, objtype = m.py().None()))?;
             Ok(())
         })
     }
@@ -461,14 +407,7 @@ pub mod alias {
     /// The body of `class Alias`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Alias", 111, |_| {
-            ns.set(
-                "__mro_entries__",
-                rt::function!(
-                    ns,
-                    __mro_entries__(slf as "self", bases),
-                    qualname = "Alias.__mro_entries__"
-                )?,
-            )?;
+            rt::def!(ns, __mro_entries__(slf as "self", bases))?;
             Ok(())
         })
     }
@@ -679,14 +618,7 @@ pub mod bad_entries {
     /// The body of `class BadEntries`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "BadEntries", 210, |_| {
-            ns.set(
-                "__mro_entries__",
-                rt::function!(
-                    ns,
-                    __mro_entries__(slf as "self", bases),
-                    qualname = "BadEntries.__mro_entries__"
-                )?,
-            )?;
+            rt::def!(ns, __mro_entries__(slf as "self", bases))?;
             Ok(())
         })
     }
@@ -720,15 +652,7 @@ pub mod bad_prepare {
     /// The body of `class BadPrepare`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "BadPrepare", 224, |_| {
-            {
-                let decorator = ns.get("classmethod")?;
-                let function = rt::function!(
-                    ns,
-                    __prepare__(mcls, name, bases),
-                    qualname = "BadPrepare.__prepare__"
-                )?;
-                ns.set("__prepare__", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, @classmethod __prepare__(mcls, name, bases))?;
             Ok(())
         })
     }
@@ -762,14 +686,7 @@ pub mod drop_cell {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "DropCell", 239, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__new__",
-                rt::function!(
-                    ns,
-                    __new__[&__class__](mcls, name, bases, ns),
-                    qualname = "DropCell.__new__"
-                )?,
-            )?;
+            rt::def!(ns, __new__[&__class__](mcls, name, bases, ns))?;
             Ok(())
         })
     }
@@ -808,14 +725,7 @@ pub mod bad6 {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Bad6", 247, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "method",
-                rt::function!(
-                    ns,
-                    method[&__class__](slf as "self"),
-                    qualname = "Bad6.method"
-                )?,
-            )?;
+            rt::def!(ns, method[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -896,10 +806,7 @@ pub mod outer {
                     qualname = "Outer.Inner"
                 )?,
             )?;
-            ns.set(
-                "make",
-                rt::function!(ns, make(slf as "self"), qualname = "Outer.make")?,
-            )?;
+            rt::def!(ns, make(slf as "self"))?;
             Ok(())
         })
     }
@@ -932,14 +839,7 @@ pub mod outer {
             /// The body of `class Outer.Inner.Deepest`, run in its namespace `ns`.
             pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
                 rt::frame!(ns, "Outer.Inner.Deepest", 292, |_| {
-                    ns.set(
-                        "where",
-                        rt::function!(
-                            ns,
-                            r#where(slf as "self"),
-                            qualname = "Outer.Inner.Deepest.where"
-                        )?,
-                    )?;
+                    rt::def!(ns, r#where(slf as "self"))?;
                     Ok(())
                 })
             }
@@ -985,22 +885,8 @@ pub mod original {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Original", 318, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "hello",
-                rt::function!(
-                    ns,
-                    hello[&__class__](slf as "self"),
-                    qualname = "Original.hello"
-                )?,
-            )?;
-            ns.set(
-                "via_super",
-                rt::function!(
-                    ns,
-                    via_super[&__class__](slf as "self"),
-                    qualname = "Original.via_super"
-                )?,
-            )?;
+            rt::def!(ns, hello[&__class__](slf as "self"))?;
+            rt::def!(ns, via_super[&__class__](slf as "self"))?;
             Ok(())
         })
     }

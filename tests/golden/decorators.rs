@@ -33,15 +33,12 @@ pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bo
                         Ok(result)
                     })
                 }
-                let wrapper = {
-                    let decorator = m.global("functools")?.method1("wraps", (r#fn,))?;
-                    let function = rt::function!(
-                        m,
-                        wrapper[label, r#fn](*args, **kwargs),
-                        qualname = "trace.<locals>.decorate.<locals>.wrapper"
-                    )?;
-                    decorator.call1((function,))?
-                };
+                let wrapper = rt::function!(
+                    m,
+                    @(m.global("functools")?.method1("wraps", (r#fn,))?)
+                    wrapper[label, r#fn](*args, **kwargs),
+                    qualname = "trace.<locals>.decorate.<locals>.wrapper"
+                )?;
                 Ok(wrapper)
             })
         }
@@ -130,43 +127,27 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("functools", rt::import(m, "functools")?)?;
         rt::def!(m, trace(label))?;
         rt::def!(m, default_value(label))?;
-        {
-            let decorator = trace(m, &rt::str(py, "outer"))?;
-            let decorator2 = trace(m, &rt::str(py, "inner"))?;
-            let function = rt::function!(
-                m,
-                greet(name, punct = default_value(m, &rt::str(py, "!"))?),
-                doc = "Say hello."
-            )?;
-            let function = decorator2.call1((&function,))?;
-            m.set_global("greet", decorator.call1((function,))?)?;
-        }
+        rt::def!(
+            m,
+            @(trace(m, &rt::str(py, "outer"))?)
+            @(trace(m, &rt::str(py, "inner"))?)
+            greet(name, punct = default_value(m, &rt::str(py, "!"))?),
+            doc = "Say hello."
+        )?;
         rt::def!(m, register(r#fn))?;
         m.set_global("registry", PyList::empty(py))?;
-        {
-            let decorator = m.global("register")?;
-            let function = rt::function!(m, first())?;
-            m.set_global("first", decorator.call1((function,))?)?;
-        }
-        {
-            let decorator = m.global("register")?;
-            let function = rt::function!(m, second())?;
-            m.set_global("second", decorator.call1((function,))?)?;
-        }
-        {
-            let decorator = rt::call!(
+        rt::def!(m, @register first())?;
+        rt::def!(m, @register second())?;
+        rt::def!(
+            m,
+            @(rt::call!(
                 m.global("functools")?.attr("lru_cache")?,
                 maxsize = py.None()
-            )?;
-            let function = rt::function!(m, fib(n))?;
-            m.set_global("fib", decorator.call1((function,))?)?;
-        }
+            )?)
+            fib(n)
+        )?;
         rt::def!(m, replace(r#fn))?;
-        {
-            let decorator = m.global("replace")?;
-            let function = rt::function!(m, gone())?;
-            m.set_global("gone", decorator.call1((function,))?)?;
-        }
+        rt::def!(m, @replace gone())?;
         rt::builtins::print(py, (m.global("greet")?.call1(("world",))?,))?;
         rt::builtins::print(
             py,

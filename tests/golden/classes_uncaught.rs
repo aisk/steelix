@@ -10,28 +10,9 @@ pub mod account {
     /// The body of `class Account`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Account", 5, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", balance),
-                    qualname = "Account.__init__"
-                )?,
-            )?;
-            ns.set(
-                "withdraw",
-                rt::function!(
-                    ns,
-                    withdraw(slf as "self", amount),
-                    qualname = "Account.withdraw"
-                )?,
-            )?;
-            {
-                let decorator = ns.get("classmethod")?;
-                let function =
-                    rt::function!(ns, opened(cls, balance), qualname = "Account.opened")?;
-                ns.set("opened", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, __init__(slf as "self", balance))?;
+            rt::def!(ns, withdraw(slf as "self", amount))?;
+            rt::def!(ns, @classmethod opened(cls, balance))?;
             Ok(())
         })
     }

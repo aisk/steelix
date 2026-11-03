@@ -31,14 +31,8 @@ pub mod base {
     /// The body of `class Base`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Base", 6, |_| {
-            ns.set(
-                "greet",
-                rt::function!(ns, greet(slf as "self"), qualname = "Base.greet")?,
-            )?;
-            ns.set(
-                "items",
-                rt::function!(ns, items(slf as "self"), qualname = "Base.items")?,
-            )?;
+            rt::def!(ns, greet(slf as "self"))?;
+            rt::def!(ns, items(slf as "self"))?;
             Ok(())
         })
     }
@@ -74,14 +68,7 @@ pub mod mixed {
 "#
             )?;
             ns.set("native_after", ns.get("squares")?.get_item(-1)?)?;
-            ns.set(
-                "greet",
-                rt::function!(
-                    ns,
-                    greet[&__class__](slf as "self"),
-                    qualname = "Mixed.greet"
-                )?,
-            )?;
+            rt::def!(ns, greet[&__class__](slf as "self"))?;
             // classes_mixed.py:22, kept as Python: generator expression with several for clauses at 23:22
             rt::exec_python!(
                 ns,
@@ -111,14 +98,7 @@ pub mod mixed {
         return next(s for s in ("private",) for _ in "1")
 "#
             )?;
-            ns.set(
-                "call_private",
-                rt::function!(
-                    ns,
-                    call_private(slf as "self"),
-                    qualname = "Mixed.call_private"
-                )?,
-            )?;
+            rt::def!(ns, call_private(slf as "self"))?;
             // classes_mixed.py:36, kept as Python: async function at 36:5
             rt::exec_python!(
                 ns,
@@ -128,14 +108,7 @@ pub mod mixed {
         return "async"
 "#
             )?;
-            ns.set(
-                "uses_kept",
-                rt::function!(
-                    ns,
-                    uses_kept(slf as "self"),
-                    qualname = "Mixed.uses_kept"
-                )?,
-            )?;
+            rt::def!(ns, uses_kept(slf as "self"))?;
             // classes_mixed.py:42, kept as Python: generator expression with several for clauses at 42:18
             rt::exec_python!(
                 ns,
@@ -220,14 +193,7 @@ pub mod native_sub {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "NativeSub", 67, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "greet",
-                rt::function!(
-                    ns,
-                    greet[&__class__](slf as "self"),
-                    qualname = "NativeSub.greet"
-                )?,
-            )?;
+            rt::def!(ns, greet[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -283,11 +249,7 @@ pub mod outer {
                 )?;
                 ns.set(
                     "_Inner__hidden",
-                    rt::function!(
-                        ns,
-                        __hidden(slf as "self"),
-                        qualname = "Outer.Inner.__hidden"
-                    )?,
+                    rt::function!(ns, __hidden(slf as "self"))?,
                 )?;
                 // classes_mixed.py:83, kept as Python: generator expression with several for clauses at 84:24
                 rt::exec_python!(

@@ -39,14 +39,7 @@ pub mod config_error {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "ConfigError", 8, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](slf as "self", key, problem),
-                    qualname = "ConfigError.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__[&__class__](slf as "self", key, problem))?;
             Ok(())
         })
     }
@@ -81,10 +74,7 @@ pub mod retry {
     /// The body of `class Retry`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Retry", 15, |_| {
-            ns.set(
-                "__str__",
-                rt::function!(ns, __str__(slf as "self"), qualname = "Retry.__str__")?,
-            )?;
+            rt::def!(ns, __str__(slf as "self"))?;
             Ok(())
         })
     }
@@ -110,10 +100,7 @@ pub mod kept {
     /// The body of `class Kept`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Kept", 42, |_| {
-            ns.set(
-                "describe",
-                rt::function!(ns, describe(slf as "self"), qualname = "Kept.describe")?,
-            )?;
+            rt::def!(ns, describe(slf as "self"))?;
             Ok(())
         })
     }
@@ -143,14 +130,7 @@ pub mod broken {
     /// The body of `class Broken`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Broken", 53, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", value),
-                    qualname = "Broken.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", value))?;
             Ok(())
         })
     }
@@ -178,14 +158,7 @@ pub mod grouped {
     /// The body of `class Grouped`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Grouped", 67, |_| {
-            ns.set(
-                "derive",
-                rt::function!(
-                    ns,
-                    derive(slf as "self", excs),
-                    qualname = "Grouped.derive"
-                )?,
-            )?;
+            rt::def!(ns, derive(slf as "self", excs))?;
             Ok(())
         })
     }

@@ -34,6 +34,7 @@ from steelix.frontend.scope import FunctionNode, default_of, params_of
 from steelix.lower.comprehension import ComprehensionLowering, ComprehensionVariable
 from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.names import rust_ident
+from steelix.lower.rustflow import fallible
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
 from steelix.rustast.pyo3 import INFALLIBLE_LEN, must_erase
@@ -1114,53 +1115,127 @@ class ExprLowering(ComprehensionLowering):
 
     # --- function objects ---
 
-    def function_value(self, node: FunctionNode, rust: str, bind: bool = False) -> Value:
-        """The function object of a `def` or `lambda` whose Rust fn is `rust`:
-        `rt::function!(..)` with the decorators applied, or `rt::def!(..)`
-        with `bind`.
+    def function_value(self, node: FunctionNode, rust: str) -> Value:
+        """The function object of a `def` or `lambda` whose Rust fn is `rust`,
+        with the decorators applied: `rt::function!(..)`.
 
         Python evaluates the decorators, then the defaults, then applies the
-        decorators bottom-up. Decorators are evaluated into temporaries and
-        applied one statement at a time, which keeps that order and reads
-        like the Python code:
+        decorators bottom-up. The macro does the same with decorators written
+        before the name, as in Python:
 
-            let decorator = m.global("functools")?.call_method1(..)?;
+            rt::function!(m, @(m.global("functools")?.method1("wraps", (f,))?) wrapper(*args))?
+
+        When a decorator or a default needs statements of its own (a
+        prelude), which would run before the decorators written in the macro,
+        or when one may assign a local that another one reads (`:=`), the
+        decorators are evaluated into temporaries and applied one statement
+        at a time instead:
+
+            let decorator = ..;
             let function = rt::function!(m, wrapper(*args, **kwargs))?;
-            let wrapper = decorator.call1((function,))?;
+            decorator.call1((function,))?
+
+        So does `--traceback-lines` when CPython would report more than one
+        line: each decorator is evaluated and applied on its own line, the
+        defaults on the line of `def`, and only the separate statements can
+        have a `frame.line(n)` each. The statement starts on the line of the
+        first decorator (`self.line`).
         """
         from steelix.lower.function import function_options, signature_text
 
         scope = self.ctx.module.scopes.of(node)
         decorators = node.decorator_list if isinstance(node, ast.FunctionDef) else []
-        decorator_values = [
-            self.hoist(replace(self.value(d), base=None), "decorator") for d in decorators
-        ]
+        lowered: list[tuple[Value, list[rs.Stmt]]] = []
+        for decorator in decorators:
+            with self.fresh() as prelude:
+                value = replace(self.value(decorator), base=None)
+            lowered.append((value, prelude))
         args = node.args
         defaults = [*args.defaults, *(d for d in args.kw_defaults if d is not None)]
-        default_exprs = [v.arg() for v in self.operands(list(defaults))]
-        names = self.comprehension_names()
-        signature = signature_text(self.ctx, scope, rust, default_exprs, names)
-        options = function_options(self.ctx, scope, rust)
+        with self.fresh() as defaults_prelude:
+            default_exprs = [v.arg() for v in self.operands(list(defaults))]
+        defaults_fallible = fallible([*defaults_prelude, *map(rs.ExprStmt, default_exprs)])
+        inline = not any(prelude for _, prelude in lowered) and not (
+            decorators and defaults_prelude
+        )
+        if decorators and any(
+            isinstance(n, ast.NamedExpr) for e in [*decorators, *defaults] for n in ast.walk(e)
+        ):
+            inline = False
+        if self.ctx.module.traceback_lines and (len(decorators) > 1 or defaults_fallible):
+            inline = False
         definer = self.module()
         if (
             self.ctx.class_body is not None
             and self.ctx.function is None
             and isinstance(node, ast.FunctionDef)
-            and not self.ctx.module.future_annotations
         ):
-            # A method: its annotations see the class namespace (`__classdict__`).
+            # A method: its qualified name and annotations know the class.
             definer = rs.Path(NAMESPACE)
-        macro_args = (definer, signature, *options)
-        macro = rs.MacroCall("rt::def" if bind else "rt::function", macro_args)
+        prefixes: list[rs.Expr] = []
+        temps: list[Value] = []
+        for decorator, (value, prelude) in zip(decorators, lowered, strict=True):
+            if inline:
+                prefixes.append(self._decorator(value, definer))
+            else:
+                if fallible([*prelude, rs.ExprStmt(value.expr)]):
+                    self.prelude += self.at_line(decorator.lineno)
+                self.prelude += prelude
+                temps.append(self.hoist(value, "decorator"))
+        if temps and defaults_fallible:
+            self.prelude += self.at_line(node.lineno)
+        self.prelude += defaults_prelude
+        names = self.comprehension_names()
+        options = function_options(self.ctx, scope, rust, definer)
+        # A `qualname = ..` option gives the name too (its last part).
+        named = any(str(o.parts[0]).startswith("qualname") for o in options)
+        signature = signature_text(self.ctx, scope, rust, default_exprs, names, named)
+        macro = rs.MacroCall("rt::function", (definer, *prefixes, signature, *options))
         value = Value(_try(macro), Kind.OWNED)
-        if not decorator_values:
+        if not temps:
             return value
         value = self.hoist(value, "function")
         assert isinstance(value.expr, rs.Path)
-        for decorator in reversed(decorator_values[1:]):
+        for decorator, source in reversed(list(zip(temps[1:], decorators[1:], strict=True))):
+            self.prelude += self.at_line(source.lineno)
             applied = self.call_value(decorator, [value])
             self.prelude.append(rs.Let(value.expr.text, init=applied.expr))
-        return self.call_value(decorator_values[0], [value])
+        self.prelude += self.at_line(decorators[0].lineno)
+        return self.call_value(temps[0], [value])
+
+    def _decorator(self, value: Value, definer: rs.Expr) -> rs.Decorator:
+        """A decorator as written before the name in `rt::function!`:
+        `@name.attr` for a name read where the function is defined (the
+        definer's `get` or `global`), else `@(expr)`."""
+        lookup = "get" if definer == rs.Path(NAMESPACE) else "global"
+        attrs: list[str] = []
+        expr = value.expr
+        while value.kind is Kind.OWNED:
+            match expr:
+                case rs.Try(rs.MethodCall(inner, "attr", (rs.StrLit(attr),))) if _plain(attr):
+                    attrs.append(attr)
+                    expr = inner
+                    continue
+                case rs.Try(rs.MethodCall(receiver, method, (rs.StrLit(name),))) if (
+                    receiver == definer and method == lookup and _plain(name)
+                ):
+                    return rs.Decorator((".".join(["@" + name, *reversed(attrs)]),))
+            break
+        match value.kind:
+            case Kind.PLACE:
+                expr = rs.Ref(value.expr)
+            case Kind.LITERAL | Kind.BOOL | Kind.NATIVE:
+                assert value.owned_literal is not None
+                expr = value.owned_literal
+            case _:
+                expr = value.expr
+        return rs.Decorator(("@(", expr, ")"))
+
+
+def _plain(name: str) -> bool:
+    """Whether `name` is spelled the same as a Rust identifier, which the
+    macro turns back into the name with `stringify!`."""
+    return name != "_" and rust_ident(name) == name
 
 
 _FRAME_BUILTINS = frozenset({"locals", "vars", "dir", "exec", "eval", "globals", "super"})

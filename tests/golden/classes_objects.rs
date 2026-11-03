@@ -15,31 +15,10 @@ pub mod point {
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Point", 8, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", x, y),
-                    qualname = "Point.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__eq__",
-                rt::function!(
-                    ns,
-                    __eq__(slf as "self", other),
-                    qualname = "Point.__eq__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", x, y))?;
+            rt::def!(ns, __eq__(slf as "self", other))?;
             ns.set("__hash__", m.py().None())?;
-            ns.set(
-                "__repr__",
-                rt::function!(
-                    ns,
-                    __repr__(slf as "self"),
-                    qualname = "Point.__repr__"
-                )?,
-            )?;
+            rt::def!(ns, __repr__(slf as "self"))?;
             Ok(())
         })
     }
@@ -105,22 +84,8 @@ pub mod slots {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Slots", 22, |_| {
             ns.set("__slots__", PyTuple::new(m.py(), ["a", "b"])?)?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", a),
-                    qualname = "Slots.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__reduce__",
-                rt::function!(
-                    ns,
-                    __reduce__(slf as "self"),
-                    qualname = "Slots.__reduce__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", a))?;
+            rt::def!(ns, __reduce__(slf as "self"))?;
             Ok(())
         })
     }
@@ -163,26 +128,9 @@ pub mod tree {
     /// The body of `class Tree`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Tree", 32, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", value, *children),
-                    qualname = "Tree.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__deepcopy__",
-                rt::function!(
-                    ns,
-                    __deepcopy__(slf as "self", memo),
-                    qualname = "Tree.__deepcopy__"
-                )?,
-            )?;
-            ns.set(
-                "total",
-                rt::function!(ns, total(slf as "self"), qualname = "Tree.total")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", value, *children))?;
+            rt::def!(ns, __deepcopy__(slf as "self", memo))?;
+            rt::def!(ns, total(slf as "self"))?;
             Ok(())
         })
     }

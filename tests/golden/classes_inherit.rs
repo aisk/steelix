@@ -14,10 +14,7 @@ pub mod a {
     /// The body of `class A`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "A", 10, |_| {
-            ns.set(
-                "who",
-                rt::function!(ns, who(slf as "self"), qualname = "A.who")?,
-            )?;
+            rt::def!(ns, who(slf as "self"))?;
             Ok(())
         })
     }
@@ -38,10 +35,7 @@ pub mod b {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "B", 15, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "who",
-                rt::function!(ns, who[&__class__](slf as "self"), qualname = "B.who")?,
-            )?;
+            rt::def!(ns, who[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -66,10 +60,7 @@ pub mod c {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "C", 20, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "who",
-                rt::function!(ns, who[&__class__](slf as "self"), qualname = "C.who")?,
-            )?;
+            rt::def!(ns, who[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -94,10 +85,7 @@ pub mod d {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "D", 25, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "who",
-                rt::function!(ns, who[&__class__](slf as "self"), qualname = "D.who")?,
-            )?;
+            rt::def!(ns, who[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -124,25 +112,9 @@ pub mod color {
             ns.set("RED", 1)?;
             ns.set("GREEN", 2)?;
             ns.set("BLUE", 3)?;
-            ns.set(
-                "describe",
-                rt::function!(
-                    ns,
-                    describe(slf as "self"),
-                    qualname = "Color.describe"
-                )?,
-            )?;
-            {
-                let decorator = ns.get("classmethod")?;
-                let function = rt::function!(ns, default(cls), qualname = "Color.default")?;
-                ns.set("default", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("property")?;
-                let function =
-                    rt::function!(ns, is_warm(slf as "self"), qualname = "Color.is_warm")?;
-                ns.set("is_warm", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, describe(slf as "self"))?;
+            rt::def!(ns, @classmethod default(cls))?;
+            rt::def!(ns, @property is_warm(slf as "self"))?;
             Ok(())
         })
     }
@@ -193,20 +165,8 @@ pub mod planet {
         rt::frame!(ns, "Planet", 55, |_| {
             ns.set("EARTH", PyTuple::new(py, [5.97e+24, 6370000.0])?)?;
             ns.set("MARS", PyTuple::new(py, [6.42e+23, 3390000.0])?)?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", mass, radius),
-                    qualname = "Planet.__init__"
-                )?,
-            )?;
-            {
-                let decorator = ns.get("property")?;
-                let function =
-                    rt::function!(ns, gravity(slf as "self"), qualname = "Planet.gravity")?;
-                ns.set("gravity", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, __init__(slf as "self", mass, radius))?;
+            rt::def!(ns, @property gravity(slf as "self"))?;
             Ok(())
         })
     }
@@ -264,10 +224,7 @@ pub mod shade {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
         rt::frame!(ns, "Shade", 79, |_| {
-            ns.set(
-                "__new__",
-                rt::function!(ns, __new__(cls, value, label), qualname = "Shade.__new__")?,
-            )?;
+            rt::def!(ns, __new__(cls, value, label))?;
             ns.set(
                 "DARK",
                 PyTuple::new(py, [&rt::int(py, 1), &rt::str(py, "dark")])?,
@@ -304,10 +261,7 @@ pub mod point {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Point", 93, |_| {
             ns.set("y", 0)?;
-            ns.set(
-                "norm1",
-                rt::function!(ns, norm1(slf as "self"), qualname = "Point.norm1")?,
-            )?;
+            rt::def!(ns, norm1(slf as "self"))?;
             Ok(())
         })
     }
@@ -337,19 +291,8 @@ pub mod shape {
     /// The body of `class Shape`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Shape", 114, |_| {
-            {
-                let decorator = ns.get("abc")?.attr("abstractmethod")?;
-                let function = rt::function!(ns, area(slf as "self"), qualname = "Shape.area")?;
-                ns.set("area", decorator.call1((function,))?)?;
-            }
-            ns.set(
-                "describe",
-                rt::function!(
-                    ns,
-                    describe(slf as "self"),
-                    qualname = "Shape.describe"
-                )?,
-            )?;
+            rt::def!(ns, @abc.abstractmethod area(slf as "self"))?;
+            rt::def!(ns, describe(slf as "self"))?;
             Ok(())
         })
     }
@@ -384,18 +327,8 @@ pub mod square {
     /// The body of `class Square`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Square", 123, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", side),
-                    qualname = "Square.__init__"
-                )?,
-            )?;
-            ns.set(
-                "area",
-                rt::function!(ns, area(slf as "self"), qualname = "Square.area")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", side))?;
+            rt::def!(ns, area(slf as "self"))?;
             Ok(())
         })
     }
@@ -428,18 +361,8 @@ pub mod worker {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Worker", 138, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](slf as "self", n),
-                    qualname = "Worker.__init__"
-                )?,
-            )?;
-            ns.set(
-                "run",
-                rt::function!(ns, run(slf as "self"), qualname = "Worker.run")?,
-            )?;
+            rt::def!(ns, __init__[&__class__](slf as "self", n))?;
+            rt::def!(ns, run(slf as "self"))?;
             Ok(())
         })
     }
@@ -484,11 +407,10 @@ pub mod upper {
     /// The body of `class Upper`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Upper", 156, |_| {
-            ns.set("__call__", rt::function!(
+            rt::def!(
                 ns,
-                __call__(slf as "self", parser, namespace, values, option_string = m.py().None()),
-                qualname = "Upper.__call__"
-            )?)?;
+                __call__(slf as "self", parser, namespace, values, option_string = m.py().None())
+            )?;
             Ok(())
         })
     }
@@ -522,22 +444,8 @@ pub mod reversed {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Reversed", 166, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](slf as "self", items),
-                    qualname = "Reversed.__init__"
-                )?,
-            )?;
-            ns.set(
-                "append",
-                rt::function!(
-                    ns,
-                    append[&__class__](slf as "self", item),
-                    qualname = "Reversed.append"
-                )?,
-            )?;
+            rt::def!(ns, __init__[&__class__](slf as "self", items))?;
+            rt::def!(ns, append[&__class__](slf as "self", item))?;
             Ok(())
         })
     }
@@ -579,14 +487,7 @@ pub mod default {
     /// The body of `class Default`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Default", 179, |_| {
-            ns.set(
-                "__missing__",
-                rt::function!(
-                    ns,
-                    __missing__(slf as "self", key),
-                    qualname = "Default.__missing__"
-                )?,
-            )?;
+            rt::def!(ns, __missing__(slf as "self", key))?;
             Ok(())
         })
     }

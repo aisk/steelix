@@ -774,14 +774,8 @@ pub mod bad {
     /// The body of `class Bad`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Bad", 61, |_| {
-            ns.set(
-                "__iter__",
-                rt::function!(ns, __iter__(slf as "self"), qualname = "Bad.__iter__")?,
-            )?;
-            ns.set(
-                "__next__",
-                rt::function!(ns, __next__(slf as "self"), qualname = "Bad.__next__")?,
-            )?;
+            rt::def!(ns, __iter__(slf as "self"))?;
+            rt::def!(ns, __next__(slf as "self"))?;
             Ok(())
         })
     }

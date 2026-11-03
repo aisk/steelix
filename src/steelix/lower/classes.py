@@ -152,6 +152,9 @@ def merge_text(parts: list[str | rs.Expr]) -> tuple[str | rs.Expr, ...]:
 def _class_options(module: ModuleContext, scope: ClassScope) -> list[str]:
     node = scope.node
     options = []
+    if module.future_annotations and scope.methods:
+        # The methods get no `__classdict__` cell (`rt::def!(ns, ..)`).
+        options.append("future_annotations")
     if scope.qualname != scope.name:
         options.append(f"qualname = {string_literal(scope.qualname)}")
     attributes = module.static_attributes.get((scope.qualname, first_line(node)), ())

@@ -260,11 +260,7 @@ def kept_middle(values, key):
         )?;
         rt::def!(m, native_middle(values, key))?;
         rt::def!(m, decorate(r#fn))?;
-        {
-            let decorator = m.global("decorate")?;
-            let function = rt::function!(m, decorated(x))?;
-            m.set_global("decorated", decorator.call1((function,))?)?;
-        }
+        rt::def!(m, @decorate decorated(x))?;
         rt::def!(m, outer())?;
         rt::def!(m, multiline(a, b))?;
         rt::def!(m, raise_again())?;

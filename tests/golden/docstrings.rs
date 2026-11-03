@@ -51,17 +51,13 @@ pub mod k {
                     \n\
                     More.\n",
             )?;
-            ns.set(
-                "method",
-                rt::function!(
-                    ns,
-                    method(slf as "self", a, b = 1),
-                    qualname = "K.method",
-                    doc = "Method doc.\n\
-                        \n\
-                        \x20   code block\n\
-                        trailing"
-                )?,
+            rt::def!(
+                ns,
+                method(slf as "self", a, b = 1),
+                doc = "Method doc.\n\
+                    \n\
+                    \x20   code block\n\
+                    trailing"
             )?;
             Ok(())
         })

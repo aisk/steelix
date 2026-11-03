@@ -279,22 +279,8 @@ pub mod noisy {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Noisy", 9, |_| {
             ns.set("__doc__", "An iterable that reports when it is iterated.")?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", label, items),
-                    qualname = "Noisy.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__iter__",
-                rt::function!(
-                    ns,
-                    __iter__(slf as "self"),
-                    qualname = "Noisy.__iter__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", label, items))?;
+            rt::def!(ns, __iter__(slf as "self"))?;
             Ok(())
         })
     }
@@ -334,30 +320,10 @@ pub mod key {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Key", 21, |_| {
             ns.set("__doc__", "A key that reports when it is hashed.")?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", name),
-                    qualname = "Key.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__hash__",
-                rt::function!(ns, __hash__(slf as "self"), qualname = "Key.__hash__")?,
-            )?;
-            ns.set(
-                "__eq__",
-                rt::function!(
-                    ns,
-                    __eq__(slf as "self", other),
-                    qualname = "Key.__eq__"
-                )?,
-            )?;
-            ns.set(
-                "__repr__",
-                rt::function!(ns, __repr__(slf as "self"), qualname = "Key.__repr__")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", name))?;
+            rt::def!(ns, __hash__(slf as "self"))?;
+            rt::def!(ns, __eq__(slf as "self", other))?;
+            rt::def!(ns, __repr__(slf as "self"))?;
             Ok(())
         })
     }
@@ -421,18 +387,8 @@ pub mod mapping {
     /// The body of `class Mapping`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Mapping", 38, |_| {
-            ns.set(
-                "keys",
-                rt::function!(ns, keys(slf as "self"), qualname = "Mapping.keys")?,
-            )?;
-            ns.set(
-                "__getitem__",
-                rt::function!(
-                    ns,
-                    __getitem__(slf as "self", key),
-                    qualname = "Mapping.__getitem__"
-                )?,
-            )?;
+            rt::def!(ns, keys(slf as "self"))?;
+            rt::def!(ns, __getitem__(slf as "self", key))?;
             Ok(())
         })
     }

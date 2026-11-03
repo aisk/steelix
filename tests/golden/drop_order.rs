@@ -152,18 +152,8 @@ pub mod t {
     /// The body of `class T`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "T", 6, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", name),
-                    qualname = "T.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__del__",
-                rt::function!(ns, __del__(slf as "self"), qualname = "T.__del__")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", name))?;
+            rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }

@@ -11,14 +11,7 @@ pub mod meta {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Meta", 10, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__new__",
-                rt::function!(
-                    m,
-                    __new__[&__class__](mcls, name, bases, ns),
-                    qualname = "Meta.__new__"
-                )?,
-            )?;
+            rt::def!(ns, __new__[&__class__](mcls, name, bases, ns))?;
             Ok(())
         })
     }
@@ -73,14 +66,7 @@ pub mod config {
                 )?;
                 ns.annotate("ratio", "float")?;
             }
-            ns.set(
-                "scaled",
-                rt::function!(
-                    m,
-                    scaled(slf as "self", by: "'int'") -> "'Config'",
-                    qualname = "Config.scaled"
-                )?,
-            )?;
+            rt::def!(ns, scaled(slf as "self", by: "'int'") -> "'Config'")?;
             Ok(())
         })
     }
@@ -123,14 +109,7 @@ pub mod private {
             ns.set("_Private__x", 1)?;
             ns.annotate("_Private__x", "__T")?;
             ns.annotate("y", "list[__T]")?;
-            ns.set(
-                "f",
-                rt::function!(
-                    m,
-                    f(slf as "self", _Private__a: "'__T'") -> "'__T'",
-                    qualname = "Private.f"
-                )?,
-            )?;
+            rt::def!(ns, f(slf as "self", _Private__a: "'__T'") -> "'__T'")?;
             Ok(())
         })
     }
@@ -160,7 +139,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("typing", rt::import(m, "typing")?)?;
         m.set_global(
             "Meta",
-            rt::class!(m, "Meta"(rt::builtin(py, "type")?), meta::body, line = 10)?,
+            rt::class!(
+                m,
+                "Meta"(rt::builtin(py, "type")?),
+                meta::body,
+                line = 10,
+                future_annotations
+            )?,
         )?;
         m.set_global(
             "Config",
@@ -168,7 +153,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m,
                 "Config"(metaclass = m.global("Meta")?),
                 config::body,
-                line = 16
+                line = 16,
+                future_annotations
             )?,
         )?;
         rt::builtins::print(
@@ -202,7 +188,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         m.set_global(
             "Private",
-            rt::class!(m, "Private"(), private::body, line = 40)?,
+            rt::class!(m, "Private"(), private::body, line = 40, future_annotations)?,
         )?;
         rt::builtins::print(
             py,

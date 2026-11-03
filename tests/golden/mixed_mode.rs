@@ -85,18 +85,8 @@ pub mod counter {
                 "A native class whose methods call native functions.",
             )?;
             ns.set("instances", ns.get("log")?.call1(("class body",))?)?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", start),
-                    qualname = "Counter.__init__"
-                )?,
-            )?;
-            ns.set(
-                "bump",
-                rt::function!(ns, bump(slf as "self"), qualname = "Counter.bump")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", start))?;
+            rt::def!(ns, bump(slf as "self"))?;
             Ok(())
         })
     }
@@ -221,13 +211,13 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
             fn pick<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "first"))
             }
-            m.set_global("pick", rt::function!(m, pick())?)?;
+            rt::def!(m, pick())?;
         } else {
             // mixed_mode.py:65
             fn pick_<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "second"))
             }
-            m.set_global("pick", rt::function!(m, pick_(), name = "pick")?)?;
+            rt::def!(m, pick_ as "pick"())?;
         }
         rt::builtins::print(py, (m.global("pick")?.call0()?,))?;
         rt::def!(m, twice())?;

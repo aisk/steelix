@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M12（计划）。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12（计划）。
 
 ## M0 项目骨架 ✅
 
@@ -267,6 +267,20 @@ golden 里属性和方法调用的写法都变了（`slf.getattr("x")?` 变成 `
 - [x] `rt::Attributes` 对所有的 `Bound<'py, T>` 实现，手写代码里的 `Bound<PyDict>` 等不用 `.as_any()`
 - [x] `rt::function!` 的排版：签名里有 `slf as "self"` 并且一行放不下时 rustfmt 不处理整条语句，以前打印出来的缩进是从第 0 列算的。现在打印 Rust AST 时一直带着当前的缩进层级（包括 `mod` 和函数里的 fn），宏的参数按所在的层级缩进。多行的 docstring（函数的 `doc = ..`、类和模块的 `__doc__`）一行对一行打印，行尾用 `\` 续行，值不变（§4，用例 `docstrings`）
 - 没有做：review 建议把不纯的参数先求值再写成 `o.method1("m", (args,))`，这会让参数在查找方法之前求值，property、`__getattr__` 能看出来（§8）
+
+## M11b 类体和装饰器的写法 ✅
+
+类体里每个方法要占五六行（`ns.set("__init__", rt::function!(ns, ..., qualname = "Vector.__init__")?)?`），带装饰器的 `def` 是一个有 `let decorator`、`let function` 的块。改成和 Python 一样的一行，语义不变。
+
+- [x] `rt::def!` 的第一个参数也可以是类体的 `ns`，在类的命名空间里绑定名字（`ns.set`），`rt::def!` 绑定的名字是函数名本身，不再读 `__name__`（§6）
+- [x] 方法的 `__qualname__` 由 runtime 推出：`rt::Namespace` 记着类的 qualname，`ns` 里定义的函数是 `<类>.<名字>`，嵌套类的方法是 `Outer.Inner.method`。`qualname = ".."` 只在不同的时候写（§10）。`from __future__ import annotations` 时方法以前用 `m` 定义（为了不创建 `__classdict__` cell），现在 `rt::class!` 带上 `future_annotations`，方法同样用 `ns`
+- [x] Rust 名字和 Python 名字不同的函数写成 `label_ as "label"(..)`，和参数的 `slf as "self"` 一样，代替 `name = "label"`
+- [x] 装饰器写在名字前面：`rt::def!(ns, @property length(slf as "self"))?`、`@label.setter`、`@functools.wraps` 这样的点号名字按定义处的规则读（`ns.get`、`m.global`），别的表达式写成 `@(expr)`。宏按 CPython 的顺序求值装饰器、默认参数，再从下到上应用。装饰器或默认参数需要临时变量、里面有 `:=`，或者 `--traceback-lines` 时 CPython 会报告不止一个行号（多个装饰器、可能出错的默认参数）时，保留原来一条语句应用一个装饰器的写法（§6）
+- [x] `--traceback-lines` 时装饰器求值和应用出错报告装饰器自己的那一行，默认参数报告 `def` 那一行，和 CPython 一样。以前都报告 `def` 那一行（§12 原来的记录也不准确）
+- [x] 嵌套函数的装饰器同样写在 `rt::function!` 里，模块级的 `def` 也是
+- [x] 用例 `decorators_uncaught`（装饰器、默认参数和应用的顺序，property 的 getter/setter/deleter，classmethod/staticmethod，嵌套类，名字是 Rust 关键字的方法，每个函数的 `__qualname__`，点号名字和调用作为装饰器，局部变量和 `:=` 作为装饰器，函数里装饰器出错的 traceback，带和不带 `--traceback-lines`）和 `decorator_lines`（模块、类体、函数里装饰器求值、默认参数、应用出错时的行号）
+
+runtime 的宏变了（`rt::def!` 的装饰器和 `as`、`rt::class!` 的 `future_annotations`），生成的代码要配合新版本的 `steelix-runtime`。
 
 ## M12 改写流程（计划）
 

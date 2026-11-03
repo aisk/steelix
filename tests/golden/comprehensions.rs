@@ -430,14 +430,8 @@ pub mod bad {
     /// The body of `class Bad`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Bad", 117, |_| {
-            ns.set(
-                "__iter__",
-                rt::function!(ns, __iter__(slf as "self"), qualname = "Bad.__iter__")?,
-            )?;
-            ns.set(
-                "__next__",
-                rt::function!(ns, __next__(slf as "self"), qualname = "Bad.__next__")?,
-            )?;
+            rt::def!(ns, __iter__(slf as "self"))?;
+            rt::def!(ns, __next__(slf as "self"))?;
             Ok(())
         })
     }
@@ -517,10 +511,7 @@ pub mod base {
     /// The body of `class Base`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Base", 140, |_| {
-            ns.set(
-                "items",
-                rt::function!(ns, items(slf as "self"), qualname = "Base.items")?,
-            )?;
+            rt::def!(ns, items(slf as "self"))?;
             Ok(())
         })
     }
@@ -543,36 +534,11 @@ pub mod derived {
             let __class__ = ns.class_cell();
             ns.set(
                 "_Derived__secret",
-                rt::function!(
-                    ns,
-                    __secret(slf as "self"),
-                    qualname = "Derived.__secret"
-                )?,
+                rt::function!(ns, __secret(slf as "self"))?,
             )?;
-            ns.set(
-                "values",
-                rt::function!(
-                    ns,
-                    values[&__class__](slf as "self"),
-                    qualname = "Derived.values"
-                )?,
-            )?;
-            ns.set(
-                "secrets",
-                rt::function!(
-                    ns,
-                    secrets(slf as "self"),
-                    qualname = "Derived.secrets"
-                )?,
-            )?;
-            ns.set(
-                "supers",
-                rt::function!(
-                    ns,
-                    supers[&__class__](slf as "self"),
-                    qualname = "Derived.supers"
-                )?,
-            )?;
+            rt::def!(ns, values[&__class__](slf as "self"))?;
+            rt::def!(ns, secrets(slf as "self"))?;
+            rt::def!(ns, supers[&__class__](slf as "self"))?;
             Ok(())
         })
     }

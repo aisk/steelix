@@ -47,30 +47,10 @@ pub mod item {
     /// The body of `class Item`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Item", 14, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", name, price, quantity),
-                    qualname = "Item.__init__"
-                )?,
-            )?;
-            ns.set(
-                "unit_price",
-                rt::function!(
-                    ns,
-                    unit_price(slf as "self"),
-                    qualname = "Item.unit_price"
-                )?,
-            )?;
-            ns.set(
-                "value",
-                rt::function!(ns, value(slf as "self"), qualname = "Item.value")?,
-            )?;
-            ns.set(
-                "__repr__",
-                rt::function!(ns, __repr__(slf as "self"), qualname = "Item.__repr__")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", name, price, quantity))?;
+            rt::def!(ns, unit_price(slf as "self"))?;
+            rt::def!(ns, value(slf as "self"))?;
+            rt::def!(ns, __repr__(slf as "self"))?;
             Ok(())
         })
     }
@@ -135,13 +115,9 @@ pub mod perishable {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Perishable", 30, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__[&__class__](slf as "self", name, price, quantity, days),
-                    qualname = "Perishable.__init__"
-                )?,
+            rt::def!(
+                ns,
+                __init__[&__class__](slf as "self", name, price, quantity, days)
             )?;
             Ok(())
         })

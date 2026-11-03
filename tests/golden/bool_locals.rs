@@ -259,46 +259,11 @@ pub mod weird {
                 "__doc__",
                 "Comparisons that do not return bool, and a truth value that counts.",
             )?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", name),
-                    qualname = "Weird.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__eq__",
-                rt::function!(
-                    ns,
-                    __eq__(slf as "self", other),
-                    qualname = "Weird.__eq__"
-                )?,
-            )?;
-            ns.set(
-                "__lt__",
-                rt::function!(
-                    ns,
-                    __lt__(slf as "self", other),
-                    qualname = "Weird.__lt__"
-                )?,
-            )?;
-            ns.set(
-                "__bool__",
-                rt::function!(
-                    ns,
-                    __bool__(slf as "self"),
-                    qualname = "Weird.__bool__"
-                )?,
-            )?;
-            ns.set(
-                "__contains__",
-                rt::function!(
-                    ns,
-                    __contains__(slf as "self", item),
-                    qualname = "Weird.__contains__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", name))?;
+            rt::def!(ns, __eq__(slf as "self", other))?;
+            rt::def!(ns, __lt__(slf as "self", other))?;
+            rt::def!(ns, __bool__(slf as "self"))?;
+            rt::def!(ns, __contains__(slf as "self", item))?;
             ns.set("__hash__", ns.get("object")?.attr("__hash__")?)?;
             Ok(())
         })
@@ -375,22 +340,8 @@ pub mod lock {
     /// The body of `class Lock`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Lock", 143, |_| {
-            ns.set(
-                "__enter__",
-                rt::function!(
-                    ns,
-                    __enter__(slf as "self"),
-                    qualname = "Lock.__enter__"
-                )?,
-            )?;
-            ns.set(
-                "__exit__",
-                rt::function!(
-                    ns,
-                    __exit__(slf as "self", *exc),
-                    qualname = "Lock.__exit__"
-                )?,
-            )?;
+            rt::def!(ns, __enter__(slf as "self"))?;
+            rt::def!(ns, __exit__(slf as "self", *exc))?;
             Ok(())
         })
     }

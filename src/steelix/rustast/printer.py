@@ -156,12 +156,28 @@ def _macro_call(path: str, args: tuple[rs.Expr, ...], level: int) -> str:
     the statement around such a call when it does not fit in a line, so
     this is the final layout. It joins the lines again when it can format
     the call itself."""
-    text = f"{path}!({_args(args, level)})"
-    if not any(_has_lines(arg) for arg in args) and (len(text) <= _MACRO_LINE or "\n" in text):
+    text = f"{path}!({_macro_args(args, level, ', ', ' ')})"
+    # A decorator of several lines goes on lines of its own, like in Python.
+    broken = any(
+        _has_lines(arg) or (isinstance(arg, rs.Decorator) and "\n" in print_expr(arg, level))
+        for arg in args
+    )
+    if not broken and (len(text) <= _MACRO_LINE or "\n" in text):
         return text
     inner = INDENT * (level + 1)
-    args_text = f",\n{inner}".join(print_expr(arg, level + 1) for arg in args)
+    args_text = _macro_args(args, level + 1, f",\n{inner}", f"\n{inner}")
     return f"{path}!(\n{inner}{args_text}\n{INDENT * level})"
+
+
+def _macro_args(args: tuple[rs.Expr, ...], level: int, comma: str, space: str) -> str:
+    """The arguments of a macro call separated by `comma`, except after a
+    decorator (`@name` before a signature), which `space` separates."""
+    out = []
+    for i, arg in enumerate(args):
+        if i:
+            out.append(space if isinstance(args[i - 1], rs.Decorator) else comma)
+        out.append(print_expr(arg, level))
+    return "".join(out)
 
 
 def _has_lines(expr: rs.Expr) -> bool:

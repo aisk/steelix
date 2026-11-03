@@ -9,15 +9,8 @@ pub mod base {
     /// The body of `class Base`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Base", 10, |_| {
-            ns.set(
-                "hello",
-                rt::function!(ns, hello(slf as "self"), qualname = "Base.hello")?,
-            )?;
-            {
-                let decorator = ns.get("property")?;
-                let function = rt::function!(ns, name(slf as "self"), qualname = "Base.name")?;
-                ns.set("name", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, hello(slf as "self"))?;
+            rt::def!(ns, @property name(slf as "self"))?;
             Ok(())
         })
     }
@@ -41,19 +34,8 @@ pub mod p {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "P", 19, |_| {
             let __class__ = ns.class_cell();
-            {
-                let decorator = ns.get("property")?;
-                let function = rt::function!(ns, name(slf as "self"), qualname = "P.name")?;
-                ns.set("name", decorator.call1((function,))?)?;
-            }
-            ns.set(
-                "hello",
-                rt::function!(
-                    ns,
-                    hello[&__class__](slf as "self"),
-                    qualname = "P.hello"
-                )?,
-            )?;
+            rt::def!(ns, @property name(slf as "self"))?;
+            rt::def!(ns, hello[&__class__](slf as "self"))?;
             Ok(())
         })
     }

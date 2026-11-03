@@ -251,10 +251,7 @@ pub mod big {
     /// The body of `class Big`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Big", 9, |_| {
-            ns.set(
-                "__del__",
-                rt::function!(ns, __del__(slf as "self"), qualname = "Big.__del__")?,
-            )?;
+            rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }
@@ -279,14 +276,7 @@ pub mod arg {
     /// The body of `class Arg`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Arg", 14, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", tag),
-                    qualname = "Arg.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", tag))?;
             Ok(())
         })
     }

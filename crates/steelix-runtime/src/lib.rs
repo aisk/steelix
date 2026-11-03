@@ -417,28 +417,99 @@ impl Drop for RecursionGuard<'_> {
 /// Creates a Python function object backed by a Rust function, like
 /// evaluating a `def` statement (without binding the name) or a `lambda`.
 ///
+/// The first argument is where the function is defined: the module (also in
+/// function bodies), or the namespace `ns` of a class body. A function
+/// defined in a class body is a method: its `__qualname__` is
+/// `<class qualname>.<name>` and its annotations see the class namespace.
+///
 /// The parameter list is written like the Python one, using the Rust names of
 /// the parameters. Defaults are evaluated right away, in order, and stored in
 /// `__defaults__` / `__kwdefaults__`; annotations are kept as Python source and
-/// evaluated lazily (PEP 649).
+/// evaluated lazily (PEP 649). A Rust name that is not the Python one gets it
+/// with `as`, for the function as for its parameters (`r#` is stripped
+/// without that).
 ///
 /// The Rust function takes the module, the captured variables and then one
 /// argument per parameter, all as `&Bound` (`*args` and `**kwargs` as
 /// `&Bound<PyTuple>` and `&Bound<PyDict>`, captured cells as `&rt::Cell`).
 ///
 /// ```ignore
-/// rt::function!(module, greet(name, greeting = "Hello"))?;       // fn greet(module, name, greeting)
-/// rt::function!(module, wrap(f, /, *args, **kwargs))?;           // fn wrap(module, f, args, kwargs)
-/// rt::function!(module, area(r: "float") -> "float")?;           // annotations
-/// rt::function!(module, slf as "self"(x), name = "method")?;     // Python names differ
+/// rt::function!(m, greet(name, greeting = "Hello"))?;      // fn greet(m, name, greeting)
+/// rt::function!(m, wrap(f, /, *args, **kwargs))?;          // fn wrap(m, f, args, kwargs)
+/// rt::function!(m, area(r: "float") -> "float")?;          // annotations
+/// rt::function!(ns, label_ as "label"(slf as "self"))?;    // Python names differ
 /// // A nested function capturing `n` by value and the shared cell `count`:
-/// rt::function!(module, add[n, &count](x), qualname = "make.<locals>.add")?;
+/// rt::function!(m, add[n, &count](x), qualname = "make.<locals>.add")?;
 /// ```
 ///
-/// Options: `name = ".."` (defaults to the Rust name, or the last part of
-/// `qualname`), `qualname = ".."` (defaults to the name) and `doc = ".."`.
+/// Decorators come before the name, as in Python. `@name` and
+/// `@name.attr.attr` read the name the way code where the function is defined
+/// does (a global, or a name in the class body); any other expression is
+/// written `@(expr)`. The decorator expressions are evaluated first, top to
+/// bottom, then the function is created, then the decorators are applied
+/// bottom-up, and the result is the decorated value:
+///
+/// ```ignore
+/// rt::function!(ns, @property length(slf as "self"))?;
+/// rt::function!(m, @(m.global("functools")?.method1("wraps", (f,))?) wrapper(*args))?;
+/// ```
+///
+/// Options: `qualname = ".."` (defaults to the name, or `<class>.<name>`
+/// for a method), `name = ".."` (like `as`) and `doc = ".."`.
 #[macro_export]
 macro_rules! function {
+    // --- decorators, collected in order: `{name a b}` for `@a.b`,
+    // `{expr e}` for `@(e)` ---
+    (@decorators $h:tt [$($d:tt)*] @ ($e:expr) $($rest:tt)*) => {
+        $crate::function!(@decorators $h [$($d)* {expr $e}] $($rest)*)
+    };
+    (@decorators $h:tt [$($d:tt)*] @ $first:ident $($rest:tt)*) => {
+        $crate::function!(@dotted $h [$($d)*] [$first] $($rest)*)
+    };
+    (@dotted $h:tt [$($d:tt)*] [$($p:ident)*] . $attr:ident $($rest:tt)*) => {
+        $crate::function!(@dotted $h [$($d)*] [$($p)* $attr] $($rest)*)
+    };
+    (@dotted $h:tt [$($d:tt)*] [$($p:ident)*] $($rest:tt)*) => {
+        $crate::function!(@decorators $h [$($d)* {name $($p)*}] $($rest)*)
+    };
+    (@decorators ($mode:ident, $definer:expr) [$($d:tt)*]
+        $f:ident $(as $n:literal)? $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)?
+        $(, $key:ident = $value:literal)* $(,)?) => {{
+        let definer = $definer;
+        $crate::function!(@$mode definer
+            ($f, [$($n)?], [$($($caps)*)?], [$($params)*], [$($ret)?], [$($key = $value),*])
+            $($d)*)
+    }};
+    (@value $definer:ident $sig:tt $($d:tt)*) => {
+        $crate::function!(@decorate $definer $sig $($d)*)
+    };
+    (@bind $definer:ident ($f:ident, $n:tt, $caps:tt, $params:tt, $ret:tt, $opts:tt) $($d:tt)*) => {
+        $crate::function::Definer::bind(
+            $definer,
+            $crate::function::def_name(
+                $crate::function!(@pyname $n $opts),
+                $crate::function!(@opt qualname $opts),
+                stringify!($f),
+            ),
+            $crate::function!(@decorate $definer ($f, $n, $caps, $params, $ret, $opts) $($d)*)?,
+        )
+    };
+    // Evaluates the first decorator, then (recursively) the others and the
+    // function, and applies the first decorator last.
+    (@decorate $definer:ident $sig:tt {$($d:tt)*} $($rest:tt)*) => {{
+        use $crate::pyo3::types::PyAnyMethods as _;
+        let decorator = $crate::function!(@decorator $definer $($d)*);
+        let function = $crate::function!(@decorate $definer $sig $($rest)*)?;
+        decorator.call1((function,))
+    }};
+    (@decorate $definer:ident ($f:ident, $n:tt, [$($caps:tt)*], [$($params:tt)*], $ret:tt, $opts:tt)) => {
+        $crate::function!(@caps ($definer, $f, $n, [$($params)*], $ret, $opts) [] $($caps)*)
+    };
+    (@decorator $definer:ident expr $e:expr) => { $e };
+    (@decorator $definer:ident name $first:ident $($attr:ident)*) => {{
+        use $crate::Attributes as _;
+        $crate::function::Definer::lookup($definer, stringify!($first))? $(.attr(stringify!($attr))?)*
+    }};
     // --- captures: `n` by value, `&count` as a shared cell ---
     (@caps $h:tt [$($c:tt)*] & $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
         $crate::function!(@caps $h [$($c)* {cell $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
@@ -446,8 +517,8 @@ macro_rules! function {
     (@caps $h:tt [$($c:tt)*] $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
         $crate::function!(@caps $h [$($c)* {value $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
     };
-    (@caps ($module:expr, $f:ident, [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
-        $crate::function!(@params ($module, $f, [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
+    (@caps ($module:expr, $f:ident, $fname:tt, [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
+        $crate::function!(@params ($module, $f, $fname, [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
     };
     // --- parameters, sorted into positional-only, positional, `*args`,
     // keyword-only and `**kwargs` ---
@@ -483,7 +554,7 @@ macro_rules! function {
         $crate::function!(@build $h [$($po)*] [$($p)*] [$($v)*] [$($k)*] [$($vk)*])
     };
     // --- the function object ---
-    (@build ($module:expr, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
+    (@build ($module:expr, $f:ident, $fname:tt, [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
         [$({$po:ident, $pon:expr, [$($pod:expr)?], [$($poa:literal)?]})*]
         [$({$p:ident, $pn:expr, [$($pd:expr)?], [$($pa:literal)?]})*]
         [$({$v:ident, $vn:expr, [], [$($va:literal)?]})?]
@@ -529,7 +600,7 @@ macro_rules! function {
             $crate::function!(@call target(module; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
         };
         $crate::Function::create(module, $crate::FunctionDef {
-            name: $crate::function!(@opt name [$($key = $value),*]),
+            name: $crate::function!(@pyname $fname [$($key = $value),*]),
             qualname: $crate::function!(@opt qualname [$($key = $value),*]),
             rust_name: stringify!($f),
             doc: $crate::function!(@opt doc [$($key = $value),*]),
@@ -540,6 +611,7 @@ macro_rules! function {
             closure_names: CLOSURE_NAMES,
             annotations: ANNOTATIONS,
             classdict: $crate::function::Definer::classdict(definer),
+            class_qualname: $crate::function::Definer::class_qualname(definer),
             body,
         })
     }};
@@ -565,21 +637,27 @@ macro_rules! function {
         $crate::function!(@opt $want [$($($rest)*)?])
     };
     (@opt $want:ident []) => { ::std::option::Option::None };
-    // --- entry points ---
-    ($module:expr, $f:ident $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)? $(, $key:ident = $value:literal)* $(,)?) => {
-        $crate::function!(@caps ($module, $f, [$($params)*], [$($ret)?], [$($key = $value),*]) [] $($($caps)*)?)
+    (@pyname [$n:literal] $opts:tt) => { ::std::option::Option::Some($n) };
+    (@pyname [] $opts:tt) => { $crate::function!(@opt name $opts) };
+    // --- entry point ---
+    ($definer:expr, $($rest:tt)*) => {
+        $crate::function!(@decorators (value, $definer) [] $($rest)*)
     };
 }
 
-/// Executes a module level `def`: creates the function like [`function!`]
-/// and binds it to its name in the module's globals.
+/// Executes a `def` statement: creates the function like [`function!`],
+/// applies its decorators and binds the result to the function's name, in
+/// the module's globals or in the namespace of a class body.
 ///
 /// ```ignore
-/// rt::def!(module, fib(n))?;
+/// rt::def!(m, fib(n))?;
+/// rt::def!(m, @(trace(m, &rt::str(py, "outer"))?) greet(name), doc = "Say hello.")?;
+/// rt::def!(ns, __init__(slf as "self", x, y = 0))?;          // `Point.__init__`
+/// rt::def!(ns, @label.setter label_ as "label"(slf as "self", value))?;
 /// ```
 #[macro_export]
 macro_rules! def {
-    ($module:expr, $($rest:tt)*) => {
-        $crate::function::bind_global($module, $crate::function!($module, $($rest)*)?)
+    ($definer:expr, $($rest:tt)*) => {
+        $crate::function!(@decorators (bind, $definer) [] $($rest)*)
     };
 }

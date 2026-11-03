@@ -43,18 +43,8 @@ pub mod nasty {
     /// The body of `class Nasty`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Nasty", 8, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", what),
-                    qualname = "Nasty.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__del__",
-                rt::function!(ns, __del__(slf as "self"), qualname = "Nasty.__del__")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", what))?;
+            rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }
@@ -101,14 +91,7 @@ pub mod nasty_name {
     /// The body of `class NastyName`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "NastyName", 16, |_| {
-            ns.set(
-                "__del__",
-                rt::function!(
-                    ns,
-                    __del__(slf as "self"),
-                    qualname = "NastyName.__del__"
-                )?,
-            )?;
+            rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }
@@ -140,10 +123,7 @@ pub mod slow {
     /// The body of `class Slow`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Slow", 68, |_| {
-            ns.set(
-                "__del__",
-                rt::function!(ns, __del__(slf as "self"), qualname = "Slow.__del__")?,
-            )?;
+            rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }

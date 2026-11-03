@@ -37,6 +37,9 @@ pub struct ClassDef {
     /// Annotations of the class body as Python source, evaluated lazily by
     /// the class's `__annotate__` (PEP 649).
     pub annotations: &'static [(&'static str, &'static str)],
+    /// Whether the module has `from __future__ import annotations`, which
+    /// leaves the methods without a `__classdict__` cell.
+    pub future_annotations: bool,
 }
 
 impl ClassDef {
@@ -57,6 +60,7 @@ pub struct Namespace<'py> {
     module: Module<'py>,
     mapping: Bound<'py, PyAny>,
     qualname: &'static str,
+    future_annotations: bool,
     class_cell: OnceCell<Bound<'py, PyAny>>,
     classdict: OnceCell<Bound<'py, PyAny>>,
     /// `__class__` and `__classdict__` cells of code kept as Python, which
@@ -65,11 +69,12 @@ pub struct Namespace<'py> {
 }
 
 impl<'py> Namespace<'py> {
-    fn new(module: Module<'py>, mapping: Bound<'py, PyAny>, qualname: &'static str) -> Self {
+    fn new(module: Module<'py>, mapping: Bound<'py, PyAny>, def: &'static ClassDef) -> Self {
         Self {
             module,
             mapping,
-            qualname,
+            qualname: def.qualname(),
+            future_annotations: def.future_annotations,
             class_cell: OnceCell::new(),
             classdict: OnceCell::new(),
             kept_cells: RefCell::new(Vec::new()),
@@ -92,6 +97,10 @@ impl<'py> Namespace<'py> {
 
     pub(crate) fn qualname(&self) -> &'static str {
         self.qualname
+    }
+
+    pub(crate) fn future_annotations(&self) -> bool {
+        self.future_annotations
     }
 
     /// Reads a name like `LOAD_NAME`: the namespace, then the module's
@@ -328,7 +337,7 @@ fn build_class<'py>(
         ))));
     }
 
-    let ns = Namespace::new(module.clone(), mapping, def.qualname());
+    let ns = Namespace::new(module.clone(), mapping, def);
     // What CPython's code for the class body does before and after the body.
     ns.set("__module__", ns.get("__name__")?)?;
     ns.set("__qualname__", def.qualname())?;
@@ -603,14 +612,17 @@ pub(crate) fn classdict_value<'py>(cell: &Bound<'py, PyAny>) -> Option<Bound<'py
 ///     qualname = "Outer.Inner", attributes = ["x", "y"])?;
 /// rt::class!(m, "Config"(), config::body, line = 5,
 ///     annotations = [("name", "str"), ("size", "int")])?;
+/// rt::class!(m, "Node"(), node::body, line = 7, future_annotations)?;
 /// ```
 ///
 /// The bases and keywords are written like the arguments of [`call!`](crate::call),
 /// `*bases` and `**keywords` included. `line` is the line of the first
 /// decorator (or of `class`), `attributes` the `__static_attributes__`.
+/// `future_annotations` is given in a module with `from __future__ import
+/// annotations` when the class body defines methods.
 #[macro_export]
 macro_rules! class {
-    ($module:expr, $name:literal ($($args:tt)*), $body:path, line = $line:literal
+    (@build $future:literal, $module:expr, $name:literal ($($args:tt)*), $body:path, $line:literal
         $(, qualname = $qualname:literal)?
         $(, attributes = [$($attr:literal),* $(,)?])?
         $(, annotations = [$(($ann_name:literal, $ann:literal)),* $(,)?])?
@@ -622,6 +634,7 @@ macro_rules! class {
             body: $body,
             attributes: &[$($($attr),*)?],
             annotations: &[$($(($ann_name, $ann)),*)?],
+            future_annotations: $future,
         };
         let module: &$crate::Module<'_> = $module;
         // Called like `__build_class__(body, name, *bases, **keywords)`:
@@ -630,4 +643,12 @@ macro_rules! class {
     }};
     (@opt) => { ::std::option::Option::None };
     (@opt $value:literal) => { ::std::option::Option::Some($value) };
+    ($module:expr, $name:literal ($($args:tt)*), $body:path, line = $line:literal,
+        future_annotations $(, $($rest:tt)*)?) => {
+        $crate::class!(@build true, $module, $name ($($args)*), $body, $line $(, $($rest)*)?)
+    };
+    ($module:expr, $name:literal ($($args:tt)*), $body:path, line = $line:literal
+        $(, $($rest:tt)*)?) => {
+        $crate::class!(@build false, $module, $name ($($args)*), $body, $line $(, $($rest)*)?)
+    };
 }

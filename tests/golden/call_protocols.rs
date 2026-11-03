@@ -124,36 +124,11 @@ pub mod box_ {
     /// The body of `class Box`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Box", 81, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", value, extra = 0),
-                    qualname = "Box.__init__"
-                )?,
-            )?;
-            ns.set(
-                "get",
-                rt::function!(ns, get(slf as "self"), qualname = "Box.get")?,
-            )?;
-            ns.set(
-                "add",
-                rt::function!(
-                    ns,
-                    add(slf as "self", n, times = 1),
-                    qualname = "Box.add"
-                )?,
-            )?;
-            {
-                let decorator = ns.get("classmethod")?;
-                let function = rt::function!(ns, make(cls, value), qualname = "Box.make")?;
-                ns.set("make", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("staticmethod")?;
-                let function = rt::function!(ns, twice(x), qualname = "Box.twice")?;
-                ns.set("twice", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, __init__(slf as "self", value, extra = 0))?;
+            rt::def!(ns, get(slf as "self"))?;
+            rt::def!(ns, add(slf as "self", n, times = 1))?;
+            rt::def!(ns, @classmethod make(cls, value))?;
+            rt::def!(ns, @staticmethod twice(x))?;
             Ok(())
         })
     }
@@ -211,14 +186,7 @@ pub mod child {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Child", 100, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "get",
-                rt::function!(
-                    ns,
-                    get[&__class__](slf as "self"),
-                    qualname = "Child.get"
-                )?,
-            )?;
+            rt::def!(ns, get[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -263,10 +231,7 @@ pub mod noisy {
     /// The body of `class Noisy`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Noisy", 148, |_| {
-            ns.set(
-                "__del__",
-                rt::function!(ns, __del__(slf as "self"), qualname = "Noisy.__del__")?,
-            )?;
+            rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }

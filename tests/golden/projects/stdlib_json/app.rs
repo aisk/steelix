@@ -283,14 +283,7 @@ pub mod point {
     /// The body of `class Point`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Point", 67, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", x, y),
-                    qualname = "Point.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", x, y))?;
             Ok(())
         })
     }
@@ -318,14 +311,7 @@ pub mod point_encoder {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "PointEncoder", 73, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "default",
-                rt::function!(
-                    ns,
-                    default[&__class__](slf as "self", o),
-                    qualname = "PointEncoder.default"
-                )?,
-            )?;
+            rt::def!(ns, default[&__class__](slf as "self", o))?;
             Ok(())
         })
     }

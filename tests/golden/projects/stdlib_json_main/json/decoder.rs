@@ -433,22 +433,8 @@ pub mod json_decode_error {
                     colno: The column corresponding to pos\n\
                     \n",
             )?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", msg, doc, pos),
-                    qualname = "JSONDecodeError.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__reduce__",
-                rt::function!(
-                    ns,
-                    __reduce__(slf as "self"),
-                    qualname = "JSONDecodeError.__reduce__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", msg, doc, pos))?;
+            rt::def!(ns, __reduce__(slf as "self"))?;
             Ok(())
         })
     }
@@ -566,10 +552,9 @@ pub mod json_decoder {
                     their corresponding ``float`` values, which is outside the JSON spec.\n\
                     \n",
             )?;
-            ns.set("__init__", rt::function!(
+            rt::def!(
                 ns,
                 __init__(slf as "self", *, object_hook = py.None(), parse_float = py.None(), parse_int = py.None(), parse_constant = py.None(), strict = true, object_pairs_hook = py.None()),
-                qualname = "JSONDecoder.__init__",
                 doc = "``object_hook``, if specified, will be called with the result\n\
                     of every JSON object decoded and its return value will be used in\n\
                     place of the given ``dict``.  This can be used to provide custom\n\
@@ -601,32 +586,24 @@ pub mod json_decoder {
                     characters will be allowed inside strings.  Control characters in\n\
                     this context are those with character codes in the 0-31 range,\n\
                     including ``'\\t'`` (tab), ``'\\n'``, ``'\\r'`` and ``'\\0'``.\n"
-            )?)?;
-            ns.set(
-                "decode",
-                rt::function!(
-                    ns,
-                    decode(slf as "self", s, _w = ns.get("WHITESPACE")?.attr("match")?),
-                    qualname = "JSONDecoder.decode",
-                    doc = "Return the Python representation of ``s`` (a ``str`` instance\n\
-                        containing a JSON document).\n\
-                        \n"
-                )?,
             )?;
-            ns.set(
-                "raw_decode",
-                rt::function!(
-                    ns,
-                    raw_decode(slf as "self", s, idx = 0),
-                    qualname = "JSONDecoder.raw_decode",
-                    doc = "Decode a JSON document from ``s`` (a ``str`` beginning with\n\
-                        a JSON document) and return a 2-tuple of the Python\n\
-                        representation and the index in ``s`` where the document ended.\n\
-                        \n\
-                        This can be used to decode a JSON document from a string that may\n\
-                        have extraneous data at the end.\n\
-                        \n"
-                )?,
+            rt::def!(
+                ns,
+                decode(slf as "self", s, _w = ns.get("WHITESPACE")?.attr("match")?),
+                doc = "Return the Python representation of ``s`` (a ``str`` instance\n\
+                    containing a JSON document).\n\
+                    \n"
+            )?;
+            rt::def!(
+                ns,
+                raw_decode(slf as "self", s, idx = 0),
+                doc = "Decode a JSON document from ``s`` (a ``str`` beginning with\n\
+                    a JSON document) and return a 2-tuple of the Python\n\
+                    representation and the index in ``s`` where the document ended.\n\
+                    \n\
+                    This can be used to decode a JSON document from a string that may\n\
+                    have extraneous data at the end.\n\
+                    \n"
             )?;
             Ok(())
         })

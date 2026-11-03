@@ -62,15 +62,9 @@ pub mod body_ {
                 .attr("version_info")?
                 .ge(PyTuple::new(py, [3, 0])?)?
             {
-                ns.set(
-                    "version",
-                    rt::function!(ns, version(slf as "self"), qualname = "Body.version")?,
-                )?;
+                rt::def!(ns, version(slf as "self"))?;
             } else {
-                ns.set(
-                    "version",
-                    rt::function!(ns, version_(slf as "self"), qualname = "Body.version")?,
-                )?;
+                rt::def!(ns, version_ as "version"(slf as "self"))?;
             }
             let result = (|| -> PyResult<()> {
                 match PyDict::new(py).as_any().get_item("key") {
@@ -175,22 +169,8 @@ pub mod generic {
     /// The body of `class Generic`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Generic", 61, |_| {
-            ns.set(
-                "__class_getitem__",
-                rt::function!(
-                    ns,
-                    __class_getitem__(cls, item),
-                    qualname = "Generic.__class_getitem__"
-                )?,
-            )?;
-            ns.set(
-                "__init_subclass__",
-                rt::function!(
-                    ns,
-                    __init_subclass__(cls, **kwargs),
-                    qualname = "Generic.__init_subclass__"
-                )?,
-            )?;
+            rt::def!(ns, __class_getitem__(cls, item))?;
+            rt::def!(ns, __init_subclass__(cls, **kwargs))?;
             Ok(())
         })
     }
@@ -245,22 +225,8 @@ pub mod new {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "New", 76, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__new__",
-                rt::function!(
-                    ns,
-                    __new__[&__class__](cls, *args),
-                    qualname = "New.__new__"
-                )?,
-            )?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", value),
-                    qualname = "New.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __new__[&__class__](cls, *args))?;
+            rt::def!(ns, __init__(slf as "self", value))?;
             Ok(())
         })
     }
@@ -333,22 +299,8 @@ pub mod annotated {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Annotated", 111, |_| {
             ns.set("alias", ns.get("int")?)?;
-            ns.set(
-                "method",
-                rt::function!(
-                    ns,
-                    method(slf as "self", x: "alias") -> "'Annotated'",
-                    qualname = "Annotated.method"
-                )?,
-            )?;
-            ns.set(
-                "kept",
-                rt::function!(
-                    ns,
-                    kept(slf as "self", x: "alias") -> "list[alias]",
-                    qualname = "Annotated.kept"
-                )?,
-            )?;
+            rt::def!(ns, method(slf as "self", x: "alias") -> "'Annotated'")?;
+            rt::def!(ns, kept(slf as "self", x: "alias") -> "list[alias]")?;
             Ok(())
         })
     }
@@ -389,54 +341,12 @@ pub mod uses {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Uses", 124, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__getattr__",
-                rt::function!(
-                    ns,
-                    __getattr__(slf as "self", name),
-                    qualname = "Uses.__getattr__"
-                )?,
-            )?;
-            ns.set(
-                "__setattr__",
-                rt::function!(
-                    ns,
-                    __setattr__[&__class__](slf as "self", name, value),
-                    qualname = "Uses.__setattr__"
-                )?,
-            )?;
-            ns.set(
-                "__contains__",
-                rt::function!(
-                    ns,
-                    __contains__(slf as "self", item),
-                    qualname = "Uses.__contains__"
-                )?,
-            )?;
-            ns.set(
-                "__lt__",
-                rt::function!(
-                    ns,
-                    __lt__(slf as "self", other),
-                    qualname = "Uses.__lt__"
-                )?,
-            )?;
-            ns.set(
-                "__enter__",
-                rt::function!(
-                    ns,
-                    __enter__(slf as "self"),
-                    qualname = "Uses.__enter__"
-                )?,
-            )?;
-            ns.set(
-                "__exit__",
-                rt::function!(
-                    ns,
-                    __exit__(slf as "self", *exc),
-                    qualname = "Uses.__exit__"
-                )?,
-            )?;
+            rt::def!(ns, __getattr__(slf as "self", name))?;
+            rt::def!(ns, __setattr__[&__class__](slf as "self", name, value))?;
+            rt::def!(ns, __contains__(slf as "self", item))?;
+            rt::def!(ns, __lt__(slf as "self", other))?;
+            rt::def!(ns, __enter__(slf as "self"))?;
+            rt::def!(ns, __exit__(slf as "self", *exc))?;
             Ok(())
         })
     }

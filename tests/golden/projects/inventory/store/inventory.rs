@@ -10,30 +10,9 @@ pub mod inventory_ {
     /// The body of `class Inventory`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Inventory", 7, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self"),
-                    qualname = "Inventory.__init__"
-                )?,
-            )?;
-            ns.set(
-                "add",
-                rt::function!(
-                    ns,
-                    add(slf as "self", item),
-                    qualname = "Inventory.add"
-                )?,
-            )?;
-            ns.set(
-                "take",
-                rt::function!(
-                    ns,
-                    take(slf as "self", name, quantity),
-                    qualname = "Inventory.take"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self"))?;
+            rt::def!(ns, add(slf as "self", item))?;
+            rt::def!(ns, take(slf as "self", name, quantity))?;
             Ok(())
         })
     }

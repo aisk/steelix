@@ -131,6 +131,8 @@ class StmtLowering(HandlingLowering):
     def stmt(self, stmt: ast.stmt) -> list[rs.Stmt]:
         markers = self.exprs.markers
         self.exprs.line = stmt.lineno if isinstance(stmt, _HEADED) else statement_line(stmt)
+        if isinstance(stmt, ast.FunctionDef):
+            self.exprs.line = first_line(stmt)  # its first decorator
         try:
             return self._lower(stmt)
         finally:
@@ -159,9 +161,11 @@ class StmtLowering(HandlingLowering):
             out = self._stmt(stmt)
         items = self.flush_items()
         rust = prelude + out
+        line = statement_line(stmt)
         if isinstance(stmt, ast.FunctionDef):
             rust = _without_def_macros(rust)
-        marker = self.mark(statement_line(stmt), rust)
+            line = first_line(stmt)
+        marker = self.mark(line, rust)
         return comments + items + marker + self.settle(prelude + out)
 
     def settle(self, stmts: list[rs.Stmt]) -> list[rs.Stmt]:
@@ -241,7 +245,7 @@ class StmtLowering(HandlingLowering):
         else:
             rust = lower_nested(self.ctx, stmt)
         value = self.exprs.function_value(stmt, rust)
-        return [self.store_name(stmt, binding_name(stmt), value)]
+        return [_as_def(self.store_name(stmt, binding_name(stmt), value), stmt.name)]
 
     def class_annotation(self, stmt: ast.AnnAssign) -> list[rs.Stmt]:
         """`name: annotation [= value]` in a class body. The annotation goes
@@ -261,13 +265,12 @@ class StmtLowering(HandlingLowering):
 
     def module_def(self, stmt: ast.FunctionDef, rust: str) -> list[rs.Stmt]:
         """A module level `def`, whose Rust fn is an item of the module."""
+        self.exprs.line = first_line(stmt)
         with self.exprs.fresh() as prelude:
-            if stmt.decorator_list:
-                out = [self.store_name(stmt, stmt.name, self.exprs.function_value(stmt, rust))]
-            else:
-                out = [rs.ExprStmt(self.exprs.function_value(stmt, rust, bind=True).expr)]
+            value = self.exprs.function_value(stmt, rust)
+            out = [_as_def(self.store_name(stmt, stmt.name, value), stmt.name)]
         items = self.flush_items()
-        line = self.mark(stmt.lineno, _without_def_macros(prelude + out))
+        line = self.mark(first_line(stmt), _without_def_macros(prelude + out))
         return items + line + self.settle(prelude + out)
 
     # --- expressions as statements ---
@@ -748,15 +751,42 @@ _HEADED = tuple(kind for kind in COMPOUND if kind is not ast.FunctionDef)
 `def` is marked like a simple statement, a `class` is lowered apart)."""
 
 
+def _as_def(store: rs.Stmt, name: str) -> rs.Stmt:
+    """`ns.set("f", rt::function!(ns, f(..))?)?` as `rt::def!(ns, f(..))?`,
+    and the same for `m.set_global` in module code: `def!` binds the name
+    of the function where it is defined, the way the store does. Other
+    stores (a name declared `global` in a class body, a mangled name, a
+    local) stay."""
+    match store:
+        case rs.ExprStmt(
+            rs.Try(
+                rs.MethodCall(
+                    rs.Path(scope),
+                    "set" | "set_global" as method,
+                    (rs.StrLit(bound), rs.Try(rs.MacroCall("rt::function", args))),
+                )
+            )
+        ) if (
+            bound == name
+            and args[0] == rs.Path(scope)
+            and method == ("set" if scope == NAMESPACE else "set_global")
+        ):
+            return rs.ExprStmt(rs.Try(rs.MacroCall("rt::def", args)))
+    return store
+
+
 def _without_def_macros(stmts: list[rs.Stmt]) -> list[rs.Stmt]:
     """`stmts` with `rt::def!(..)?` and `rt::function!(..)?` replaced by
     their arguments: creating the function object only fails when Python is
     out of memory, which is not worth a line marker before every `def`. The
-    defaults and decorators it evaluates can raise."""
+    defaults and decorators it evaluates can raise; reading or applying a
+    decorator always may."""
 
     def visit(node: rs.Expr) -> rs.Expr:
         match node:
             case rs.Try(rs.MacroCall("rt::def" | "rt::function", args)):
+                if any(isinstance(arg, rs.Decorator) for arg in args):
+                    return rs.Try(rs.Tuple(args))
                 return rs.Tuple(args)
         return node
 

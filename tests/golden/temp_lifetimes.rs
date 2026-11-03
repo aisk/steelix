@@ -85,38 +85,10 @@ pub mod tracked {
     /// The body of `class Tracked`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Tracked", 10, |_| {
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", name),
-                    qualname = "Tracked.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__del__",
-                rt::function!(
-                    ns,
-                    __del__(slf as "self"),
-                    qualname = "Tracked.__del__"
-                )?,
-            )?;
-            ns.set(
-                "__iadd__",
-                rt::function!(
-                    ns,
-                    __iadd__(slf as "self", other),
-                    qualname = "Tracked.__iadd__"
-                )?,
-            )?;
-            ns.set(
-                "__bool__",
-                rt::function!(
-                    ns,
-                    __bool__(slf as "self"),
-                    qualname = "Tracked.__bool__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", name))?;
+            rt::def!(ns, __del__(slf as "self"))?;
+            rt::def!(ns, __iadd__(slf as "self", other))?;
+            rt::def!(ns, __bool__(slf as "self"))?;
             Ok(())
         })
     }

@@ -18,39 +18,14 @@ pub mod account {
                 "_Account__slots_like",
                 PyTuple::new(m.py(), ["__a", "__b"])?,
             )?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", owner),
-                    qualname = "Account.__init__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", owner))?;
             ns.set(
                 "_Account__secret",
-                rt::function!(
-                    ns,
-                    __secret(slf as "self"),
-                    qualname = "Account.__secret"
-                )?,
+                rt::function!(ns, __secret(slf as "self"))?,
             )?;
-            ns.set(
-                "reveal",
-                rt::function!(ns, reveal(slf as "self"), qualname = "Account.reveal")?,
-            )?;
-            ns.set(
-                "get",
-                rt::function!(
-                    ns,
-                    get(slf as "self", _Account__key = "default"),
-                    qualname = "Account.get"
-                )?,
-            )?;
-            {
-                let decorator = ns.get("staticmethod")?;
-                let function = rt::function!(ns, count(), qualname = "Account.count")?;
-                ns.set("count", decorator.call1((function,))?)?;
-            }
+            rt::def!(ns, reveal(slf as "self"))?;
+            rt::def!(ns, get(slf as "self", _Account__key = "default"))?;
+            rt::def!(ns, @staticmethod count())?;
             ns.set(
                 "_Account__Inner",
                 rt::class!(
@@ -61,22 +36,9 @@ pub mod account {
                     qualname = "Account.__Inner"
                 )?,
             )?;
-            ns.set(
-                "inner",
-                rt::function!(ns, inner(slf as "self"), qualname = "Account.inner")?,
-            )?;
-            ns.set(
-                "handler",
-                rt::function!(
-                    ns,
-                    handler(slf as "self"),
-                    qualname = "Account.handler"
-                )?,
-            )?;
-            ns.set(
-                "names",
-                rt::function!(ns, names(slf as "self"), qualname = "Account.names")?,
-            )?;
+            rt::def!(ns, inner(slf as "self"))?;
+            rt::def!(ns, handler(slf as "self"))?;
+            rt::def!(ns, names(slf as "self"))?;
             Ok(())
         })
     }
@@ -151,14 +113,7 @@ pub mod account {
         pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
             rt::frame!(ns, "Account.__Inner", 26, |_| {
                 ns.set("_Inner__level", 2)?;
-                ns.set(
-                    "level",
-                    rt::function!(
-                        ns,
-                        level(slf as "self"),
-                        qualname = "Account.__Inner.level"
-                    )?,
-                )?;
+                rt::def!(ns, level(slf as "self"))?;
                 Ok(())
             })
         }
@@ -224,14 +179,8 @@ pub mod _under {
     /// The body of `class _Under`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "_Under", 46, |_| {
-            ns.set(
-                "_Under__x",
-                rt::function!(ns, __x(slf as "self"), qualname = "_Under.__x")?,
-            )?;
-            ns.set(
-                "call",
-                rt::function!(ns, call(slf as "self"), qualname = "_Under.call")?,
-            )?;
+            ns.set("_Under__x", rt::function!(ns, __x(slf as "self"))?)?;
+            rt::def!(ns, call(slf as "self"))?;
             Ok(())
         })
     }
@@ -254,14 +203,8 @@ pub mod ___ {
     /// The body of `class ___`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "___", 54, |_| {
-            ns.set(
-                "__y",
-                rt::function!(ns, __y(slf as "self"), qualname = "___.__y")?,
-            )?;
-            ns.set(
-                "call",
-                rt::function!(ns, call(slf as "self"), qualname = "___.call")?,
-            )?;
+            rt::def!(ns, __y(slf as "self"))?;
+            rt::def!(ns, call(slf as "self"))?;
             Ok(())
         })
     }

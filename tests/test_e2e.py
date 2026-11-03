@@ -259,6 +259,7 @@ DEFAULT_LINES_CASES = [
     "exceptions_uncaught",
     "with_stmt",
     "except_custom_line",
+    "decorators_uncaught",
 ]
 DEFAULT_SUFFIX = "_default_lines"
 # Prints line numbers of traceback entries, which are the def lines here.

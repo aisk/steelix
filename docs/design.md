@@ -143,7 +143,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 - 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
 - 函数末尾的 `return` 写成尾表达式，返回值本身是 `PyResult` 时不再包一层 `Ok(..?)`
 - 带 `else` 且有 `break` 的循环包在带标签的 block 里，`break` 写成 `break 'for_else`，正常结束时执行 `else`。`else` 里的 `break`/`continue` 属于外层循环，要跨出这个 block，rustc 不允许不带标签的跳转跨出带标签的 block（E0695），所以只在这时给外层循环加标签 `'outer: for ..`，写成 `continue 'outer`。其余循环都不带标签
-- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(m, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`。多行的 docstring（还有类和模块的 `__doc__`）在 Rust 字面量里也是一行对一行，行尾用 `\` 续行（M11a），续行的缩进和行首的空白不属于字符串，所以值的行首空格写成 `\x20`
+- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(m, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。Rust 名字与 Python 名字不同时写成 `helper_ as "helper"(x)`，有 docstring 时加 `doc = "..."`，装饰器写在名字前面（`rt::def!(m, @functools.cache fib(n))?`，第 6 节）。多行的 docstring（还有类和模块的 `__doc__`）在 Rust 字面量里也是一行对一行，行尾用 `\` 续行（M11a），续行的缩进和行首的空白不属于字符串，所以值的行首空格写成 `\x20`
 
   ```rust
   rt::def!(
@@ -245,11 +245,12 @@ let increment = rt::function!(
 )?;
 ```
 
-- `rt::function!` 返回函数对象，`rt::def!` 再把它绑定到 globals 里的 `__name__`。第一个参数是模块上下文，函数对象保存它的 globals，经过 Python 调用时再用它构造 `rt::Module` 传给 Rust fn
+- `rt::function!` 返回函数对象，`rt::def!` 再把它绑定到函数名，模块代码里是 globals，类体里是类的命名空间（§10）。第一个参数是模块上下文（类体里是 `ns`），函数对象保存它的 globals，经过 Python 调用时再用它构造 `rt::Module` 传给 Rust fn。装饰器写在名字前面（下面的装饰器一节）
 - 签名里 `/`、`*`、`*args`、`**kwargs` 与 Python 相同。默认值是 Rust 表达式，在宏展开处（也就是 `def` 执行时）按 Python 顺序求值一次。Rust 名字与 Python 名字不同的参数写成 `py_ as "py"`，报错信息和 `inspect.signature` 里显示 Python 名字
 - 注解写成 `x: "int"`、`-> "str"`，是 Python 源码文本（见下面的注解一节）
 - 方括号里是闭包捕获的变量，`&count` 是 cell，不带 `&` 的是值（见闭包一节）
-- 可选的 `name = ".."`、`qualname = ".."`、`doc = ".."`。qualname 默认就是名字，嵌套函数是 `outer.<locals>.inner`，lambda 是 `<lambda>`
+- Rust 名字和 Python 名字不同的函数和参数一样写成 `helper_ as "helper"(x)`，`r#type` 这样的关键字不用写，宏去掉 `r#`
+- 可选的 `qualname = ".."`、`doc = ".."`（还有和 `as` 一样的 `name = ".."`，生成的代码不用）。qualname 默认就是名字，类体里定义的函数是 `<类的 qualname>.<名字>`（§10），只在不同的时候写出来，比如嵌套函数是 `outer.<locals>.inner`，lambda 是 `<lambda>`
 - 生成的 Rust fn 参数顺序：`m`、捕获的变量、Python 参数。`*args` 的类型是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`，可以直接用 tuple/dict 的方法
 
 ### 直接调用与默认参数
@@ -299,7 +300,7 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 - lambda 的函数体是一个尾表达式
 - `if`、`elif`、`while`、`for` 头部表达式里的 lambda，其 fn item 放在整个语句之前，而不是第一个分支或循环体里，否则头部看不到它
 - 嵌套函数的 docstring 同样生成 `///` 和 `__doc__`
-- 模块级 `if`、`for`、`try` 等复合语句里的 `def`（M8 之前保留为 Python）同样是 fn item，写在 `exec_module` 里，执行到 `def` 时用 `m.set_global(..)` 绑定，调用经过 globals。名字和模块函数冲突时加 `_` 后缀（`fn helper_`），Python 名字用 `name = "helper"` 给出
+- 模块级 `if`、`for`、`try` 等复合语句里的 `def`（M8 之前保留为 Python）同样是 fn item，写在 `exec_module` 里，执行到 `def` 时由 `rt::def!` 绑定，调用经过 globals。名字和模块函数冲突时加 `_` 后缀（`fn helper_`），Python 名字和参数一样用 `as` 给出：`rt::def!(m, helper_ as "helper"(x))?`
 - 生成器表达式的 step（§8）也是这样的 fn item，叫 `genexpr`、`genexpr2`
 
 ### 闭包与 cell
@@ -339,17 +340,33 @@ pub fn make_counter<'py>(
 
 ### 装饰器
 
-按 Python 的顺序执行：从上到下求值装饰器表达式，再求值默认参数、创建函数对象，然后从下到上应用。装饰器先放进临时变量，每次应用一条语句，读起来和 Python 的顺序一致
+装饰器写在 `rt::def!`（嵌套函数是 `rt::function!`）里函数名的前面，和 Python 一样（M11b）
 
 ```rust
-let decorator = trace(m, &rt::str(py, "outer"))?;
-let decorator2 = trace(m, &rt::str(py, "inner"))?;
-let function = rt::function!(m, greet(name, punct = ..), doc = "Say hello.")?;
-let function = decorator2.call1((&function,))?;
-m.set_global("greet", decorator.call1((&function,))?)?;
+rt::def!(
+    m,
+    @(trace(m, &rt::str(py, "outer"))?)
+    @(trace(m, &rt::str(py, "inner"))?)
+    greet(name, punct = default_value(m, &rt::str(py, "!"))?),
+    doc = "Say hello."
+)?;
+rt::def!(m, @register first())?;
+rt::def!(ns, @label.setter label_ as "label"(slf as "self", value))?;
 ```
 
-被装饰的名字绑定的是装饰器的返回值，所以对它的调用一律走 globals 查找，不做直接调用。已验证 `functools.wraps`、`functools.lru_cache` 和用户自己的装饰器。
+- `@name` 和 `@name.attr.attr` 按定义处的规则读名字：模块代码和函数里是 `m.global("name")`，类体里是 `ns.get("name")`，属性是 `.attr("attr")`。只有生成代码本来就是这样读的名字才这样写，名字要能原样写成 Rust 标识符（不是关键字，不是 `_`）。别的表达式（调用、局部变量、builtin）写成 `@(expr)`，局部变量是 `@(&local)`
+- 宏按 Python 的顺序执行：从上到下求值装饰器表达式，再求值默认参数、创建函数对象，然后从下到上应用，最后 `rt::def!` 把结果绑定到函数名（`m.set_global` 或 `ns.set`），`rt::function!` 返回它
+- 装饰器或默认参数的求值要用到临时变量（lowering 的 prelude）时，这些语句会在宏之前执行，顺序就错了；装饰器或默认参数里有 `:=` 时，赋值的局部变量可能正被前面的装饰器借用。这两种情况仍然是原来的写法：装饰器先放进临时变量，每次应用一条语句
+
+  ```rust
+  let decorator = m.global("chosen")?;
+  let function = rt::function!(m, walrus())?;
+  m.set_global("walrus", decorator.call1((function,))?)?;
+  ```
+
+- `--traceback-lines` 时 CPython 报告的行号是装饰器自己的那一行（求值和应用都是），默认参数是 `def` 那一行。只有一个装饰器、默认参数不会出错时，这些都是同一行，宏之前的 `frame.line(N)` 就够了；否则也用上面的写法，每条语句前面是自己的行号。不带 `--traceback-lines` 时都写成宏
+
+被装饰的名字绑定的是装饰器的返回值，所以对它的调用一律走 globals 查找，不做直接调用。已验证 `functools.wraps`、`functools.lru_cache` 和用户自己的装饰器（`tests/cases/decorators.py`、`decorators_uncaught.py`，行号是 `decorator_lines.py`）。
 
 ### 注解（PEP 649）
 
@@ -521,7 +538,7 @@ h.call0()?.contains(&item)?
 - 返回或者 yield 一个在同一个 fn 或闭包里声明的局部变量时直接 move（`return Ok(x)`、`return Ok(Some(x))`），不 clone（`rustast/cleanup.py`，在 Rust AST 上做，因为只有那里知道变量在哪个闭包里声明）。返回之后这个变量不会再被用到，对象由返回值继续持有，不会有别的对象因此提前或推迟释放。外层 fn 或闭包的变量（被闭包按引用捕获）、参数（`&Bound`）、`Option` 变量和被 guard 借用的变量（`rt::Handling::new(&err)`）照旧 clone
 - 目标和右边个数相同、都没有 `*` 的解包赋值 `a, b = b, a` 不再构造元组再 `rt::unpack`，写成 `[a, b] = [b.clone(), a.clone()];`。Python 也是先按顺序求值右边的每一项，再依次赋值，中间的元组看不到（CPython 对两三项的情况本来就不构造元组）
 - `globals()` 是模块持有的 `&Bound<PyDict>`，直接用 `m.globals()`，不再 `.clone().into_any()`（`m.globals().contains("n")?`）
-- 带装饰器的类和带装饰器的函数一样，最外层的装饰器在保存时调用：`m.set_global("Point", decorator.call1((point,))?)?`
+- 带装饰器的类和以前带装饰器的函数一样，最外层的装饰器在保存时调用：`m.set_global("Point", decorator.call1((point,))?)?`（M11b 起函数的装饰器写在 `rt::def!` 里，§6）
 - 先声明后赋值的局部变量（`let kind: Bound<'py, PyAny>;` 和 `let mut x: Option<..> = None;`，§5）移到第一次用到它的语句之前（`rustast/cleanup.py` 的 `declare_late`，在每个函数 lower 完之后做）。第一次使用就是给它赋值时在那里带值声明，对应 clippy 的 `needless_late_init`。第一次使用可以是 `x = v;`，也可以是带 `else` 的 `if`/`else if` 链或 `match`（`try` 生成的），要求每个分支的最后一条语句给它赋值，或者离开（`return`、`break`、`continue`，`raise` 也是 `return Err(..)`），分支里别的地方和条件里都不用到它。嵌套的 `if` 只要符合同样的条件也算赋值。分支里的赋值变成块的尾表达式，至少要有一个分支给出值
 
   ```rust
@@ -538,7 +555,7 @@ h.call0()?.contains(&item)?
 
   标准库 154 个模块里先声明后赋值的变量从 3445 个变成 3137 个，合并了 308 个。剩下的第一次使用是没有 `else` 的 `if`、循环，或者分支最后赋值的是别的变量（一条 `if` 给两个变量赋值时，排在后面的那个合并，前面的保留声明），都移到了使用之前。因为 `co_varnames` 的顺序而不能合并的 `if` 链有 23 个，比如 `userhome` 和 `drive` 由同一条 `if` 赋值，`drive` 的声明必须排在 `userhome` 后面
 
-量过但没有做的（标准库 154 个模块，32 万行）：`.clone()` 共 2422 个，其中 1150 个是被重新赋值的参数 `let mut n = n.clone();`（参数是 `&Bound`），约 400 个是 `x = y.clone()`（两个 Python 变量都持有这个对象，move 会让对象在 `x` 被重新赋值时提前释放），约 270 个是返回参数（`&Bound`，只能 clone），约 170 个是条件表达式和 `and`/`or` 的值形式里的局部变量，都是必要的。临时变量在 lowering 时已经只在求值顺序需要时才引入，3052 个临时变量里能原样内联而不改变求值顺序的只有装饰器的 `let decorator`/`let function`（650 多个，内联之后是一个很长的嵌套调用，不比现在好读）和上面的装饰类
+量过但没有做的（标准库 154 个模块，32 万行）：`.clone()` 共 2422 个，其中 1150 个是被重新赋值的参数 `let mut n = n.clone();`（参数是 `&Bound`），约 400 个是 `x = y.clone()`（两个 Python 变量都持有这个对象，move 会让对象在 `x` 被重新赋值时提前释放），约 270 个是返回参数（`&Bound`，只能 clone），约 170 个是条件表达式和 `and`/`or` 的值形式里的局部变量，都是必要的。临时变量在 lowering 时已经只在求值顺序需要时才引入，3052 个临时变量里能原样内联而不改变求值顺序的只有装饰器的 `let decorator`/`let function`（650 多个，内联之后是一个很长的嵌套调用，不比现在好读；M11b 把它们写进了 `rt::def!`，见 §6）和上面的装饰类
 
 具体写法
 
@@ -861,17 +878,9 @@ pub mod point {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Point", 6, |_| {
             let __class__ = ns.class_cell();
-            ns.set(
-                "__init__",
-                rt::function!(ns, __init__(slf as "self", x, y), qualname = "Point.__init__")?,
-            )?;
-            let decorator = ns.get("property")?;
-            let function = rt::function!(ns, norm(slf as "self"), qualname = "Point.norm")?;
-            ns.set("norm", decorator.call1((&function,))?)?;
-            ns.set(
-                "describe",
-                rt::function!(ns, describe[&__class__](slf as "self"), qualname = "Point.describe")?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", x, y))?;
+            rt::def!(ns, @property norm(slf as "self"))?;
+            rt::def!(ns, describe[&__class__](slf as "self"))?;
             Ok(())
         })
     }
@@ -911,7 +920,7 @@ m.set_global(
 
 ### 建类
 
-- `rt::class!` 的第二个参数按 `rt::call!` 的写法列出名字、bases 和关键字（`metaclass=`、传给 `__init_subclass__` 的关键字、`*`、`**`），之后是类体 fn 和几个只读的选项：`line` 是 `__firstlineno__`（有装饰器时是第一个装饰器的行），`qualname` 只在和名字不同时给出（嵌套类），`attributes` 是 `__static_attributes__`，`annotations` 是类体里注解的源码。`__static_attributes__` 的规则由 CPython 的代码生成器决定，`frontend/classinfo.py` 把模块编译一次，从每个类体的代码里读出来
+- `rt::class!` 的第二个参数按 `rt::call!` 的写法列出名字、bases 和关键字（`metaclass=`、传给 `__init_subclass__` 的关键字、`*`、`**`），之后是类体 fn 和几个只读的选项：`line` 是 `__firstlineno__`（有装饰器时是第一个装饰器的行），`qualname` 只在和名字不同时给出（嵌套类），`attributes` 是 `__static_attributes__`，`annotations` 是类体里注解的源码，`future_annotations` 跟在 `line` 后面（上面的"方法"）。`__static_attributes__` 的规则由 CPython 的代码生成器决定，`frontend/classinfo.py` 把模块编译一次，从每个类体的代码里读出来
 - 宏创建一个 `rt::class::BuildClass` 对象，像 `__build_class__` 一样以名字和 bases 为位置参数调用，所以参数的求值顺序和 `*`/`**` 的报错与 CPython 一致。运行时（`class.rs` 的 `build_class`）逐步复刻 `__build_class__` 的 C 代码：`__mro_entries__`（以及 `__orig_bases__`）、确定 metaclass（`metaclass conflict`）、`__prepare__`（返回值必须是 mapping）、执行类体、调用 metaclass，最后检查 `__classcell__`。错误消息和 CPython 相同
 - 编译器在类体前后生成的代码也由运行时补上，顺序相同。之前是 `__module__`、`__qualname__`、`__firstlineno__`、`__doc__`（`from __future__ import annotations` 时还有 `__annotations__`），之后是 `__annotate_func__`、`__static_attributes__`、`__classdictcell__`、`__classcell__`
 - 装饰器在 `rt::class!` 之前求值，建类之后倒序应用，每次应用的行号是装饰器自己的那一行，最后绑定名字（与 CPython 一样）
@@ -927,7 +936,9 @@ m.set_global(
 
 ### 方法
 
-- 类体里的 `def` 创建 `Function`，Rust fn 放在类的 mod 里，名字就是方法名，和模块级的函数名、mod 里别的名字冲突时加 `_`（property 的 setter、deleter 是 `label_`、`label__`）。`self` 参数叫 `slf`，`rt::function!` 里写成 `slf as "self"`
+- 类体里的 `def` 是 `rt::def!(ns, ..)`：创建 `Function`，应用装饰器，用 `ns.set` 绑定到方法名（M11b）。Rust fn 放在类的 mod 里，名字就是方法名，和模块级的函数名、mod 里别的名字冲突时加 `_`（property 的 setter、deleter 是 `label_`、`label__`），Python 名字用 `as` 给出：`rt::def!(ns, @label.setter label_ as "label"(slf as "self", value))?`。Rust 关键字照常是 `r#type`，宏去掉 `r#`。`self` 参数叫 `slf`，写成 `slf as "self"`
+- 方法的 `__qualname__` 由 runtime 推出：`rt::class!` 把类的 qualname 交给 `rt::Namespace`，在 `ns` 里定义的函数是 `<类的 qualname>.<名字>`，嵌套类的方法是 `Outer.Inner.method`。只有和推出的值不同时才写 `qualname = ".."`。名字改编过的方法（`__secret` 绑定到 `_Point__secret`）绑定的名字和 `__name__` 不同，仍然写成 `ns.set("_Point__secret", rt::function!(ns, __secret(slf as "self"))?)?`
+- 类体里有方法时 CPython 创建 `__classdict__` cell（方法的注解在类的命名空间里查找名字），在 `ns` 里创建函数也是这样。`from __future__ import annotations` 时 CPython 不创建它，这时 `rt::class!` 带上 `future_annotations`，方法同样写 `rt::def!(ns, ..)`
 - 方法和模块函数一样接收 `m`。实例属性是 `slf.attr("x")?`、`slf.set_attr("x", v)?`，调用自己的方法是 `slf.method0("describe")?`，都是动态的，和 Python 一样受子类覆盖、`__getattr__`、`__slots__` 影响；方法之间不直接调用
 - `staticmethod`、`classmethod`、`property` 和别的装饰器一样处理，不需要特殊支持
 - `Function` 有 `__get__`，绑定后是 `types.MethodType`，和 Python 函数一样。M5 还给它加了一个 `__code__`：没有字节码，只描述签名（`co_name`、`co_qualname`、参数个数、`co_varnames`、`co_freevars`、flags），给检查 `co_freevars` 的代码（`dataclass(slots=True)`）用
@@ -946,7 +957,7 @@ m.set_global(
 
 - 类体里的注解编译成类的 `__annotate__`：运行时由 `annotations = [("x", "int")]` 创建 `__annotate_func__`，注解源码在第一次读取时 `eval`，名字先在类的命名空间（`__classdict__` cell）里找，再到 globals。FORWARDREF 格式得到的 `ForwardRef` 带 `owner` 和 `is_class`，和 CPython 一样。dataclass、`typing.get_type_hints`、`annotationlib.get_annotations` 的三种格式都可用
 - 有 `from __future__ import annotations` 时，类体开头 `ns.setup_annotations()?` 创建 `__annotations__`，每条带注解的赋值之后 `ns.annotate("x", "int")?`
-- 方法的注解按第 6 节处理，它们引用的类里的名字同样经过 `__classdict__` 查找（方法用 `ns` 作为 `rt::function!` 的第一个参数，就是为了拿到这个 cell）
+- 方法的注解按第 6 节处理，它们引用的类里的名字同样经过 `__classdict__` 查找（方法用 `ns` 作为 `rt::def!` 的第一个参数，这样才拿得到这个 cell，也知道类的 qualname）
 
 ### 类出现的位置
 
@@ -1075,7 +1086,7 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 
 - 直接调用的模块函数不受其他模块 monkeypatch 影响（可用 `--dynamic-globals` 关闭）
 - 原生函数的 traceback 帧是异常离开时合成的（第 9 节）。和 CPython 的区别：默认行号是 `def` 所在的行（`<module>` 是 1），显示的源码行也是这一行；`--traceback-lines` 时是语句所在的行。原生帧没有 `^^^` 定位（`tb_lasti` 是 -1），`f_locals` 为空。保留为 Python 的代码（§13）的帧和 CPython 完全一样
-- 以下行号的细节只在 `--traceback-lines` 时有意义：多行语句只显示取值所在的一行；`rt::def!` 执行出错（例如装饰器抛异常）时报告的是上一条语句的行号；`continue` 之前检查信号时的行号是上一条执行的语句；只有一个表达式的 `try`（第 9 节的 A）里查找 builtin 和全局名字提前到 `match` 之前，只有这个查找本身出错（`NameError`）时才看得出顺序不同
+- 以下行号的细节只在 `--traceback-lines` 时有意义：多行语句只显示取值所在的一行；装饰器写在 `rt::def!` 里时，宏之前只有一个 `frame.line(N)`，所以只在一个装饰器、默认参数不会出错的时候才这样写，别的情况拆开写（§6），行号和 CPython 一样；`continue` 之前检查信号时的行号是上一条执行的语句；只有一个表达式的 `try`（第 9 节的 A）里查找 builtin 和全局名字提前到 `match` 之前，只有这个查找本身出错（`NameError`）时才看得出顺序不同
 - 编译期的 `SyntaxWarning`（例如 3.14 PEP 765 对 `finally` 里 `return` 的警告）由 CPython 在编译时输出，二进制程序没有编译 Python 源码这一步，不输出
 - 合成的帧只在异常经过时存在，运行期间解释器的帧链上没有原生函数，所以按调用方的帧工作的标准库功能看到的是离它最近的 Python 帧（`tests/cases/frames_logging.py` 记录了现在的输出）
   - `logging` 的 `%(filename)s`、`%(lineno)d`、`%(funcName)s` 指向 logging 自己的帧，例如 `__init__.py:2191 warning` 而不是 `app.py:8 step`
@@ -1257,7 +1268,7 @@ CPython 3.14 把模块里所有的注解编译成一个 `__annotate__` 函数，
 保留为 Python 的 `def` 和原生函数的接口相同：都是 globals 里的一个名字，调用方都经过它。所以在 steelix 支持对应的语法之前，也可以手工把它改写成 Rust，步骤是
 
 1. 在模块文件里写一个 `pub fn`，签名用适配层的约定：`fn name<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>, ..) -> PyResult<Bound<'py, PyAny>>`，`*args` 是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`（照着同一个文件里生成的原生函数写）。函数体可以先照抄 steelix 对类似代码的生成方式，也可以直接按第 15 节写原生逻辑
-2. 在 `exec_module` 里原来的位置，把 `rt::exec_python!(..)?;` 换成 `rt::def!(m, name(x, y = ..))?;`，签名写 Python 的参数列表，有默认值的参数用 `rt::def!` 的写法（同样照着生成的例子）。装饰过的函数用 `rt::function!` 创建函数对象，交给装饰器，再用 `m.set_global` 绑定（见 `tests/golden/decorators.rs`）
+2. 在 `exec_module` 里原来的位置，把 `rt::exec_python!(..)?;` 换成 `rt::def!(m, name(x, y = ..))?;`，签名写 Python 的参数列表，有默认值的参数用 `rt::def!` 的写法（同样照着生成的例子）。装饰器写在名字前面，`rt::def!(m, @functools.cache name(x))?`（§6，见 `tests/golden/decorators.rs`）
 3. 删掉 raw string 里的 Python 源码和文件开头模块文档里对应的一行，跑端到端测试
 
 注意两点：这样改写的函数仍然只能通过 globals 调用，其他原生函数里对它的调用仍是 `m.global("name")?.call1(..)`，要直接调用就把这些调用点也改成 `name(m, ..)?`，和第 15 节"调用方"一样；改写过的模块文件从此由人维护，不能再用 steelix 覆盖。
@@ -1379,7 +1390,7 @@ pub fn percentile<'py>(
 
 每个类生成一个 mod（§10），改写也以 mod 为单位，两步和上面对应：
 
-1. **方法逐个改写，实例状态留在 `__dict__` 里。** 方法的 fn 就是适配层，签名 `(m, slf, ..)` 和普通函数一样不改。方法体可以把属性读出来转成原生类型，调用原生模块里的函数，再写回 `slf.setattr(..)`。只要读写的属性名和值的类型不变，同一个类的其他方法、子类和 Python 代码都不受影响。`rt::class!` 那一行和 `body` 不用动。也可以手工把类里保留为 Python 的方法改成原生的：在 mod 里加一个 fn，把 `body` 里的 `rt::exec_python!(ns, ..)?;` 换成 `ns.set("name", rt::function!(ns, name(slf as "self", ..), qualname = "C.name")?)?;`，方法里用了 `super()` 时在 `body` 开头 `let __class__ = ns.class_cell();` 并按闭包捕获它（照着同一个文件里生成的方法写）
+1. **方法逐个改写，实例状态留在 `__dict__` 里。** 方法的 fn 就是适配层，签名 `(m, slf, ..)` 和普通函数一样不改。方法体可以把属性读出来转成原生类型，调用原生模块里的函数，再写回 `slf.setattr(..)`。只要读写的属性名和值的类型不变，同一个类的其他方法、子类和 Python 代码都不受影响。`rt::class!` 那一行和 `body` 不用动。也可以手工把类里保留为 Python 的方法改成原生的：在 mod 里加一个 fn，把 `body` 里的 `rt::exec_python!(ns, ..)?;` 换成 `rt::def!(ns, name(slf as "self", ..))?;`，方法里用了 `super()` 时在 `body` 开头 `let __class__ = ns.class_cell();` 并按闭包捕获它（照着同一个文件里生成的方法写）
 2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。这一步不自动生成，原因见 §10
 
 和函数一样，`self.method()` 在生成代码里总是动态调用，改写成原生代码之后，同一个结构体的方法之间可以直接调用，不经过 Python。

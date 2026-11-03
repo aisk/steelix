@@ -324,27 +324,12 @@ pub mod manager {
     /// The body of `class Manager`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Manager", 7, |_| {
-            ns.set("__init__", rt::function!(
+            rt::def!(
                 ns,
-                __init__(slf as "self", name, suppress = false, fail_enter = false, fail_exit = false),
-                qualname = "Manager.__init__"
-            )?)?;
-            ns.set(
-                "__enter__",
-                rt::function!(
-                    ns,
-                    __enter__(slf as "self"),
-                    qualname = "Manager.__enter__"
-                )?,
+                __init__(slf as "self", name, suppress = false, fail_enter = false, fail_exit = false)
             )?;
-            ns.set(
-                "__exit__",
-                rt::function!(
-                    ns,
-                    __exit__(slf as "self", exc_type, exc, tb),
-                    qualname = "Manager.__exit__"
-                )?,
-            )?;
+            rt::def!(ns, __enter__(slf as "self"))?;
+            rt::def!(ns, __exit__(slf as "self", exc_type, exc, tb))?;
             Ok(())
         })
     }
@@ -434,14 +419,7 @@ pub mod no_exit {
     /// The body of `class NoExit`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "NoExit", 28, |_| {
-            ns.set(
-                "__enter__",
-                rt::function!(
-                    ns,
-                    __enter__(slf as "self"),
-                    qualname = "NoExit.__enter__"
-                )?,
-            )?;
+            rt::def!(ns, __enter__(slf as "self"))?;
             Ok(())
         })
     }

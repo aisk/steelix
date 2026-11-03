@@ -187,6 +187,13 @@ class Tokens(Expr):
     parts: tuple[str | Expr, ...]
 
 
+@dataclass(frozen=True)
+class Decorator(Tokens):
+    """A decorator in `rt::def!` and `rt::function!`, `@name.attr` or
+    `@(expr)`. It precedes the signature without a comma, on a line of its
+    own when the call is broken into lines."""
+
+
 # --- statements ----------------------------------------------------------------
 
 

@@ -19,122 +19,23 @@ pub mod vector {
             ns.set("__doc__", "A 2D vector.")?;
             ns.set("scale", 2)?;
             ns.set("instances", 0)?;
-            ns.set(
-                "__init__",
-                rt::function!(
-                    ns,
-                    __init__(slf as "self", x, y = 0),
-                    qualname = "Vector.__init__"
-                )?,
-            )?;
-            ns.set(
-                "__repr__",
-                rt::function!(
-                    ns,
-                    __repr__(slf as "self"),
-                    qualname = "Vector.__repr__"
-                )?,
-            )?;
-            ns.set(
-                "__eq__",
-                rt::function!(
-                    ns,
-                    __eq__(slf as "self", other),
-                    qualname = "Vector.__eq__"
-                )?,
-            )?;
-            ns.set(
-                "__hash__",
-                rt::function!(
-                    ns,
-                    __hash__(slf as "self"),
-                    qualname = "Vector.__hash__"
-                )?,
-            )?;
-            ns.set(
-                "__add__",
-                rt::function!(
-                    ns,
-                    __add__(slf as "self", other),
-                    qualname = "Vector.__add__"
-                )?,
-            )?;
-            ns.set(
-                "scaled",
-                rt::function!(ns, scaled(slf as "self"), qualname = "Vector.scaled")?,
-            )?;
-            ns.set(
-                "class_scaled",
-                rt::function!(
-                    ns,
-                    class_scaled(slf as "self"),
-                    qualname = "Vector.class_scaled"
-                )?,
-            )?;
-            {
-                let decorator = ns.get("property")?;
-                let function =
-                    rt::function!(ns, length(slf as "self"), qualname = "Vector.length")?;
-                ns.set("length", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("property")?;
-                let function = rt::function!(ns, label(slf as "self"), qualname = "Vector.label")?;
-                ns.set("label", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("label")?.attr("setter")?;
-                let function = rt::function!(
-                    ns,
-                    label_(slf as "self", value),
-                    qualname = "Vector.label"
-                )?;
-                ns.set("label", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("label")?.attr("deleter")?;
-                let function =
-                    rt::function!(ns, label__(slf as "self"), qualname = "Vector.label")?;
-                ns.set("label", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("classmethod")?;
-                let function = rt::function!(ns, zero(cls), qualname = "Vector.zero")?;
-                ns.set("zero", decorator.call1((function,))?)?;
-            }
-            {
-                let decorator = ns.get("staticmethod")?;
-                let function = rt::function!(ns, dot(a, b), qualname = "Vector.dot")?;
-                ns.set("dot", decorator.call1((function,))?)?;
-            }
-            ns.set(
-                "__len__",
-                rt::function!(ns, __len__(slf as "self"), qualname = "Vector.__len__")?,
-            )?;
-            ns.set(
-                "__iter__",
-                rt::function!(
-                    ns,
-                    __iter__(slf as "self"),
-                    qualname = "Vector.__iter__"
-                )?,
-            )?;
-            ns.set(
-                "__getitem__",
-                rt::function!(
-                    ns,
-                    __getitem__(slf as "self", index),
-                    qualname = "Vector.__getitem__"
-                )?,
-            )?;
-            ns.set(
-                "__bool__",
-                rt::function!(
-                    ns,
-                    __bool__(slf as "self"),
-                    qualname = "Vector.__bool__"
-                )?,
-            )?;
+            rt::def!(ns, __init__(slf as "self", x, y = 0))?;
+            rt::def!(ns, __repr__(slf as "self"))?;
+            rt::def!(ns, __eq__(slf as "self", other))?;
+            rt::def!(ns, __hash__(slf as "self"))?;
+            rt::def!(ns, __add__(slf as "self", other))?;
+            rt::def!(ns, scaled(slf as "self"))?;
+            rt::def!(ns, class_scaled(slf as "self"))?;
+            rt::def!(ns, @property length(slf as "self"))?;
+            rt::def!(ns, @property label(slf as "self"))?;
+            rt::def!(ns, @label.setter label_ as "label"(slf as "self", value))?;
+            rt::def!(ns, @label.deleter label__ as "label"(slf as "self"))?;
+            rt::def!(ns, @classmethod zero(cls))?;
+            rt::def!(ns, @staticmethod dot(a, b))?;
+            rt::def!(ns, __len__(slf as "self"))?;
+            rt::def!(ns, __iter__(slf as "self"))?;
+            rt::def!(ns, __getitem__(slf as "self", index))?;
+            rt::def!(ns, __bool__(slf as "self"))?;
             Ok(())
         })
     }
@@ -366,30 +267,9 @@ pub mod counter {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Counter", 98, |_| {
             ns.set("count", 0)?;
-            ns.set(
-                "increment",
-                rt::function!(
-                    ns,
-                    increment(slf as "self", by = 1),
-                    qualname = "Counter.increment"
-                )?,
-            )?;
-            ns.set(
-                "__call__",
-                rt::function!(
-                    ns,
-                    __call__(slf as "self", *args, **kwargs),
-                    qualname = "Counter.__call__"
-                )?,
-            )?;
-            ns.set(
-                "__str__",
-                rt::function!(
-                    ns,
-                    __str__(slf as "self"),
-                    qualname = "Counter.__str__"
-                )?,
-            )?;
+            rt::def!(ns, increment(slf as "self", by = 1))?;
+            rt::def!(ns, __call__(slf as "self", *args, **kwargs))?;
+            rt::def!(ns, __str__(slf as "self"))?;
             Ok(())
         })
     }

@@ -118,7 +118,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, h(*, a, b, c))?;
         rt::def!(m, k(globals, r#type, slf as "self"))?;
         rt::def!(m, no_args())?;
-        rt::def!(m, m_(a, b, c, d), name = "m")?;
+        rt::def!(m, m_ as "m"(a, b, c, d))?;
         attempt(m, &m.global("f")?, &PyTuple::empty(py), &PyDict::new(py))?;
         attempt(
             m,
