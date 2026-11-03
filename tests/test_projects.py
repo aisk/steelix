@@ -245,3 +245,10 @@ def test_ext_package_matches_python(tmp_path: Path) -> None:
     assert actual.stdout.replace(str(tmp_path), "<dir>") == expected.stdout.replace(
         str(root), "<dir>"
     )
+    # `runpy` runs a transpiled submodule through `NativeLoader.get_code`.
+    expected = run([str(PYTHON), "-B", "-m", "store.__main__"], root)
+    actual = run([str(PYTHON), "-B", "-m", "store.__main__"], tmp_path)
+    assert actual.returncode == expected.returncode == 0, actual.stderr
+    assert actual.stdout.replace(str(tmp_path), "<dir>") == expected.stdout.replace(
+        str(root), "<dir>"
+    )

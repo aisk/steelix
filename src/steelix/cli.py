@@ -345,18 +345,30 @@ def build(args: argparse.Namespace) -> int:
     return 0
 
 
-def dist_rustflags(env: dict[str, str], runtime: Path | None) -> list[str]:
-    """The user's rustflags, and remappings so that the source locations in
-    panic messages do not show the build machine's directories."""
-    if "CARGO_ENCODED_RUSTFLAGS" in env:
-        flags = [f for f in env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") if f]
-    else:
-        flags = env.get("RUSTFLAGS", "").split()
+def dist_rustflags(env: dict[str, str], runtime: Path | None) -> tuple[dict[str, str], list[str]]:
+    """Remappings so that the source locations in panic messages do not show
+    the build machine's directories, added to the user's rustflags: the
+    environment variables and the cargo arguments that do it.
+
+    Rustflags from the environment (`RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`)
+    replace those of cargo's configuration, so the remappings are appended
+    to them. Otherwise they go to `build.rustflags` with `--config`, which
+    cargo joins with the `build.rustflags` of the user's configuration. A
+    `target.<triple>.rustflags` in the configuration takes precedence over
+    both, and the paths are then not remapped (which only changes panic
+    messages)."""
     cargo_home = Path(env.get("CARGO_HOME") or Path.home() / ".cargo")
     remaps = [(cargo_home / "registry" / "src", "cargo")]
     if runtime is not None:
         remaps.append((runtime.parent, "steelix"))
-    return flags + [f"--remap-path-prefix={source}={target}" for source, target in remaps]
+    flags = [f"--remap-path-prefix={source}={target}" for source, target in remaps]
+    if "CARGO_ENCODED_RUSTFLAGS" in env:
+        user = [f for f in env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") if f]
+    elif "RUSTFLAGS" in env:
+        user = env["RUSTFLAGS"].split()
+    else:
+        return {}, ["--config", f"build.rustflags={json.dumps(flags)}"]
+    return {"CARGO_ENCODED_RUSTFLAGS": "\x1f".join(user + flags)}, []
 
 
 def cargo_build_dist(
@@ -375,8 +387,10 @@ def cargo_build_dist(
     env["PYO3_PYTHON"] = str(python)
     env["STEELIX_DIST"] = "1"
     env.pop("PYO3_BUILD_EXTENSION_MODULE", None)
-    env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(dist_rustflags(env, runtime))
+    rustflags_env, rustflags_args = dist_rustflags(env, runtime)
+    env.update(rustflags_env)
     command = ["cargo", "build", "--release", "--message-format=json-render-diagnostics"]
+    command += rustflags_args
     proc = subprocess.run(
         command,
         cwd=crate,

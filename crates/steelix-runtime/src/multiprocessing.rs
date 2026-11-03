@@ -3,13 +3,28 @@
 //! CPython starts these children as `python -c "from multiprocessing.spawn
 //! import spawn_main; ..."`, and the child re-runs the parent's `__main__`
 //! from its source file as `__mp_main__`, so that functions and classes
-//! defined there can be unpickled. A transpiled program instead starts
-//! itself: [`install_spawn_hook`] makes the program's own executable the one
-//! `multiprocessing` uses, the program recognizes the child command lines
-//! ([`is_child_command`]), and [`install_main_fixups`] makes the child run the
-//! transpiled `__main__` instead of its source file, which need not exist.
+//! defined there can be unpickled. The child of a transpiled program has to
+//! run the transpiled `__main__` instead, whose source file need not exist:
+//! [`install_main_fixups`] replaces the functions that re-run it.
+//!
+//! The child is never chosen by the program's own command line, which
+//! belongs to the program (`app -c "from multiprocessing.spawn import ..."`
+//! must reach the script as arguments, like for `python app.py -c ..`):
+//!
+//! - In a distribution, `sys.executable` is the bundled interpreter
+//!   `python/bin/python`, a link to the program that runs as the Python
+//!   interpreter, and `multiprocessing` starts the children with it as
+//!   usual. The interpreter recognizes the child command lines
+//!   ([`is_child_command`]) and installs the fixups. It runs any command
+//!   anyway, so this exposes nothing new.
+//! - A development build has no such interpreter (`sys.executable` is the
+//!   build interpreter, which does not know the transpiled code), so
+//!   [`install_spawn_hook`] makes `multiprocessing` start the program itself
+//!   and sets [`CHILD_MARKER`] in the environment to the program's path. The
+//!   program takes the child role only for a child command line with that
+//!   marker ([`is_child`]).
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
@@ -23,6 +38,18 @@ const CHILD_COMMANDS: &[&str] = &[
     "import sys; from multiprocessing.forkserver import main;",
     "from multiprocessing.resource_tracker import main;",
 ];
+
+/// The environment variable by which the parent process of a development
+/// build marks the children it starts: the path of the program that is to
+/// run as a child.
+pub(crate) const CHILD_MARKER: &str = "STEELIX_MP_CHILD";
+
+/// Whether a development build started as `program` with the command line
+/// `args` and `marker` (the value of [`CHILD_MARKER`]) is a child process of
+/// `multiprocessing`: a child command line, from a parent that marked it.
+pub(crate) fn is_child(args: &[OsString], marker: Option<&OsStr>, program: &str) -> bool {
+    marker.is_some_and(|marker| marker == OsStr::new(program)) && is_child_command(args)
+}
 
 /// Whether the command line is one `multiprocessing` starts a child with:
 /// `PROGRAM [interpreter options] -c COMMAND [args]`, with one of the
@@ -53,11 +80,12 @@ pub(crate) fn is_child_command(args: &[OsString]) -> bool {
     false
 }
 
-/// Puts a finder on `sys.meta_path` that makes `multiprocessing.spawn` start
-/// children with `program` (`multiprocessing.set_executable(program)`) when
-/// it is first imported, while `sys.executable` stays a Python interpreter.
-/// Importing `multiprocessing` right away would cost every program about
-/// 12 ms of start-up time.
+/// For a development build: puts a finder on `sys.meta_path` that makes
+/// `multiprocessing.spawn` start children with `program`
+/// ([`set_child_executable`]) when it is first imported, while
+/// `sys.executable` stays a Python interpreter. Importing `multiprocessing`
+/// right away would cost every program about 12 ms of start-up time. The
+/// finder removes itself once it has done that.
 pub(crate) fn install_spawn_hook(py: Python<'_>, program: &str) -> PyResult<()> {
     let finder = Bound::new(
         py,
@@ -112,8 +140,9 @@ impl SpawnFinder {
 }
 
 /// Runs `multiprocessing.spawn` with its own loader, then calls
-/// `set_executable` and puts the original loader back into the module's
-/// `__loader__` and `__spec__`, so that nothing of the wrapper remains.
+/// [`set_child_executable`] and puts the original loader back into the
+/// module's `__loader__` and `__spec__`, so that nothing of the wrapper (or
+/// of the finder) remains.
 #[pyclass(frozen, name = "SpawnLoader", module = "steelix_runtime")]
 struct SpawnLoader {
     loader: Py<PyAny>,
@@ -133,9 +162,34 @@ impl SpawnLoader {
         module.setattr("__loader__", loader)?;
         module.getattr("__spec__")?.setattr("loader", loader)?;
         loader.call_method1("exec_module", (module,))?;
-        module.call_method1("set_executable", (&self.program,))?;
+        set_child_executable(module, &self.program)?;
+        let py = module.py();
+        let meta_path = py.import("sys")?.getattr("meta_path")?;
+        let finders: Vec<_> = meta_path
+            .try_iter()?
+            .filter_map(Result::ok)
+            .filter(|finder| finder.is_instance_of::<SpawnFinder>())
+            .collect();
+        for finder in finders {
+            meta_path.call_method1("remove", (finder,))?;
+        }
         Ok(())
     }
+}
+
+/// Makes `multiprocessing` (its module `spawn`) start children with the
+/// program `program` of a development build, and marks them as children
+/// through [`CHILD_MARKER`]. The marker goes into `os.environ`, which every
+/// process started from here on inherits; it only matters to a program at
+/// that path with a child command line.
+pub(crate) fn set_child_executable(spawn: &Bound<'_, PyAny>, program: &str) -> PyResult<()> {
+    spawn.call_method1("set_executable", (program,))?;
+    spawn
+        .py()
+        .import("os")?
+        .getattr("environ")?
+        .set_item(CHILD_MARKER, program)?;
+    Ok(())
 }
 
 /// What the parent process runs as `__main__`.
@@ -262,13 +316,26 @@ fn new_main<'py>(py: Python<'py>, current: &Bound<'py, PyAny>) -> PyResult<Bound
 }
 
 /// Runs `body` in `main` as `__mp_main__`, then makes it `__main__` too.
+/// If `body` fails, `sys.modules["__mp_main__"]` is restored, as
+/// `runpy._TempModule` does for the source.
 fn run_as_main(
     main: &Bound<'_, PyModule>,
     body: impl FnOnce(&Bound<'_, PyModule>) -> PyResult<()>,
 ) -> PyResult<()> {
     let modules = sys_modules(main.py())?;
+    let saved = modules.get_item("__mp_main__")?;
     modules.set_item("__mp_main__", main)?;
-    body(main)?;
+    if let Err(err) = body(main) {
+        match saved {
+            Some(saved) => modules.set_item("__mp_main__", saved)?,
+            None => {
+                if modules.contains("__mp_main__")? {
+                    modules.del_item("__mp_main__")?;
+                }
+            }
+        }
+        return Err(err);
+    }
     modules.set_item("__main__", main)?;
     Ok(())
 }
@@ -306,6 +373,25 @@ mod tests {
         assert!(is_child_command(&args(&["app", "-c", tracker])));
         let forkserver = "import sys; from multiprocessing.forkserver import main; main(3, 4, ['__main__'], sys_argv=sys.argv[1:], **{})";
         assert!(is_child_command(&args(&["app", "-c", forkserver, "x"])));
+    }
+
+    #[test]
+    fn children_of_development_builds_need_the_marker() {
+        let spawn = "from multiprocessing.spawn import spawn_main; spawn_main()";
+        let child = args(&["/bin/app", "-c", spawn, "--multiprocessing-fork"]);
+        let marker = OsStr::new("/bin/app");
+        assert!(is_child(&child, Some(marker), "/bin/app"));
+        assert!(!is_child(&child, None, "/bin/app"));
+        assert!(!is_child(
+            &child,
+            Some(OsStr::new("/bin/other")),
+            "/bin/app"
+        ));
+        assert!(!is_child(
+            &args(&["/bin/app", "x"]),
+            Some(marker),
+            "/bin/app"
+        ));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M9。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9。
 
 ## M0 项目骨架 ✅
 
@@ -166,7 +166,7 @@
 - [x] ext 模式：有项目模块时安装 finder；`--mode ext -m pkg` 生成包形式的扩展模块（§11）
 - [x] 测试：多模块测试应用 `tests/projects/inventory`、标准库 `json` 包（也以 `python -m json` 运行），golden、clippy、与 CPython 比较完整 traceback 的 e2e
 - [x] 发现的问题：Python 参数 `_m` 和上下文参数 `m` 触发 clippy 的 `duplicate_underscore_argument`，这时上下文参数改叫 `module`；类的 mod 和所在模块同名（`module_inception`）时加 `_`；crate 根上 allow `too_many_arguments` 和 `doc_lazy_continuation`（§14）
-- [ ] ext 模式下 `python -m pkg`：`NativeLoader` 需要 `get_code`
+- [ ] ext 模式下 `python -m pkg`：M7a 给 `NativeLoader` 加了 `get_code`，剩下的问题是扩展模块 `pkg` 的 spec 不是包，runpy 不会去找 `pkg.__main__`
 - [ ] 命名空间包（没有 `__init__.py` 的目录）里的模块现在不转换
 
 ## M7 分发 ✅
@@ -178,6 +178,20 @@
 - [x] `steelix build` 一条命令转换、`cargo build --release`、组装 `dist/<name>/`（程序、Python 运行时、构建解释器的 site-packages、可选的源文件、`--add-data`），`--archive` 打成 tar.gz，`--python` 选择解释器或 venv
 - [x] 在干净环境里验证：测试用 `bwrap` 只挂载 `/usr` 和分发目录运行 hello、json 项目、`-m json` 和 multiprocessing（容器的 podman 在本机不可用，`bwrap` 起到同样的隔离作用）
 - 只做了 Linux x86_64，macOS 和 Windows 需要的改动记在 §11。标准库 zip 暂不做（文件数少了，但启动慢 6 到 11 ms）
+
+## M7a M6/M7 之后的修复 ✅
+
+来自 M6、M7 之后的 review，都有复现（`tests/test_dist.py` 里的回归测试）。
+
+- [x] 安全：M7 的程序只看命令行就当成 multiprocessing 子进程，`app -c "from multiprocessing.spawn import spawn_main; ..."` 会执行任意代码。现在程序的参数永远交给脚本，和 `python app.py -c ...` 一样。分发里子进程由 `python/bin/python`（解释器角色，本来就执行任意代码）启动，解释器识别子进程的命令行后安装原生的 `__mp_main__`；开发构建由父进程在环境变量 `STEELIX_MP_CHILD` 里写上程序的路径，程序只在命令行和标记都对上时作为子进程运行（§11）
+- [x] 分发的程序和环境隔离：忽略 `PYTHON*` 环境变量（`use_environment = 0`），不加用户的 site-packages，`STEELIX_PYTHON_ENV=1` 恢复。附带的解释器读取环境变量，但像 venv 一样不加用户的 site-packages。顺带修了解释器角色的 `-X dev`、`-X utf8`、`-E` 不影响 pre-initialization 的问题（先用命令行 `Py_PreInitializeFromBytesArgs`）
+- [x] `NativeLoader` 加上 `get_resource_reader`（`importlib.resources.files(pkg)`）、`get_data`（`pkgutil.get_data`）和 `get_code`（`runpy`、`python -m pkg.mod`），ext 模式同样受益（§7）
+- [x] 分发复制包目录下的所有文件（数据文件），`--no-sources` 只去掉转换过的 `.py`；项目顶层既没转换也没复制的 `.py` 在构建时给出警告，建议 `--include`
+- [x] `.pyc` 用 `unchecked-hash`（标准库、site-packages）和 `checked-hash`（`src/` 里从源码 import 的文件），丢掉修改时间的拷贝不会每次启动都重新编译；`compileall` 失败时构建失败，单个文件编译不过只警告，并行编译失败时改为单进程
+- [x] 附带的解释器安装项目模块的 finder，只在 CPython 能找到源文件时回答（项目目录在 `sys.path` 里），`--no-sources` 的分发里 `subprocess.run([sys.executable, "-m", "pkg.cli"], cwd=项目目录)` 能用。比较路径时不要求目录存在：`--no-sources` 的分发里转换过的包没有目录，最初用 `canonicalize` 比较时 spawn 的子进程 import 不到 `pkg.sub`，Pool 不停地重启 worker（验收时发现，`tests/dist_apps/mp/mptools` 是回归测试）
+- [x] 小修：`SpawnFinder` 完成任务后把自己从 `sys.meta_path` 去掉；子进程里原生 `__main__` 出错时恢复 `sys.modules["__mp_main__"]`；purelib 和 platlib 不同时 `.pth` 的警告不再重复；输出路径是文件时报 `DistError`；remap 参数追加到用户的 rustflags 后面而不是覆盖；`inspect_python` 能处理没有 `METADATA` 的 `.dist-info`；`--python` 是 `include-system-site-packages = true` 的 venv 时给出警告
+- [x] §12 记录 `PYTHONSAFEPATH`（`-P`）的差异
+- ext 模式下 `python -m pkg`（M6 遗留）仍然不行：`pkg` 是扩展模块，runpy 在它变成包之前就按普通模块处理。`python -m pkg.__main__` 现在可以
 
 ## M8 推导式与其它 ✅
 

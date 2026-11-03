@@ -31,6 +31,11 @@ DIST_DIR = ROOT / "tests" / "dist_apps"
 PROJECTS_DIR = ROOT / "tests" / "projects"
 HELLO = DIST_DIR / "hello" / "app.py"
 MPAPP = DIST_DIR / "mp" / "mpapp.py"
+MP_DIR = DIST_DIR / "mp"
+PKGAPP = DIST_DIR / "pkgapp" / "app.py"
+# Arguments that look like the command line of a `multiprocessing` child:
+# they belong to the program, which must not run them (design §11).
+INJECTION = ["-c", "from multiprocessing.spawn import spawn_main; print('INJECTED')"]
 JSON_PROJECT = PROJECTS_DIR / "stdlib_json"
 
 # Where the distribution is mounted inside the sandbox: unrelated to any
@@ -72,6 +77,21 @@ def test_inspect_python_rejects_what_it_can_not_run(tmp_path: Path) -> None:
         dist.inspect_python(tmp_path / "python")
 
 
+def test_inspect_python_venv_with_system_site_packages(tmp_path: Path) -> None:
+    """A virtual environment that includes the system site-packages (which
+    are not copied) is reported; a `.dist-info` without `METADATA` does not
+    stop the inspection."""
+    venv = tmp_path / "venv"
+    subprocess.run(
+        [str(PYTHON), "-m", "venv", "--without-pip", "--system-site-packages", str(venv)],
+        check=True,
+    )
+    (venv / "lib" / "python3.14" / "site-packages" / "broken-1.0.dist-info").mkdir()
+    install = dist.inspect_python(venv / "bin" / "python")
+    assert install.system_site_packages == venv
+    assert dist.inspect_python(PYTHON).system_site_packages is None
+
+
 def fake_install(tmp_path: Path) -> dist.PythonInstall:
     """A Python installation laid out like python-build-standalone's."""
     base = tmp_path / "base"
@@ -99,12 +119,16 @@ def fake_install(tmp_path: Path) -> dist.PythonInstall:
         (site / name).parent.mkdir(parents=True, exist_ok=True)
         (site / name).write_text("")
     (site / "editable.pth").write_text("/home/someone/src/lib\n")
+    # A separate platlib (purelib != platlib), merged into the same directory.
+    platlib = tmp_path / "venv" / "platlib"
+    (platlib / "native").mkdir(parents=True)
+    (platlib / "native" / "__init__.py").write_text("")
     return dist.PythonInstall(
         executable=Path("/nonexistent/python"),
         version="3.14",
         libpython=libpython,
         stdlib=stdlib,
-        site_packages=(site,),
+        site_packages=(site, platlib),
         excluded=frozenset({site / "steelix.pth", site / "steelix-0.1.0.dist-info"}),
     )
 
@@ -134,6 +158,7 @@ def test_assemble_layout(tmp_path: Path) -> None:
         "python/lib/python3.14/os.py",
         "python/lib/python3.14/site-packages/editable.pth",
         "python/lib/python3.14/site-packages/greeting/__init__.py",
+        "python/lib/python3.14/site-packages/native/__init__.py",
         "src/hello.py",
     ]
     # `sys.executable` is the program itself, called as `python`.
@@ -168,6 +193,62 @@ def test_assemble_refuses_to_replace_other_directories(tmp_path: Path) -> None:
     with pytest.raises(dist.DistError, match="not a distribution"):
         dist.assemble(tmp_path / "x", "hello", install, project, target, dist.DistOptions())
     assert (target / "notes.txt").read_text() == "keep me"
+    with pytest.raises(dist.DistError, match="not a directory"):
+        dist.assemble(
+            tmp_path / "x", "hello", install, project, target / "notes.txt", dist.DistOptions()
+        )
+    assert (target / "notes.txt").read_text() == "keep me"
+
+
+def test_package_data_and_unshipped_modules(tmp_path: Path) -> None:
+    """Every file of a package is shipped (data files for
+    `importlib.resources`), `--no-sources` leaves out only the transpiled
+    modules, and Python files at the top of the project that are neither
+    transpiled nor shipped are reported."""
+    root = tmp_path / "project"
+    files = {
+        "app.py": "import pkg\n",
+        "dyn.py": "",
+        "notes.txt": "",
+        "pkg/__init__.py": "",
+        "pkg/data.txt": "",
+        "pkg/plugin.py": "",
+        "pkg/templates/page.html": "",
+        "pkg/__pycache__/__init__.cpython-314.pyc": "",
+    }
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    project = find_project(root / "app.py")
+    shipped = dist.project_files(project, dist.DistOptions(sources=False))
+    assert shipped == ["pkg/data.txt", "pkg/plugin.py", "pkg/templates/page.html"]
+    with_sources = dist.project_files(project, dist.DistOptions())
+    assert with_sources == sorted([*shipped, "app.py", "pkg/__init__.py"])
+    [warning] = dist.unshipped_warnings(project, shipped)
+    assert warning.startswith("not in the distribution: dyn.py in ")
+    assert warning.endswith("add them with --include dyn")
+    project = find_project(root / "app.py", include=["dyn"])
+    assert dist.unshipped_warnings(project, dist.project_files(project, dist.DistOptions())) == []
+
+
+def pyc_flags(pyc: Path) -> int:
+    """The flags of a `.pyc` header (PEP 552): 0 for timestamps, 1 for an
+    unchecked hash, 3 for a checked hash."""
+    return int.from_bytes(pyc.read_bytes()[4:8], "little")
+
+
+def test_compile_tree(tmp_path: Path) -> None:
+    """Hash based `.pyc` (copies need not keep modification times); files
+    that do not compile are reported, a failing `compileall` is an error."""
+    (tmp_path / "good.py").write_text("X = 1\n")
+    (tmp_path / "bad.py").write_text("def (:\n")
+    warnings = dist.compile_tree(PYTHON, [tmp_path], "unchecked-hash")
+    assert warnings == [f"does not compile, importing it fails: {tmp_path / 'bad.py'}"]
+    assert pyc_flags(tmp_path / "__pycache__" / "good.cpython-314.pyc") == 1
+    assert dist.compile_tree(PYTHON, [tmp_path / "good.py"], "checked-hash") == []
+    assert pyc_flags(tmp_path / "__pycache__" / "good.cpython-314.pyc") == 3
+    with pytest.raises(dist.DistError, match="compiling the Python files to .pyc failed"):
+        dist.compile_tree(PYTHON, [tmp_path], "no-such-mode")
 
 
 def test_project_files() -> None:
@@ -190,15 +271,26 @@ def test_project_files() -> None:
 
 
 def test_dist_rustflags_remap_build_paths() -> None:
-    flags = dist_rustflags({"RUSTFLAGS": "-C debuginfo=1", "CARGO_HOME": "/c"}, Path("/r/rt"))
-    assert flags == [
+    """The remappings are added to the user's rustflags: appended to those
+    of the environment, or joined by cargo with those of its configuration
+    (`--config build.rustflags`)."""
+    env, args = dist_rustflags({"RUSTFLAGS": "-C debuginfo=1", "CARGO_HOME": "/c"}, Path("/r/rt"))
+    assert args == []
+    assert env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") == [
         "-C",
         "debuginfo=1",
         "--remap-path-prefix=/c/registry/src=cargo",
         "--remap-path-prefix=/r=steelix",
     ]
     encoded = {"CARGO_ENCODED_RUSTFLAGS": "-Ctarget-cpu=native", "CARGO_HOME": "/c"}
-    assert dist_rustflags(encoded, None)[0] == "-Ctarget-cpu=native"
+    env, args = dist_rustflags(encoded, None)
+    assert env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") == [
+        "-Ctarget-cpu=native",
+        "--remap-path-prefix=/c/registry/src=cargo",
+    ]
+    env, args = dist_rustflags({"CARGO_HOME": "/c"}, None)
+    assert env == {}
+    assert args == ["--config", 'build.rustflags=["--remap-path-prefix=/c/registry/src=cargo"]']
 
 
 # End-to-end tests
@@ -341,6 +433,83 @@ def test_tracebacks_with_and_without_sources(
 
 
 @pytest.mark.e2e
+@needs_bwrap
+def test_child_command_line_is_the_programs(
+    hello_dists: tuple[Path, Path], build_venv: Path
+) -> None:
+    """`app -c "from multiprocessing.spawn import ..."` passes the arguments
+    to the script, like `python app.py -c ...`: only the bundled
+    interpreter runs the children of `multiprocessing`."""
+    dist_dir, _ = hello_dists
+    expected = python_run(build_venv, [str(HELLO), *INJECTION], ROOT)
+    assert expected.returncode == 0, expected.stderr
+    assert "INJECTED" not in expected.stdout.splitlines()
+    actual = run(sandbox(dist_dir, [f"{MOUNT}/app", *INJECTION]), ROOT)
+    assert (actual.stdout, actual.stderr, actual.returncode) == (expected.stdout, "", 0)
+
+
+@pytest.mark.e2e
+def test_distribution_ignores_the_python_environment(
+    hello_dists: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The program of a distribution ignores `PYTHON*` variables and the
+    user's site-packages, unless `STEELIX_PYTHON_ENV=1`; the bundled
+    interpreter honours the variables but, like a virtual environment, not
+    the user's site-packages. Outside bwrap, which hides the home directory."""
+    dist_dir, _ = hello_dists
+    home = tmp_path / "home"
+    user_site = home / ".local" / "lib" / "python3.14" / "site-packages"
+    user_site.mkdir(parents=True)
+    (user_site / "usercustomize.py").write_text("print('USERCUSTOMIZE')\n")
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "json.py").write_text("print('SHADOW json')\n")
+    clean = {"PATH": os.environ["PATH"]}
+    polluted = {
+        **clean,
+        "HOME": str(home),
+        "PYTHONPATH": str(shadow),
+        "PYTHONHOME": "/nonexistent",
+        "PYTHONSAFEPATH": "1",
+        "PYTHONUTF8": "1",
+    }
+
+    def program(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+        command = [str(dist_dir / "app"), *args]
+        return subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+
+    expected = program(clean)
+    assert expected.returncode == 0, expected.stderr
+    actual = program(polluted)
+    assert (actual.stdout, actual.stderr, actual.returncode) == (expected.stdout, "", 0)
+    opt_in = program({**polluted, "STEELIX_PYTHON_ENV": "1"})
+    assert opt_in.stdout.splitlines()[:2] == ["USERCUSTOMIZE", "SHADOW json"], opt_in.stderr
+    code = "import sys, site; print(site.ENABLE_USER_SITE, sys.flags.ignore_environment)"
+    interpreter = subprocess.run(
+        [str(dist_dir / "python" / "bin" / "python"), "-c", code],
+        env=polluted,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert interpreter.stdout.splitlines() == ["False 0"], interpreter.stderr
+
+
+@pytest.mark.e2e
+def test_bytecode_does_not_depend_on_modification_times(hello_dists: tuple[Path, Path]) -> None:
+    """The standard library and site-packages are compiled with unchecked
+    hashes: a copy that does not keep modification times (`cp -r`, `scp`)
+    does not compile them again at every start."""
+    dist_dir, _ = hello_dists
+    stdlib = dist_dir / "python" / "lib" / "python3.14"
+    for pyc in [
+        stdlib / "json" / "__pycache__" / "__init__.cpython-314.pyc",
+        stdlib / "site-packages" / "greeting" / "__pycache__" / "__init__.cpython-314.pyc",
+    ]:
+        assert pyc_flags(pyc) == 1, pyc
+
+
+@pytest.mark.e2e
 def test_archive_keeps_the_layout(hello_dists: tuple[Path, Path], tmp_path: Path) -> None:
     with tarfile.open(E2E_DIR / "dist-hello.tar.gz") as tar:
         tar.extractall(tmp_path, filter="tar")
@@ -405,10 +574,40 @@ def test_json_module_runs_in_a_clean_environment(build_venv: Path, json_data: Pa
 
 @pytest.mark.e2e
 @needs_bwrap
+def test_package_data_and_bundled_interpreter(
+    build_venv: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Data files of a package through `importlib.resources` and
+    `pkgutil.get_data`, and `python -m pkg.cli` run by the bundled
+    interpreter in the project directory, without the Python sources: the
+    interpreter imports the transpiled modules where CPython would find
+    their sources."""
+    capsys.readouterr()
+    output = steelix_build(build_venv, str(PKGAPP), "--no-sources")
+    warnings = capsys.readouterr().err
+    assert "steelix: warning: not in the distribution: dyn.py in " in warnings
+    dist_dir = output / "app"
+    assert not (dist_dir / "src" / "pkg" / "cli.py").exists()
+    assert (dist_dir / "src" / "pkg" / "templates" / "greeting.txt").is_file()
+    # The child `python -m pkg.cli` does not write `__pycache__` either.
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    expected = python_run(build_venv, [str(PKGAPP)], ROOT)
+    assert expected.returncode == 0, expected.stderr
+    actual = run(sandbox(dist_dir, [f"{MOUNT}/app"]), ROOT)
+    assert (actual.stdout, actual.stderr, actual.returncode) == (expected.stdout, "", 0)
+    # Elsewhere the project is not on `sys.path`, as for CPython.
+    python = f"{MOUNT}/python/bin/python"
+    outside = run(sandbox(dist_dir, [python, "-c", "import pkg"]), ROOT)
+    assert outside.last_stderr_line == "ModuleNotFoundError: No module named 'pkg'"
+
+
+@pytest.mark.e2e
+@needs_bwrap
 @pytest.mark.parametrize("method", ["spawn", "forkserver"])
 def test_multiprocessing_from_a_distribution(method: str, build_venv: Path, mp_dist: Path) -> None:
-    """The children are the program itself, running the transpiled
-    `__main__`: the distribution has no Python sources."""
+    """The children are the bundled interpreter, running the transpiled
+    `__main__` and the functions of the project's package `mptools`, whose
+    transpiled modules have no sources in the distribution."""
     expected = python_run(build_venv, [str(MPAPP), method], ROOT)
     assert expected.returncode == 0, expected.stderr
     actual = run(sandbox(mp_dist, [f"{MOUNT}/mpapp", method]), ROOT)
@@ -423,7 +622,26 @@ def mp_dist(build_venv: Path) -> Path:
         shutil.rmtree(dist_dir)
     (output / "mpapp").rename(dist_dir)
     assert not (dist_dir / "src" / "mpapp.py").exists()
+    # Only the submodule the program does not import is shipped.
+    shipped = [p.relative_to(dist_dir / "src").as_posix() for p in (dist_dir / "src").rglob("*.py")]
+    assert shipped == ["mptools/cli.py"]
     return dist_dir
+
+
+@pytest.mark.e2e
+@needs_bwrap
+@pytest.mark.parametrize("method", ["spawn", "forkserver"])
+def test_multiprocessing_from_a_module_distribution(method: str, build_venv: Path) -> None:
+    """`python -m mptools.cli` without sources: the children run the
+    transpiled module as `__mp_main__` and import its sibling submodule,
+    whose package directory is not in the distribution."""
+    output = steelix_build(build_venv, "-m", "mptools.cli", "--root", str(MP_DIR), "--no-sources")
+    dist_dir = output / "cli"
+    assert not (dist_dir / "src" / "mptools").exists()
+    expected = python_run(build_venv, ["-m", "mptools.cli", method], MP_DIR)
+    assert expected.returncode == 0, expected.stderr
+    actual = run(sandbox(dist_dir, [f"{MOUNT}/cli", method]), ROOT)
+    assert (actual.stdout, actual.stderr, actual.returncode) == (expected.stdout, "", 0)
 
 
 @pytest.mark.e2e
@@ -434,6 +652,9 @@ def test_multiprocessing_in_development(method: str, tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     shutil.copyfile(MPAPP, project / "mpapp.py")
+    shutil.copytree(
+        MP_DIR / "mptools", project / "mptools", ignore=shutil.ignore_patterns("__pycache__")
+    )
     root = E2E_DIR / f"mp-dev-{method}"
     if root.exists():
         shutil.rmtree(root)
@@ -450,6 +671,13 @@ def test_multiprocessing_in_development(method: str, tmp_path: Path) -> None:
     binary = Path(cargo_env(extension=False)["CARGO_TARGET_DIR"]) / "debug" / "mpapp"
     actual = run([str(binary), method], tmp_path)
     assert (actual.stdout, actual.stderr, actual.returncode) == (expected.stdout, "", 0)
+    if method == "spawn":
+        # A child command line without the parent's marker is the program's.
+        expected = python_run(PYTHON, [str(MPAPP), *INJECTION], tmp_path)
+        actual = run([str(binary), *INJECTION], tmp_path)
+        assert "INJECTED" not in actual.stdout.splitlines()
+        assert actual.returncode == expected.returncode == 1
+        assert actual.last_stderr_line == expected.last_stderr_line
 
 
 @pytest.mark.cargo

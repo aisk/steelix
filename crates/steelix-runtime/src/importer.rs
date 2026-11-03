@@ -8,6 +8,8 @@
 //! (`__name__`, `__file__`, `__spec__`, `__path__`, ..) that importing the
 //! source would have created.
 
+use std::path::{Component, Path, PathBuf};
+
 use pyo3::exceptions::PyImportError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
@@ -71,6 +73,22 @@ pub struct NativeImporter {
     /// The project directory: the module file names are relative to it.
     root: String,
     modules: &'static [NativeModule],
+    /// Which imports the importer answers.
+    scope: Scope,
+}
+
+/// Which imports a [`NativeImporter`] answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// Every import of a module in its table: the program, whose project
+    /// directory is `sys.path[0]` (design §7).
+    Always,
+    /// Only those where the path based finder would find the module's
+    /// source: the project directory is on `sys.path` (or, for a submodule,
+    /// the package's directory is in the parent's `__path__`). This is the
+    /// bundled interpreter (`python/bin/python`), which runs arbitrary
+    /// commands and so sees the project only where CPython would.
+    OnPath,
 }
 
 impl NativeImporter {
@@ -87,6 +105,93 @@ impl NativeImporter {
     fn location(&self, module: &NativeModule) -> String {
         format!("{}/{}", self.root, module.path())
     }
+
+    /// Whether the directory the path based finder would find `module` in
+    /// is one of `locations`: the `path` that importlib passes to
+    /// `find_spec`, which is `sys.path` for a top-level module (`None`) and
+    /// the parent package's `__path__` for a submodule (also looked up when
+    /// it is `None`). An empty entry is the current directory.
+    ///
+    /// The paths are compared with [`resolve`], which does not require them
+    /// to exist: without the sources (`steelix build --no-sources`) a
+    /// package's directory may not be there.
+    fn on_path(
+        &self,
+        py: Python<'_>,
+        module: &NativeModule,
+        locations: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        let package = module.name.rsplit_once('.').map(|(package, _)| package);
+        let mut parent = resolve(Path::new(&self.root));
+        if let Some(package) = package {
+            parent.extend(package.split('.'));
+        }
+        let looked_up;
+        let locations = match (locations, package) {
+            (Some(locations), _) => locations,
+            (None, None) => {
+                looked_up = py.import("sys")?.getattr("path")?;
+                &looked_up
+            }
+            (None, Some(package)) => {
+                let modules = py.import("sys")?.getattr("modules")?;
+                let Some(parent) = modules.cast::<PyDict>()?.get_item(package)? else {
+                    return Ok(false);
+                };
+                let Ok(path) = parent.getattr("__path__") else {
+                    return Ok(false);
+                };
+                looked_up = path;
+                &looked_up
+            }
+        };
+        for entry in locations.try_iter()? {
+            let entry = entry?;
+            let Ok(entry) = entry.extract::<&str>() else {
+                continue;
+            };
+            let entry = if entry.is_empty() { "." } else { entry };
+            if resolve(Path::new(entry)) == parent {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// `path` made absolute, with links resolved as far as it exists and the
+/// rest normalized lexically (`.` dropped, `..` removes the previous
+/// component), so that paths that do not exist (yet) can be compared.
+pub(crate) fn resolve(path: &Path) -> PathBuf {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+    let mut lexical = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                lexical.pop();
+            }
+            other => lexical.push(other),
+        }
+    }
+    // The longest existing prefix, with its links resolved, then the rest.
+    let mut existing = lexical.as_path();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(existing) {
+            return rest
+                .iter()
+                .rev()
+                .fold(resolved, |path, name| path.join(name));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                existing = parent;
+            }
+            _ => return lexical,
+        }
+    }
 }
 
 #[pymethods]
@@ -102,10 +207,13 @@ impl NativeImporter {
         path: Option<&Bound<'py, PyAny>>,
         target: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Option<Bound<'py, PyAny>>> {
-        let _ = (path, target);
+        let _ = target;
         let Some(module) = self.get(fullname) else {
             return Ok(None);
         };
+        if self.scope == Scope::OnPath && !self.on_path(py, module, path)? {
+            return Ok(None);
+        }
         let location = self.location(module);
         let loader = NativeLoader {
             module,
@@ -207,6 +315,62 @@ impl NativeLoader {
         Ok(self.path.clone())
     }
 
+    /// `importlib.abc.InspectLoader.get_code`, for `runpy` (`python -m
+    /// pkg.mod`, `runpy.run_module`): a code object that runs the module's
+    /// generated code in the namespace it is executed in. `runpy` puts the
+    /// loader into that namespace as `__loader__`.
+    #[pyo3(signature = (fullname = None))]
+    fn get_code<'py>(
+        &self,
+        py: Python<'py>,
+        fullname: Option<&str>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.check(fullname)?;
+        let compile = py.import("builtins")?.getattr("compile")?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("dont_inherit", true)?;
+        compile.call(
+            ("__loader__._exec_in(globals())", &self.path, "exec"),
+            Some(&kwargs),
+        )
+    }
+
+    /// Runs the generated code with `globals` as the module's namespace,
+    /// for the code object of [`get_code`](Self::get_code).
+    fn _exec_in(&self, globals: Bound<'_, PyDict>) -> PyResult<()> {
+        (self.module.exec)(&Module::from_globals(globals))
+    }
+
+    /// `importlib.abc.ResourceLoader.get_data`: the contents of a file,
+    /// for `pkgutil.get_data` (data files next to the module's source).
+    fn get_data<'py>(
+        &self,
+        py: Python<'py>,
+        path: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let file = py.import("_io")?.getattr("FileIO")?.call1((path, "r"))?;
+        let data = file.call_method0("readall");
+        let closed = file.call_method0("close");
+        let data = data?;
+        closed?;
+        Ok(data)
+    }
+
+    /// `importlib.resources` support, like the source loader's: a
+    /// `FileReader` over the directory of the module's source file (the
+    /// package directory for a package), so that
+    /// `importlib.resources.files(pkg)` finds the package's data files.
+    fn get_resource_reader<'py>(
+        slf: &Bound<'py, Self>,
+        fullname: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        slf.get().check(Some(fullname))?;
+        slf.py()
+            .import("importlib.readers")?
+            .getattr("FileReader")?
+            .call1((slf,))
+    }
+
     /// `importlib.abc.InspectLoader.get_source`: the Python source the
     /// module was transpiled from, or `None` if the file is not there
     /// (any more).
@@ -242,11 +406,22 @@ pub fn install_importer<'py>(
     root: &str,
     modules: &'static [NativeModule],
 ) -> PyResult<Bound<'py, NativeImporter>> {
+    install(py, root, modules, Scope::Always)
+}
+
+/// [`install_importer`] answering the imports of `scope`.
+pub(crate) fn install<'py>(
+    py: Python<'py>,
+    root: &str,
+    modules: &'static [NativeModule],
+    scope: Scope,
+) -> PyResult<Bound<'py, NativeImporter>> {
     let importer = Bound::new(
         py,
         NativeImporter {
             root: root.to_owned(),
             modules,
+            scope,
         },
     )?;
     let meta_path = py
@@ -299,4 +474,24 @@ pub fn init_extension(m: &Bound<'_, PyModule>, modules: &'static [NativeModule])
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_paths_that_do_not_exist() {
+        let dir = std::env::temp_dir().join(format!("steelix-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("root")).unwrap();
+        std::os::unix::fs::symlink(dir.join("root"), dir.join("link")).unwrap();
+        let root = std::fs::canonicalize(dir.join("root")).unwrap();
+        // A package directory that is not there (no sources), through a
+        // link, `.` and `..`.
+        assert_eq!(resolve(&dir.join("root/pkg")), root.join("pkg"));
+        assert_eq!(resolve(&dir.join("link/pkg/sub")), root.join("pkg/sub"));
+        assert_eq!(resolve(&dir.join("link/./x/../pkg")), root.join("pkg"));
+        assert_ne!(resolve(&dir.join("root/other")), root.join("pkg"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

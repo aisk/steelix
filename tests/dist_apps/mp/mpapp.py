@@ -1,10 +1,13 @@
 """multiprocessing with the spawn and forkserver start methods
 (tests/test_dist.py): the children must run the program's transpiled
-`__main__`, also when its source file is not there."""
+`__main__` and the project's package `mptools`, also when their source
+files are not there."""
 
 import multiprocessing
 import sys
 from concurrent.futures import ProcessPoolExecutor
+
+from mptools.work import cube, where
 
 
 class Point:
@@ -32,6 +35,7 @@ def main(method):
     with ctx.Pool(2) as pool:
         print(pool.map(square, range(6)))
         print(pool.map(norm, [Point(1, 2), Point(3, 4)]))
+        print(pool.map(cube, range(4)), pool.map(where, [1]))
         try:
             pool.map(fail, range(5))
         except ValueError as e:
