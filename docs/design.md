@@ -158,7 +158,8 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 
 - 每个局部变量只声明一次，循环变量、`if`/`try` 内的赋值都是对它的赋值，不再重新 `let`
   - 第一次出现是函数体顶层的赋值语句时，直接在那里写 `let x = ...;`（顶层语句按顺序执行，它支配之后所有使用点），这样直线代码最可读
-  - 否则在函数开头声明 `let x: Bound<'py, PyAny>;`，由后面的分支赋值
+  - 否则先声明 `let x: Bound<'py, PyAny>;`，由后面的分支赋值。lowering 把这些声明放在函数开头，清理时再移到第一次用到它的语句之前，那条语句在每条路径上都给它赋值时并成 `let x = if .. { a } else { b };`（§8）
+- 局部变量按 `co_varnames` 的顺序声明（参数在前，其余按第一次出现）。函数返回时 CPython 按这个顺序的逆序释放局部变量，Rust 按声明的逆序 drop，两边一致，`__del__` 和 weakref 回调的顺序相同（`tests/cases/drop_order.py`）。`co_varnames` 直接取自编译器（`frontend/classinfo.py` 编译整个模块，按 qualname 和首行找到每个函数的 code 对象），不自己推算，因为它是代码生成的顺序（`x = f(y)` 先 `y` 后 `x`，循环变量在循环体之前），和源码顺序不完全一样。只被内层函数捕获的变量（纯 cellvar）不在 `co_varnames` 里，在 CPython 的帧里排在所有局部变量之后，所以排在最后，最先释放
   - 可能重复赋值（另做一遍"可能已赋值"分析，循环取不动点）时才加 `mut`，与 rustc 的判断一致，不产生 `unused_mut`
   - 被重新赋值的参数在开头遮蔽成 `let mut n = n.clone();`
 - 自行做定值分析，规则与 rustc 一致或更保守（条件一律视为不透明，`while True` 没有 `break` 时之后不可达）。能确定已赋值的变量用 `Bound`，不能确定的用 `Option<Bound>`：声明为 `let mut x: Option<Bound<'py, PyAny>> = None;`，赋值写 `x = Some(..)`，读取写 `rt::local(&x, "x")?`，未赋值时抛和 CPython 一样的 `UnboundLocalError`
@@ -484,6 +485,21 @@ h.call0()?.contains(&item)?
 - 目标和右边个数相同、都没有 `*` 的解包赋值 `a, b = b, a` 不再构造元组再 `rt::unpack`，写成 `[a, b] = [b.clone(), a.clone()];`。Python 也是先按顺序求值右边的每一项，再依次赋值，中间的元组看不到（CPython 对两三项的情况本来就不构造元组）
 - `globals()` 是模块持有的 `&Bound<PyDict>`，直接用 `m.globals()`，不再 `.clone().into_any()`（`m.globals().contains("n")?`）
 - 带装饰器的类和带装饰器的函数一样，最外层的装饰器在保存时调用：`m.set_global("Point", decorator.call1((point,))?)?`
+- 先声明后赋值的局部变量（`let kind: Bound<'py, PyAny>;` 和 `let mut x: Option<..> = None;`，§5）移到第一次用到它的语句之前（`rustast/cleanup.py` 的 `declare_late`，在每个函数 lower 完之后做）。第一次使用就是给它赋值时在那里带值声明，对应 clippy 的 `needless_late_init`。第一次使用可以是 `x = v;`，也可以是带 `else` 的 `if`/`else if` 链或 `match`（`try` 生成的），要求每个分支的最后一条语句给它赋值，或者离开（`return`、`break`、`continue`，`raise` 也是 `return Err(..)`），分支里别的地方和条件里都不用到它。嵌套的 `if` 只要符合同样的条件也算赋值。分支里的赋值变成块的尾表达式，至少要有一个分支给出值
+
+  ```rust
+  let word = if n.lt(0)? {
+      rt::str(py, "negative")
+  } else if n.eq(0)? {
+      return Ok(rt::str(py, "zero"));
+  } else {
+      rt::str(py, "positive")
+  };
+  ```
+
+  声明原来不持有对象（或者只持有 `None`），所以求值顺序和释放时机都不变。分支里的临时变量和以前一样在分支结束时释放，值由变量接着持有。声明只在同一层块里往下移，不移进循环或分支，变量照旧活到函数返回。往下移时可以越过注释、别的语句和临时变量，越过别的局部变量的声明则要求那个变量在 `co_varnames` 里排在前面（§5），否则停在它前面，不合并。`bool` 变量不受这个限制，Rust 不 drop 它。类型标注去掉，由值推断（分支的值本来就是这个类型），只有 `Option` 变量的值里可能有 `None` 时保留。后面还会被赋值时保留 `mut`，否则去掉
+
+  标准库 154 个模块里先声明后赋值的变量从 3445 个变成 3137 个，合并了 308 个。剩下的第一次使用是没有 `else` 的 `if`、循环，或者分支最后赋值的是别的变量（一条 `if` 给两个变量赋值时，排在后面的那个合并，前面的保留声明），都移到了使用之前。因为 `co_varnames` 的顺序而不能合并的 `if` 链有 23 个，比如 `userhome` 和 `drive` 由同一条 `if` 赋值，`drive` 的声明必须排在 `userhome` 后面
 
 量过但没有做的（标准库 154 个模块，32 万行）：`.clone()` 共 2422 个，其中 1150 个是被重新赋值的参数 `let mut n = n.clone();`（参数是 `&Bound`），约 400 个是 `x = y.clone()`（两个 Python 变量都持有这个对象，move 会让对象在 `x` 被重新赋值时提前释放），约 270 个是返回参数（`&Bound`，只能 clone），约 170 个是条件表达式和 `and`/`or` 的值形式里的局部变量，都是必要的。临时变量在 lowering 时已经只在求值顺序需要时才引入，3052 个临时变量里能原样内联而不改变求值顺序的只有装饰器的 `let decorator`/`let function`（650 多个，内联之后是一个很长的嵌套调用，不比现在好读）和上面的装饰类
 
@@ -1010,6 +1026,8 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 - docstring 按 3.13+ 编译器的规则去缩进（与 `inspect.cleandoc` 不同，保留首尾空行），同时生成 `///` 和 `__doc__`
 
 已知且有意保留的语义差异
+
+- 局部变量释放的时机（§5、§8）。函数返回时的释放顺序和 CPython 一样，但有三处不同。`for` 的目标变量只在循环里用到时在每次迭代开头声明（§5），所以最后一个元素在循环结束时释放，CPython 要等到函数返回或者变量被重新赋值。只在 `try` 体里用到的变量声明在 `try` 生成的闭包里（§9），`try` 语句结束时就释放。被重新赋值的参数（`let mut n = n.clone();`）不会让实参提前释放，调用方一直持有实参到调用返回，CPython 的帧拥有实参，`f(T())` 里的 `T()` 在 `n` 被重新赋值时就释放
 
 - 直接调用的模块函数不受其他模块 monkeypatch 影响（可用 `--dynamic-globals` 关闭）
 - 原生函数的 traceback 帧是异常离开时合成的（第 9 节）。和 CPython 的区别：默认行号是 `def` 所在的行（`<module>` 是 1），显示的源码行也是这一行；`--traceback-lines` 时是语句所在的行。原生帧没有 `^^^` 定位（`tb_lasti` 是 -1），`f_locals` 为空。保留为 Python 的代码（§13）的帧和 CPython 完全一样

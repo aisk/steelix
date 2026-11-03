@@ -44,10 +44,6 @@ pub fn py_make_scanner<'py>(
         ) -> PyResult<Bound<'py, PyAny>> {
             let py = module.py();
             rt::frame!(module, "py_make_scanner.<locals>._scan_once", 31, |frame| {
-                let integer: Bound<'py, PyAny>;
-                let frac: Bound<'py, PyAny>;
-                let exp: Bound<'py, PyAny>;
-                let res: Bound<'py, PyAny>;
                 let nextchar = match string.get_item(idx) {
                     Ok(value) => value,
                     Err(err) if err.is_instance_of::<PyIndexError>(py) => {
@@ -93,6 +89,10 @@ pub fn py_make_scanner<'py>(
                     return Ok(PyTuple::new(py, [&rt::bool(py, false), &idx.add(5)?])?.into_any());
                 }
                 let m = match_number.call1((string, idx))?;
+                let integer: Bound<'py, PyAny>;
+                let frac: Bound<'py, PyAny>;
+                let exp: Bound<'py, PyAny>;
+                let res: Bound<'py, PyAny>;
                 if !m.is_none() {
                     [integer, frac, exp] = rt::unpack(&m.call_method0("groups")?)?;
                     if frac.is_truthy()? || exp.is_truthy()? {

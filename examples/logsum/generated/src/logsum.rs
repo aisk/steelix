@@ -115,9 +115,9 @@ pub fn parse_line<'py>(
 pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "load", 51, |_| {
-        let mut request: Bound<'py, PyAny>;
         let requests = PyList::empty(py).into_any();
         let mut malformed = rt::int(py, 0);
+        let mut request: Bound<'py, PyAny>;
         for line in rt::call!(path.getattr("read_text")?, encoding = "utf-8")?
             .call_method0("splitlines")?
             .try_iter()?
@@ -188,8 +188,8 @@ pub fn tally<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "tally", 84, |_| {
-        let mut key: Bound<'py, PyAny>;
         let counts = PyDict::new(py).into_any();
+        let mut key: Bound<'py, PyAny>;
         for request in requests.try_iter()? {
             let request = request?;
             key = request.get_item(field)?;
@@ -344,8 +344,8 @@ pub fn print_latency<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "print_latency", 111, |_| {
-        let mut request: Bound<'py, PyAny>;
         let timed = PyList::empty(py).into_any();
+        let mut request: Bound<'py, PyAny>;
         for item in requests.try_iter()? {
             request = item?;
             if !request.get_item("ms")?.is_none() {

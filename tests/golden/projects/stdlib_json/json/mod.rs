@@ -71,9 +71,8 @@ pub fn dump<'py>(
     let py = m.py();
     rt::frame!(m, "dump", 123, |_| {
         let mut cls = cls.clone();
-        let iterable: Bound<'py, PyAny>;
         // cached encoder
-        if !skipkeys.is_truthy()?
+        let iterable = if !skipkeys.is_truthy()?
             && ensure_ascii.is_truthy()?
             && check_circular.is_truthy()?
             && allow_nan.is_truthy()?
@@ -84,14 +83,13 @@ pub fn dump<'py>(
             && !sort_keys.is_truthy()?
             && !kw.is_truthy()?
         {
-            iterable = m
-                .global("_default_encoder")?
-                .call_method1("iterencode", (obj,))?;
+            m.global("_default_encoder")?
+                .call_method1("iterencode", (obj,))?
         } else {
             if cls.is_none() {
                 cls = m.global("JSONEncoder")?;
             }
-            iterable = rt::call!(
+            rt::call!(
                 cls,
                 skipkeys = skipkeys,
                 ensure_ascii = ensure_ascii,
@@ -103,8 +101,8 @@ pub fn dump<'py>(
                 sort_keys = sort_keys,
                 **kw
             )?
-            .call_method1("iterencode", (obj,))?;
-        }
+            .call_method1("iterencode", (obj,))?
+        };
         // could accelerate with writelines in some versions of Python, at
         // a debuggability cost
         for chunk in iterable.try_iter()? {

@@ -40,9 +40,9 @@ pub fn in_while<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "in_while", 16, |_| {
-        let mut item: Bound<'py, PyAny>;
         let out = PyList::empty(py).into_any();
         let it = values.try_iter()?.into_any();
+        let mut item: Bound<'py, PyAny>;
         loop {
             item = rt::builtin(py, "next")?.call1((&it, py.None()))?;
             if item.is_none() {
@@ -123,8 +123,8 @@ pub fn filtered<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "filtered", 39, |_| {
-        let mut y: Option<Bound<'py, PyAny>> = None;
         let list = PyList::empty(py);
+        let mut y: Option<Bound<'py, PyAny>> = None;
         for x in values.try_iter()? {
             let x = x?;
             let y2 = x.mul(2)?;

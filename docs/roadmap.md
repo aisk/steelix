@@ -225,6 +225,7 @@ M9 第一项提前做，并且改成默认行为。
 - [x] 只会是 `bool` 的局部变量是 Rust `bool`（§5，`frontend/booleans.py`），只认 Python 语义保证是 `bool` 的值（`not`、`is`、`in`、`isinstance`、`bool()`、字面量和它们的 `and`/`or`），比较运算不算。标准库 12087 个局部变量里有 128 个
 - [x] 用例 `bool_locals`（富比较返回非 bool、`__bool__` 的调用时机、被捕获、可能未赋值、`try`/`with` 里赋值）和 `returned_locals`（move 之后 `__del__`、weakref 的时机不变）
 - [x] CI：`.github/workflows/ci.yml`，ruff、cargo fmt、clippy 和完整的 pytest（§14）
+- [x] 先声明后赋值的局部变量移到第一次使用之前，第一次使用就是赋值（或者每个分支最后都赋值的 `if` 链、`match`）时带值声明：`let kind = if .. { a } else { b };`（§8，较新的 clippy 报 `needless_late_init`）。局部变量按 `co_varnames` 的顺序声明，函数返回时的释放顺序和 CPython 一致（§5，剩下的差异见 §12）。用例 `late_init`、`drop_order`，golden 里的扫描测试保证不再出现可以合并的写法。标准库里合并了 308 个
 
 已有用例的 golden 从 18168 行变成 18138 行（新增的两个用例另有 815 行），`tests/golden/projects` 的模块从 7873 行变成 7860 行，`tests/apps` 的输出从 9419 行变成 9407 行，154 个标准库模块从 332793 行变成 332235 行。行数变化不大，主要的变化是返回值少了 clone、解包不再构造元组、bool 局部变量不再经过 `rt::bool` 和 `is_truthy`（标准库里 `rt::bool(` 从 1251 个减到 1048 个，`is_truthy` 从 5585 个减到 5440 个）。
 

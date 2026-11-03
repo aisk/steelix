@@ -100,8 +100,8 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
     let py = m.py();
     rt::frame!(m, "classify", 45, |frame| {
         let result2 = (|| -> PyResult<Bound<'py, PyAny>> {
-            let result: Bound<'py, PyAny>;
             frame.line(47);
+            let result: Bound<'py, PyAny>;
             match (|| m.global("risky")?.call1((kind,)))() {
                 Ok(value) => {
                     result = value;

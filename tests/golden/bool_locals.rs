@@ -178,8 +178,8 @@ pub fn maybe_unbound<'py>(
 pub fn in_try<'py>(m: &rt::Module<'py>, values: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "in_try", 108, |frame| {
-        let mut good: Option<Bound<'py, PyAny>> = None;
         let mut failed = false;
+        let mut good: Option<Bound<'py, PyAny>> = None;
         let result = (|| -> PyResult<()> {
             match (|| -> PyResult<()> {
                 rt::builtin(py, "int")?.call1((values.get_item(0)?,))?;

@@ -41,9 +41,9 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "late_binding", 18, |_| {
         let i = rt::Cell::empty(py, "i")?;
-        let mut show: Bound<'py, PyAny>;
         // Every closure sees the final value of `i`.
         let funcs = PyList::empty(py).into_any();
+        let mut show: Bound<'py, PyAny>;
         for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
             i.set(item?)?;
             // closures.py:23

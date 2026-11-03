@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 
 from steelix.rustast import nodes as rs
-from steelix.rustast.cleanup import move_returned_locals
+from steelix.rustast.cleanup import declare_late, move_returned_locals
 from steelix.rustast.fmt import rustfmt
 from steelix.rustast.printer import byte_string_literal, print_expr, print_file, string_literal
 from steelix.rustast.rewrite import count_path, replace_path
@@ -213,3 +216,225 @@ def test_if_let_and_nested_returns() -> None:
     stmt = rs.If(next_, then, pattern="Some(x)")
     out = _cleaned(rs.Block((stmt,), _ok(p("None"))))
     assert "return Ok(Some(x));" in out
+
+
+BOUND = "Bound<'py, PyAny>"
+
+
+# Positions in `co_varnames`: `x` comes after `a` and before `t`.
+RANKS = {"a": 0, "x": 1, "t": 2, "y": 3}
+
+
+def _merged(body: rs.Block, ranks: dict[str, int] = RANKS) -> str:
+    fn = rs.Fn("f", (), "PyResult<Bound<'py, PyAny>>", declare_late(body, ranks), ("'py",))
+    return print_file(rs.File([fn]))
+
+
+def _set(name: str, value: rs.Expr) -> rs.Assign:
+    return rs.Assign(p(name), value)
+
+
+def _call(name: str) -> rs.Expr:
+    return rs.Try(rs.Call(p(name), ()))
+
+
+def test_late_init_local_is_declared_with_the_if_chain() -> None:
+    let = rs.Let("x", ty=BOUND)
+    third = rs.Block((rs.ExprStmt(_call("log")), _set("x", _call("c"))))
+    leaves = rs.Block((rs.Return(_ok(_call("d"))),))
+    chain = rs.If(
+        p("a"),
+        rs.Block((_set("x", _call("b")),)),
+        rs.If(p("p"), third, rs.If(p("q"), rs.Block((_set("x", p("y")),)), leaves)),
+    )
+    out = _merged(rs.Block((let, rs.Comment("chain"), chain), _ok(p("x"))))
+    assert "let x = if a {\n        b()?\n    } else if p {\n        log()?;\n        c()?\n" in out
+    assert "} else if q {\n        y\n    } else {\n        return Ok(d()?);\n    };" in out
+    assert "// chain\n    let x = if" in out
+    assert "x =" not in out.replace("let x =", "")
+
+
+def test_late_init_mut_only_when_assigned_again() -> None:
+    chain = rs.If(p("a"), rs.Block((_set("x", p("b")),)), rs.Block((_set("x", p("c")),)))
+    again = _set("x", _call("d"))
+    out = _merged(rs.Block((rs.Let("x", True, BOUND), chain, again), _ok(p("x"))))
+    assert "let mut x = if a {" in out
+    out = _merged(rs.Block((rs.Let("x", True, BOUND), chain), _ok(p("x"))))
+    assert "let x = if a {" in out
+    # A plain assignment as the first use.
+    out = _merged(rs.Block((rs.Let("x", ty=BOUND), rs.ExprStmt(_call("g")), again), p("x")))
+    assert "    g()?;\n    let x = d()?;\n" in out
+
+
+def test_late_init_local_is_declared_with_the_match() -> None:
+    arms = (
+        rs.Arm("Ok(v)", rs.Block((_set("x", p("v")),))),
+        rs.Arm("Err(e)", rs.Block((rs.ExprStmt(_call("log")), _set("x", p("none")))), p("g")),
+        rs.Arm("Err(e)", rs.Block((rs.Return(rs.Call(p("Err"), (p("e"),))),))),
+    )
+    stmt = rs.ExprStmt(rs.Match(_call("r"), arms))
+    out = _merged(rs.Block((rs.Let("x", ty=BOUND), stmt), _ok(p("x"))))
+    assert "let x = match r()? {\n        Ok(v) => v,\n" in out
+    assert "Err(e) if g => {\n            log()?;\n            none\n        }" in out
+    # An arm binding the name assigns another variable.
+    shadow = rs.Arm("Ok(x)", rs.Block((_set("x", p("v")),)))
+    stmt = rs.ExprStmt(rs.Match(_call("r"), (shadow, *arms[1:])))
+    assert "let x: Bound" in _merged(rs.Block((rs.Let("x", ty=BOUND), stmt), _ok(p("x"))))
+
+
+@pytest.mark.parametrize(
+    "stmts",
+    [
+        # No `else`.
+        [rs.If(p("a"), rs.Block((_set("x", p("b")),)))],
+        # Read or assigned in a branch before the end.
+        [
+            rs.If(
+                p("a"),
+                rs.Block((_set("x", p("b")), _set("x", p("c")))),
+                rs.Block((_set("x", p("c")),)),
+            )
+        ],
+        [
+            rs.If(
+                p("a"),
+                rs.Block((_set("x", p("b")),)),
+                rs.Block((_set("y", p("x")), _set("x", p("c")))),
+            )
+        ],
+        # Assigns something else last.
+        [
+            rs.If(
+                p("a"),
+                rs.Block((_set("x", p("b")), _set("y", p("c")))),
+                rs.Block((_set("x", p("c")),)),
+            )
+        ],
+        # Every branch leaves.
+        [rs.If(p("a"), rs.Block((rs.Break(),)), rs.Block((rs.Continue(),)))],
+        # Read in the condition.
+        [rs.If(rs.Ref(p("x")), rs.Block((_set("x", p("b")),)), rs.Block((_set("x", p("c")),)))],
+        # `if let`.
+        [rs.If(p("a"), rs.Block((_set("x", p("b")),)), rs.Block((_set("x", p("c")),)), "Some(z)")],
+        # Moving the declaration past a local that comes later in
+        # `co_varnames` would change the drop order.
+        [rs.Let("t", init=_call("t")), _set("x", p("b"))],
+        [rs.Let("t", ty=BOUND), _set("x", p("b"))],
+    ],
+)
+def test_late_init_local_kept(stmts: list[rs.Stmt]) -> None:
+    out = _merged(rs.Block((rs.Let("x", ty=BOUND), *stmts), _ok(p("x"))))
+    assert f"let x: {BOUND};" in out
+
+
+def test_late_init_moves_past_earlier_locals_and_bools() -> None:
+    # Past a local that comes first in `co_varnames`, or a temporary.
+    stmts = (rs.Let("x", ty=BOUND), rs.Let("a", init=_call("a")), _set("x", p("b")))
+    assert "let a = a()?;\n    let x = b;\n" in _merged(rs.Block(stmts, p("x")))
+    stmts = (rs.Let("x", ty=BOUND), rs.Let("tmp", init=_call("g")), _set("x", p("b")))
+    assert "let tmp = g()?;\n    let x = b;\n" in _merged(rs.Block(stmts, p("x")))
+    # Rust does not drop a `bool`.
+    stmts = (rs.Let("x", ty="bool"), rs.Let("t", init=_call("t")), _set("x", rs.BoolLit(True)))
+    assert "let t = t()?;\n    let x = true;\n" in _merged(rs.Block(stmts, p("x")))
+    stmts = (rs.Let("x", ty=BOUND), rs.Let("t", ty="bool"), _set("x", p("b")))
+    assert "let t: bool;\n    let x = b;\n" in _merged(rs.Block(stmts, p("x")))
+
+
+def test_declarations_move_down_to_their_first_use() -> None:
+    late = rs.Let("x", ty=BOUND)
+    option = rs.Let("y", True, f"Option<{BOUND}>", p("None"))
+    no_else = rs.If(p("c"), rs.Block((_set("x", p("b")), _set("y", p("d")))))
+    stmts = (late, option, rs.ExprStmt(_call("g")), rs.Comment("note"), no_else)
+    out = _merged(rs.Block(stmts, rs.Tuple((p("x"), p("y")))))
+    assert (
+        f"g()?;\n    let x: {BOUND};\n    let mut y: Option<{BOUND}> = None;\n    // note\n" in out
+    )
+    # As far as the order allows: not past `t`, which comes after `x`.
+    stmts = (late, rs.ExprStmt(_call("g")), rs.Let("t", init=_call("t")), no_else)
+    out = _merged(rs.Block(stmts, p("x")))
+    assert f"g()?;\n    let x: {BOUND};\n    let t = t()?;\n" in out
+    # Only the tail uses it; a local nothing uses stays.
+    stmts = (late, rs.ExprStmt(_call("g")))
+    assert f"g()?;\n    let x: {BOUND};\n    x\n" in _merged(rs.Block(stmts, p("x")))
+    assert f"let x: {BOUND};\n    g()?;" in _merged(rs.Block(stmts))
+    # An `Option` local gets its first value too; the type stays when the
+    # value may be a bare `None`.
+    some = _set("y", rs.Call(p("Some"), (p("b"),)))
+    out = _merged(rs.Block((option, some, _set("y", p("None"))), p("y")))
+    assert "let mut y = Some(b);\n    y = None;\n" in out
+    choice = rs.If(p("c"), rs.Block((some,)), rs.Block((_set("y", p("None")),)))
+    out = _merged(rs.Block((option, choice), p("y")))
+    assert f"let y: Option<{BOUND}> = if c {{" in out
+    # Nested fns have their own locals.
+    inner = rs.Fn("inner", (), "()", rs.Block((late, rs.ExprStmt(_call("g")), no_else)))
+    out = _merged(rs.Block((rs.ItemStmt(inner),)))
+    assert f"let x: {BOUND};\n    g()?;" in out
+
+
+_LATE_LET = re.compile(r"^( *)let (?:mut )?((?:r#)?\w+): [^=]+;$")
+
+
+def _late_init_if_chains(text: str) -> list[str]:
+    """`let x: T;` followed (comments aside) by an `if` with an `else` whose
+    every branch ends by assigning `x` or leaving, in formatted Rust."""
+    lines = text.splitlines()
+    found = []
+    for i, line in enumerate(lines):
+        if (match := _LATE_LET.match(line)) is None:
+            continue
+        indent, name = match.groups()
+        j = i + 1
+        while j < len(lines) and lines[j].strip().startswith("//"):
+            j += 1
+        if not lines[j].startswith(f"{indent}if "):
+            continue
+        # The branches: lines one level deeper, up to the closing `}` lines.
+        branches: list[list[str]] = [[]]
+        has_else = False
+        for line in lines[j + 1 :]:
+            if line == f"{indent}}}":
+                break
+            if line.startswith(f"{indent}}} else"):
+                has_else |= line == f"{indent}}} else {{"
+                branches.append([])
+            elif line.startswith(f"{indent}    ") and not line.startswith(f"{indent}     "):
+                if not line.strip().startswith((")", "]", "}", ".", "?", "//")):
+                    branches[-1].append(line.strip())
+        ends = [b[-1] if b else "" for b in branches]
+        leaves = ("return", "break", "continue")
+        if has_else and all(e.startswith((f"{name} = ", *leaves)) for e in ends):
+            if any(e.startswith(f"{name} = ") for e in ends):
+                found.append(f"{name}: {lines[j].strip()}")
+    return found
+
+
+def test_late_init_scan_finds_the_pattern() -> None:
+    text = """
+    let kind: Bound<'py, PyAny>;
+    // comment
+    if n.lt(0)? {
+        kind = rt::str(py, "negative");
+    } else if n.eq(0)? {
+        return Ok(n.clone());
+    } else {
+        f(
+            a,
+        )?;
+        kind = rt::str(py, "large");
+    }
+    let other: Bound<'py, PyAny>;
+    if c {
+        other = a;
+    }
+"""
+    assert _late_init_if_chains(text) == ["kind: if n.lt(0)? {"]
+
+
+def test_goldens_have_no_late_init_if_chains() -> None:
+    root = Path(__file__).parent / "golden"
+    found = {
+        str(path.relative_to(root)): chains
+        for path in sorted(root.rglob("*.rs"))
+        if (chains := _late_init_if_chains(path.read_text()))
+    }
+    assert found == {}

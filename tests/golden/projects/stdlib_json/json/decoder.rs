@@ -52,6 +52,9 @@ pub fn py_scanstring<'py>(
     let py = module.py();
     rt::frame!(module, "py_scanstring", 73, |frame| {
         let mut end = end.clone();
+        let chunks = PyList::empty(py).into_any();
+        let _append = chunks.getattr("append")?;
+        let begin = end.sub(1)?;
         let mut chunk: Bound<'py, PyAny>;
         let mut content: Bound<'py, PyAny>;
         let mut terminator: Bound<'py, PyAny>;
@@ -60,9 +63,6 @@ pub fn py_scanstring<'py>(
         let mut char: Bound<'py, PyAny>;
         let mut uni: Bound<'py, PyAny>;
         let mut uni2: Bound<'py, PyAny>;
-        let chunks = PyList::empty(py).into_any();
-        let _append = chunks.getattr("append")?;
-        let begin = end.sub(1)?;
         loop {
             chunk = _m.call1((s, &end))?;
             if chunk.is_none() {
@@ -175,10 +175,6 @@ pub fn JSONObject<'py>(
     let py = m.py();
     rt::frame!(m, "JSONObject", 140, |frame| {
         let mut memo = memo.clone();
-        let result: Bound<'py, PyAny>;
-        let mut key: Bound<'py, PyAny>;
-        let mut value: Option<Bound<'py, PyAny>> = None;
-        let mut comma_idx: Bound<'py, PyAny>;
         let [s, mut end] = rt::unpack(s_and_end)?;
         let mut pairs = PyList::empty(py).into_any();
         let pairs_append = pairs.getattr("append")?;
@@ -190,6 +186,7 @@ pub fn JSONObject<'py>(
         // Use a slice to prevent IndexError from being raised, the following
         // check will raise a more specific ValueError if the string is empty
         let mut nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
+        let result: Bound<'py, PyAny>;
         // Normally we expect nextchar == '"'
         if nextchar.ne("\"")? {
             if _ws.contains(&nextchar)? {
@@ -216,6 +213,9 @@ pub fn JSONObject<'py>(
             }
         }
         end = rt::iadd(&end, 1)?;
+        let mut key: Bound<'py, PyAny>;
+        let mut value: Option<Bound<'py, PyAny>> = None;
+        let mut comma_idx: Bound<'py, PyAny>;
         loop {
             [key, end] = rt::unpack(&m.global("scanstring")?.call1((&s, &end, strict))?)?;
             key = memo_get.call1((&key, &key))?;
@@ -331,8 +331,6 @@ pub fn JSONArray<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "JSONArray", 224, |frame| {
-        let mut value: Option<Bound<'py, PyAny>> = None;
-        let mut comma_idx: Bound<'py, PyAny>;
         let [s, mut end] = rt::unpack(s_and_end)?;
         let values = PyList::empty(py).into_any();
         let mut nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
@@ -345,6 +343,8 @@ pub fn JSONArray<'py>(
             return Ok(PyTuple::new(py, [&values, &end.add(1)?])?.into_any());
         }
         let _append = values.getattr("append")?;
+        let mut value: Option<Bound<'py, PyAny>> = None;
+        let mut comma_idx: Bound<'py, PyAny>;
         loop {
             match (|| -> PyResult<()> {
                 let [value2, end2] = rt::unpack(&scan_once.call1((&s, &end))?)?;

@@ -154,18 +154,16 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             dump_args.set_item("separators", PyTuple::new(py, [",", ":"])?)?;
         }
         match (|| -> PyResult<()> {
-            let infile: Bound<'py, PyAny>;
-            let mut objs: Option<Bound<'py, PyAny>> = None;
-            let outfile: Bound<'py, PyAny>;
-            if options.getattr("infile")?.eq("-")? {
-                infile = m.global("sys")?.getattr("stdin")?;
+            let infile = if options.getattr("infile")?.eq("-")? {
+                m.global("sys")?.getattr("stdin")?
             } else {
-                infile = rt::call!(
+                rt::call!(
                     rt::builtin(py, "open")?,
                     options.getattr("infile")?,
                     encoding = "utf-8"
-                )?;
-            }
+                )?
+            };
+            let mut objs: Option<Bound<'py, PyAny>> = None;
             let result = (|| -> PyResult<()> {
                 let lines: Bound<'py, PyAny>;
                 if options.getattr("json_lines")?.is_truthy()? {
@@ -202,16 +200,16 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 infile.call_method0("close")?;
             }
             finally.resume()?;
-            if options.getattr("outfile")?.is_none() {
-                outfile = m.global("sys")?.getattr("stdout")?;
+            let outfile = if options.getattr("outfile")?.is_none() {
+                m.global("sys")?.getattr("stdout")?
             } else {
-                outfile = rt::call!(
+                rt::call!(
                     rt::builtin(py, "open")?,
                     options.getattr("outfile")?,
                     "w",
                     encoding = "utf-8"
-                )?;
-            }
+                )?
+            };
             frame.with(&outfile, |_| {
                 let t: Bound<'py, PyAny>;
                 let mut obj: Bound<'py, PyAny>;

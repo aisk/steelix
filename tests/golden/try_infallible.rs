@@ -88,8 +88,8 @@ pub fn deleted_in_loop<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "deleted_in_loop", 62, |_| {
-        let mut w: Bound<'py, PyAny>;
         let mut v = Some(rt::int(py, 0));
+        let mut w: Bound<'py, PyAny>;
         for underscore in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
             let underscore = underscore?;
             w = rt::local(&v, "v")?.clone();

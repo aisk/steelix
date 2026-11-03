@@ -134,8 +134,8 @@ pub fn search<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "search", 61, |_| {
-        let mut j: Bound<'py, PyAny>;
         let mut i = rt::int(py, 0);
+        let mut j: Bound<'py, PyAny>;
         for row in rows.try_iter()? {
             let row = row?;
             j = rt::int(py, 0);

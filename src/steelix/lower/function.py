@@ -27,6 +27,7 @@ from steelix.lower.docstrings import docstring
 from steelix.lower.names import FUNCTION_RESERVED, Renamer, context_name, rust_ident
 from steelix.lower.rustflow import fallible, returns_as_tail, statement_line
 from steelix.rustast import nodes as rs
+from steelix.rustast.cleanup import declare_late
 from steelix.rustast.printer import string_literal
 from steelix.rustast.rewrite import count_path, replace_path
 
@@ -161,7 +162,13 @@ def lower_function(
         params.append(rs.Param(names[param], ty))
 
     doc = docstring(fn, module.filename) if isinstance(fn, ast.FunctionDef) else None
-    block = in_frame(ctx.context_name, scope.qualname, first_line, rs.Block(tuple(body), tail))
+    # Declared in the order of `co_varnames`, which is the reverse of the
+    # order CPython releases them in when the function returns.
+    varnames = module.varnames.get((scope.qualname, first_line), ())
+    order = [*varnames, *(n for n in [*scope.params, *locals_info.order] if n not in varnames)]
+    ranks = {names[n]: i for i, n in enumerate(order) if n in names}
+    lowered = declare_late(rs.Block(tuple(body), tail), ranks)
+    block = in_frame(ctx.context_name, scope.qualname, first_line, lowered)
     return rs.Fn(
         name=rust_name,
         params=tuple(params),

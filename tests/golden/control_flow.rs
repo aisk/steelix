@@ -28,16 +28,15 @@ pub fn collatz_steps<'py>(
 pub fn classify<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "classify", 19, |_| {
-        let kind: Bound<'py, PyAny>;
-        if n.lt(0)? {
-            kind = rt::str(py, "negative");
+        let kind = if n.lt(0)? {
+            rt::str(py, "negative")
         } else if n.eq(0)? {
-            kind = rt::str(py, "zero");
+            rt::str(py, "zero")
         } else if n.lt(m.global("LIMIT")?)? {
-            kind = rt::str(py, "small");
+            rt::str(py, "small")
         } else {
-            kind = rt::str(py, "large");
-        }
+            rt::str(py, "large")
+        };
         Ok(kind)
     })
 }

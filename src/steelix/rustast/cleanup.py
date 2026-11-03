@@ -10,23 +10,220 @@ reference either way, and no other object is dropped earlier or later.
 Locals of an enclosing fn or closure are captured by reference and keep
 their clone, and so do parameters (`&Bound`) and locals that a guard
 borrows (`let _handling = rt::Handling::new(&err);`).
+
+`declare_late`: a local declared without a value (`let kind: T;`) is
+declared where it is first used, as far as the drop order allows. When that
+first use is an assignment, or an `if`/`else` chain or `match` whose every
+branch ends by assigning it or leaves (`return`, `break`, `continue`), it
+is declared with that value: `let kind = if .. { a } else { b };`. The local
+held nothing before, so evaluation order and drop timing stay the same.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from steelix.rustast import nodes as rs
 
 _RETURN_WRAPPERS = ("Ok", "Some", "rt::Flow::Return")
 _PATTERN_WORDS = frozenset({"Some", "Ok", "Err", "mut", "ref", "_"})
+# Types of locals that Rust does not drop.
+_COPY = frozenset({"bool"})
 
 
 def move_returned_locals(file: rs.File) -> rs.File:
     """`file` with returned locals moved instead of cloned."""
     return dataclasses.replace(file, items=[_item(item) for item in file.items])
+
+
+def declare_late(block: rs.Block, ranks: Mapping[str, int]) -> rs.Block:
+    """The body of a lowered function with each declaration that holds no
+    object yet (`let x: T;`, `let mut x: Option<T> = None;`) moved down to
+    the statement that first uses the local, and given its value there when
+    that statement assigns it. `ranks` is the position of each local in
+    `co_varnames` by its Rust name.
+
+    A declaration moves past another local's only when that one comes first
+    in `co_varnames`: Rust drops locals in reverse order of declaration, like
+    CPython does when the function returns (design §5). Nested fns are left
+    alone, they have their own locals."""
+    return _late_node(block, ranks)
+
+
+def _late_node(node: Any, ranks: Mapping[str, int]) -> Any:
+    """`node` with every block in it rewritten, innermost first."""
+    if isinstance(node, rs.Fn | rs.ItemStmt):
+        return node
+    if isinstance(node, tuple):
+        new = tuple(_late_node(item, ranks) for item in node)
+        return node if all(a is b for a, b in zip(new, node, strict=True)) else new
+    if not dataclasses.is_dataclass(node) or isinstance(node, type):
+        return node
+    changes = {}
+    for field in dataclasses.fields(node):
+        value = getattr(node, field.name)
+        new = _late_node(value, ranks)
+        if new is not value:
+            changes[field.name] = new
+    if changes:
+        node = dataclasses.replace(node, **changes)
+    return _late_block(node, ranks) if isinstance(node, rs.Block) else node
+
+
+def _late_block(block: rs.Block, ranks: Mapping[str, int]) -> rs.Block:
+    stmts = list(block.stmts)
+    changed = False
+    # From the last declaration up, so that one moved down is out of the way
+    # of the declarations above it.
+    for i in reversed(range(len(stmts))):
+        changed |= _move_declaration(stmts, i, block.tail, ranks)
+    return rs.Block(tuple(stmts), block.tail) if changed else block
+
+
+def _move_declaration(
+    stmts: list[rs.Stmt], i: int, tail: rs.Expr | None, ranks: Mapping[str, int]
+) -> bool:
+    """Move the declaration `stmts[i]` down if it holds nothing yet; whether
+    it moved."""
+    let = stmts[i]
+    if not isinstance(let, rs.Let) or let.name not in ranks:
+        return False
+    if let.init is not None and not (
+        let.init == rs.Path("None") and (let.ty or "").startswith("Option<")
+    ):
+        return False
+    name = let.name
+    rank = ranks[name]
+    first = i + 1
+    while first < len(stmts) and not _mentions(stmts[first], name):
+        crossed = stmts[first]
+        if (
+            isinstance(crossed, rs.Let)
+            and _COPY.isdisjoint((let.ty, crossed.ty))
+            and any(ranks.get(other, -1) > rank for other in _pattern_names(crossed.name))
+        ):
+            break
+        first += 1
+    if first == len(stmts) and (tail is None or not _mentions(tail, name)):
+        return False  # never used: leave it
+    value = None
+    if first < len(stmts) and _mentions(stmts[first], name):
+        value = _assigned_value(stmts[first], name)
+    if value is not None:
+        later = (*stmts[first + 1 :], tail)
+        # The type is inferred from the value, unless that may be a bare `None`.
+        ty = let.ty if let.init is not None and _mentions(value, "None") else None
+        stmts[first] = rs.Let(name, let.mutable and _reassigned(later, name), ty, value)
+        del stmts[i]
+        return True
+    # Before the comments of the statement it moves to.
+    while first > i + 1 and isinstance(stmts[first - 1], rs.Comment):
+        first -= 1
+    if first == i + 1:
+        return False
+    stmts.insert(first, let)
+    del stmts[i]
+    return True
+
+
+def _assigned_value(stmt: rs.Stmt, name: str) -> rs.Expr | None:
+    """The value `stmt` gives `name` when it ends every path through it by
+    assigning `name` (or leaves) without reading or assigning it before:
+    `x = v;`, an `if` with an `else` or a `match`."""
+    match stmt:
+        case rs.Assign(rs.Path(target), value) if target == name and not _mentions(value, name):
+            return value
+        case rs.If():
+            return _if_value(stmt, name)
+        case rs.ExprStmt(rs.Match(scrutinee, arms)) if not _mentions(scrutinee, name):
+            bodies = []
+            for arm in arms:
+                body = _branch(arm.body, name)
+                if body is None or _mentions(arm, name, body=False):
+                    return None
+                bodies.append(body)
+            if all(body.tail is None for body in bodies):
+                return None
+            pairs = zip(arms, bodies, strict=True)
+            return rs.Match(scrutinee, tuple(rs.Arm(a.pattern, b, a.guard) for a, b in pairs))
+    return None
+
+
+def _if_value(stmt: rs.If, name: str) -> rs.IfExpr | None:
+    if stmt.pattern is not None or stmt.orelse is None or _mentions(stmt.cond, name):
+        return None
+    then = _branch(stmt.then, name)
+    orelse: rs.Block | rs.IfExpr | None
+    if isinstance(stmt.orelse, rs.If):
+        orelse = _if_value(stmt.orelse, name)
+        diverges = False
+    else:
+        orelse = _branch(stmt.orelse, name)
+        diverges = orelse is not None and orelse.tail is None
+    if then is None or orelse is None or (then.tail is None and diverges):
+        return None
+    return rs.IfExpr(stmt.cond, then, orelse)
+
+
+def _branch(block: rs.Block, name: str) -> rs.Block | None:
+    """`block` with its final assignment to `name` as the tail, or as it is
+    if it always leaves; `None` if it does neither or uses `name` otherwise."""
+    if block.tail is not None or not block.stmts or _mentions(block.stmts[:-1], name):
+        return None
+    last = block.stmts[-1]
+    if isinstance(last, rs.Return | rs.Break | rs.Continue):
+        return None if _mentions(last, name) else block
+    value = _assigned_value(last, name)
+    return None if value is None else rs.Block(block.stmts[:-1], value)
+
+
+def _mentions(node: Any, name: str, body: bool = True) -> bool:
+    """Whether `node` refers to the local `name` or binds a variable of that
+    name (in a pattern or a parameter). Without `body`, the body of a `match`
+    arm is left out."""
+    match node:
+        case rs.Arm(pattern, _, guard) if not body:
+            return name in _pattern_names(pattern) or _mentions(guard, name)
+        case rs.Path(text):
+            return text == name
+        case rs.Let(pattern) | rs.For(pattern) | rs.Arm(pattern) | rs.Param(pattern) if (
+            name in _pattern_names(pattern)
+        ):
+            return True
+        case rs.If(pattern=str(pattern)) if name in _pattern_names(pattern):
+            return True
+        case rs.Closure(params) if any(name in _pattern_names(p) for p in params):
+            return True
+    if isinstance(node, tuple):
+        return any(_mentions(item, name) for item in node)
+    if not dataclasses.is_dataclass(node) or isinstance(node, type):
+        return False
+    return any(_mentions(getattr(node, f.name), name) for f in dataclasses.fields(node))
+
+
+def _reassigned(nodes: tuple[Any, ...], name: str) -> bool:
+    """Whether `nodes` assign `name` or borrow it mutably."""
+    found = False
+
+    def visit(node: Any) -> None:
+        nonlocal found
+        match node:
+            case rs.Assign(target) if _mentions(target, name):
+                found = True
+            case rs.Ref(rs.Path(text), mutable=True) if text == name:
+                found = True
+        if isinstance(node, tuple):
+            for item in node:
+                visit(item)
+        elif dataclasses.is_dataclass(node) and not isinstance(node, type):
+            for field in dataclasses.fields(node):
+                visit(getattr(node, field.name))
+
+    visit(nodes)
+    return found
 
 
 def _item(item: rs.Item) -> rs.Item:

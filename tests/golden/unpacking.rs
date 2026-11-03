@@ -22,9 +22,6 @@ pub fn swap<'py>(
 pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "unpack", 9, |_| {
-        let x: Bound<'py, PyAny>;
-        let y: Bound<'py, PyAny>;
-        let z: Bound<'py, PyAny>;
         let [first, second] = rt::unpack(seq)?;
         rt::builtins::print(py, (&first, &second))?;
         let ([head], rest, []) = rt::unpack_star(PyList::new(py, [1, 2, 3, 4])?.as_any())?;
@@ -32,7 +29,9 @@ pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bou
         let ([left], middle, [right]) = rt::unpack_star(&rt::builtin(py, "range")?.call1((5,))?)?;
         rt::builtins::print(py, (&head, &rest, &init, &last, &left, &middle, &right))?;
         let [x2, items] = [rt::int(py, 1), PyList::new(py, [2, 3])?.into_any()];
-        x = x2;
+        let x = x2;
+        let y: Bound<'py, PyAny>;
+        let z: Bound<'py, PyAny>;
         [y, z] = rt::unpack(&items)?;
         rt::builtins::print(py, (&x, &y, &z))?;
         let [p, q] = rt::unpack([("p", 1), ("q", 2)].into_py_dict(py)?.as_any())?;
@@ -45,8 +44,6 @@ pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bou
 pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "targets", 23, |_| {
-        let mut key: Option<Bound<'py, PyAny>> = None;
-        let mut value: Bound<'py, PyAny>;
         let r#box = PyList::new(py, [0, 0, 0])?.into_any();
         let [item, item2] = [rt::str(py, "a"), rt::str(py, "c")];
         r#box.set_item(0, item)?;
@@ -73,6 +70,8 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py.check_signals()?;
         }
         rt::builtins::print(py, (&total,))?;
+        let mut key: Option<Bound<'py, PyAny>> = None;
+        let mut value: Bound<'py, PyAny>;
         for item4 in [("k", "v")]
             .into_py_dict(py)?
             .call_method0("items")?

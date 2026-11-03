@@ -63,10 +63,10 @@ pub fn py_encode_basestring_ascii<'py>(
                 "py_encode_basestring_ascii.<locals>.replace",
                 56,
                 |frame| {
+                    let s = r#match.call_method1("group", (0,))?;
                     let mut n: Bound<'py, PyAny>;
                     let s1: Bound<'py, PyAny>;
                     let s2: Bound<'py, PyAny>;
-                    let s = r#match.call_method1("group", (0,))?;
                     match (|| m.global("ESCAPE_DCT")?.get_item(&s))() {
                         Ok(value) => Ok(value),
                         Err(err) if err.is_instance_of::<PyKeyError>(py) => {
@@ -331,20 +331,16 @@ pub mod json_encoder {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "JSONEncoder.iterencode", 210, |_| {
-            let markers: Bound<'py, PyAny>;
-            let _encoder: Bound<'py, PyAny>;
-            let indent: Bound<'py, PyAny>;
-            let _iterencode: Bound<'py, PyAny>;
-            if slf.getattr("check_circular")?.is_truthy()? {
-                markers = PyDict::new(py).into_any();
+            let markers = if slf.getattr("check_circular")?.is_truthy()? {
+                PyDict::new(py).into_any()
             } else {
-                markers = rt::none(py);
-            }
-            if slf.getattr("ensure_ascii")?.is_truthy()? {
-                _encoder = m.global("encode_basestring_ascii")?;
+                rt::none(py)
+            };
+            let _encoder = if slf.getattr("ensure_ascii")?.is_truthy()? {
+                m.global("encode_basestring_ascii")?
             } else {
-                _encoder = m.global("encode_basestring")?;
-            }
+                m.global("encode_basestring")?
+            };
             // json/encoder.py:229
             fn floatstr<'py>(
                 m: &rt::Module<'py>,
@@ -360,19 +356,18 @@ pub mod json_encoder {
                     "JSONEncoder.iterencode.<locals>.floatstr",
                     229,
                     |frame| {
-                        let text: Bound<'py, PyAny>;
                         // Check for specials.  Note that this type of test is processor
                         // and/or platform-specific, so do tests which don't depend on the
                         // internals.
-                        if o.ne(o)? {
-                            text = rt::str(py, "NaN");
+                        let text = if o.ne(o)? {
+                            rt::str(py, "NaN")
                         } else if o.eq(_inf)? {
-                            text = rt::str(py, "Infinity");
+                            rt::str(py, "Infinity")
                         } else if o.eq(_neginf)? {
-                            text = rt::str(py, "-Infinity");
+                            rt::str(py, "-Infinity")
                         } else {
                             return _repr.call1((o,));
-                        }
+                        };
                         if !allow_nan.is_truthy()? {
                             return Err(frame.raise(PyValueError::new_err((rt::str(
                                 py,
@@ -396,17 +391,17 @@ pub mod json_encoder {
                 ),
                 qualname = "JSONEncoder.iterencode.<locals>.floatstr"
             )?;
-            if slf.getattr("indent")?.is_none()
+            let indent = if slf.getattr("indent")?.is_none()
                 || slf
                     .getattr("indent")?
                     .is_instance(&rt::builtin(py, "str")?)?
             {
-                indent = slf.getattr("indent")?;
+                slf.getattr("indent")?
             } else {
-                indent = rt::str(py, " ").mul(slf.getattr("indent")?)?;
-            }
-            if _one_shot.is_truthy()? && !m.global("c_make_encoder")?.is_none() {
-                _iterencode = m.global("c_make_encoder")?.call1((
+                rt::str(py, " ").mul(slf.getattr("indent")?)?
+            };
+            let _iterencode = if _one_shot.is_truthy()? && !m.global("c_make_encoder")?.is_none() {
+                m.global("c_make_encoder")?.call1((
                     &markers,
                     slf.getattr("default")?,
                     &_encoder,
@@ -416,9 +411,9 @@ pub mod json_encoder {
                     slf.getattr("sort_keys")?,
                     slf.getattr("skipkeys")?,
                     slf.getattr("allow_nan")?,
-                ))?;
+                ))?
             } else {
-                _iterencode = m.global("_make_iterencode")?.call1((
+                m.global("_make_iterencode")?.call1((
                     &markers,
                     slf.getattr("default")?,
                     &_encoder,
@@ -429,8 +424,8 @@ pub mod json_encoder {
                     slf.getattr("sort_keys")?,
                     slf.getattr("skipkeys")?,
                     _one_shot,
-                ))?;
-            }
+                ))?
+            };
             _iterencode.call1((o, 0))
         })
     }

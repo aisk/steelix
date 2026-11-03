@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from steelix.diagnostics import SourceLocation, UnsupportedError
 from steelix.frontend.bindings import analyze_module_bindings, analyze_module_flow
 from steelix.frontend.callgraph import build_call_graph
-from steelix.frontend.classinfo import static_attributes
+from steelix.frontend.classinfo import CompilerInfo, compiler_info
 from steelix.frontend.desugar import desugar
 from steelix.frontend.fallback import (
     FallbackPlan,
@@ -93,10 +93,10 @@ def lower_module(
         for stmt in tree.body:
             for kept in plan.within(stmt):
                 raise plan.python[kept][0].error()
-    attributes = static_attributes(parsed.source, parsed.filename)
+    compiled = compiler_info(parsed.source, parsed.filename)
     while True:
         try:
-            return _lower(parsed, plan, attributes, role, traceback_lines)
+            return _lower(parsed, plan, compiled, role, traceback_lines)
         except UnsupportedError as err:
             # Found while lowering rather than by the subset check: keep the
             # statement as Python and start over, since keeping it changes
@@ -121,7 +121,7 @@ def _keep_redefinitions(tree: ast.Module, plan: FallbackPlan, filename: str) -> 
 def _lower(
     parsed: ParsedModule,
     plan: FallbackPlan,
-    attributes: dict[tuple[str, int], tuple[str, ...]],
+    compiled: CompilerInfo,
     role: ModuleRole,
     traceback_lines: bool = False,
 ) -> LoweredModule:
@@ -146,7 +146,8 @@ def _lower(
         annotation_index={a: i for i, a in enumerate(annotations)},
         source_lines=source_lines(parsed.source),
         leading_comments=_leading_comments(tree, parsed, plan),
-        static_attributes=attributes,
+        static_attributes=compiled.static_attributes,
+        varnames=compiled.varnames,
         traceback_lines=traceback_lines,
         # Class modules avoid the submodules and the module's own name.
         mod_names={

@@ -9,7 +9,6 @@ pub fn describe<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "describe", 4, |_| {
-        let mut label: Option<Bound<'py, PyAny>> = None;
         let count = rt::int(py, items.len()?);
         let mut total = rt::int(py, 0);
         for item in items.try_iter()? {
@@ -17,6 +16,7 @@ pub fn describe<'py>(
             total = rt::iadd(&total, &item)?;
             py.check_signals()?;
         }
+        let mut label: Option<Bound<'py, PyAny>> = None;
         if count.is_truthy()? {
             label = Some(rt::str(py, "average"));
             return rt::local(&label, "label")?

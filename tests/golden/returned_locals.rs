@@ -121,16 +121,14 @@ pub fn swap<'py>(
     rt::frame!(m, "swap", 80, |_| {
         let mut a = a.clone();
         let mut b = b.clone();
-        let mut first: Option<Bound<'py, PyAny>> = None;
-        let second: Bound<'py, PyAny>;
         [a, b] = [b.clone(), a.clone()];
         rt::builtins::print(py, ("swapped", &a, &b))?;
         let [first2, second2] = [
             m.global("Tracked")?.call1(("first",))?,
             m.global("Tracked")?.call1(("second",))?,
         ];
-        first = Some(first2);
-        second = second2;
+        let mut first = Some(first2);
+        let second = second2;
         rt::builtins::print(
             py,
             (
