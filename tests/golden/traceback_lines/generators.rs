@@ -185,7 +185,7 @@ pub async fn python_delegate<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         frame.line(86);
         rt::builtins::print(py, ("python delegate result", &result))?;
         frame.line(87);
-        result = averager(m).await?;
+        result = rt::delegate(averager(m)).await?;
         Ok(result)
     })
 }
@@ -195,22 +195,22 @@ pub async fn native_delegate<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
     let py = m.py();
     rt::frame!(m, "native_delegate", 91, async |frame| {
         frame.line(92);
-        let total = averager(m).await?;
+        let total = rt::delegate(averager(m)).await?;
         frame.line(93);
         rt::builtins::print(py, ("native delegate total", &total))?;
         frame.line(94);
-        let rest = count(m, &rt::int(py, 2)).await?;
+        let rest = rt::delegate(count(m, &rt::int(py, 2))).await?;
         frame.line(95);
         rt::builtins::print(py, ("count returned", &rest))?;
         frame.line(96);
-        in_loops(
+        rt::delegate(in_loops(
             m,
             PyList::new(
                 py,
                 [PyList::new(py, [&rt::int(py, 1), &rt::str(py, "end")])?.as_any()],
             )?
             .as_any(),
-        )
+        ))
         .await?;
         Ok(total)
     })
@@ -230,7 +230,7 @@ pub async fn tree<'py>(
             for child in node.try_iter()? {
                 let child = child?;
                 frame.line(104);
-                Box::pin(tree(m, &child)).await?;
+                rt::delegate(Box::pin(tree(m, &child))).await?;
                 py.check_signals()?;
                 frame.line(103);
             }
@@ -252,7 +252,7 @@ pub async fn ping<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
             let value = PyTuple::new(py, [&rt::str(py, "ping"), n])?;
             rt::yield_(value).await?;
             frame.line(112);
-            Box::pin(pong(m, &n.sub(1)?)).await?;
+            rt::delegate(Box::pin(pong(m, &n.sub(1)?))).await?;
         }
         Ok(rt::none(py))
     })
@@ -268,7 +268,7 @@ pub async fn pong<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
             let value = PyTuple::new(py, [&rt::str(py, "pong"), n])?;
             rt::yield_(value).await?;
             frame.line(118);
-            Box::pin(ping(m, &n.sub(1)?)).await?;
+            rt::delegate(Box::pin(ping(m, &n.sub(1)?))).await?;
         }
         Ok(rt::none(py))
     })

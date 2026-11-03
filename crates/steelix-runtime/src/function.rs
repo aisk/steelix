@@ -1237,6 +1237,14 @@ pub(crate) struct Annotate {
 
 #[pymethods]
 impl Annotate {
+    /// None, like CPython's `__annotate__` functions, instead of the Rust
+    /// documentation above.
+    #[classattr]
+    #[pyo3(name = "__doc__")]
+    fn doc(py: Python<'_>) -> Py<PyAny> {
+        py.None()
+    }
+
     fn __call__<'py>(&self, py: Python<'py>, format: i32) -> PyResult<Bound<'py, PyDict>> {
         let result = PyDict::new(py);
         let globals = self.globals.bind(py);

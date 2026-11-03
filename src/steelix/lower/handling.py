@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 from steelix.frontend.desugar import AsyncWith
 from steelix.frontend.regions import Region, expression_body, suspends
 from steelix.frontend.resolve import Lookup, resolve_global
-from steelix.lower.expr import Kind, Value
+from steelix.lower.expr import MAX_CALL_ARGS, Kind, Value
 from steelix.lower.function import BOUND
 from steelix.lower.rustflow import children, diverges, returns_as_tail, statement_line
 from steelix.rustast import nodes as rs
@@ -568,7 +568,8 @@ class HandlingLowering:
             case ast.Call(ast.Name() as func, args, []) if (
                 name := self.builtin_exception(func)
             ) is not None and not any(isinstance(a, ast.Starred) for a in args):
-                return self.new_err(name, args)
+                if len(args) <= MAX_CALL_ARGS:
+                    return self.new_err(name, args)
         value = self.exprs.value(exc)
         if value.kind is Kind.PLACE:
             return rs.Ref(value.expr)

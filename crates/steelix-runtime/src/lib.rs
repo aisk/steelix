@@ -65,7 +65,7 @@ pub use frame::{Flow, Frame, Handling, IntoException};
 pub use attr::Attributes;
 pub use cell::Cell;
 pub use class::{Namespace, super_};
-pub use coroutine::{Coroutine, aiter, anext, await_, yield_, yield_from};
+pub use coroutine::{Coroutine, aiter, anext, await_, delegate, yield_, yield_from};
 pub use function::{Body, Function, FunctionDef, Signature};
 pub use generator::{Generator, next};
 pub use import::{import, import_from, import_module, import_names};
@@ -278,6 +278,25 @@ pub(crate) fn raised(err: PyErr) -> PyErr {
         err.value(py);
     });
     err
+}
+
+/// Makes `tp_name` of the class `T` the plain `name` that CPython's own
+/// class of that name has (`generator`), which error messages such as
+/// `cannot pickle 'generator' object` use. PyO3 always puts a module in
+/// front (`builtins.generator`); `__name__` and `__module__` are not
+/// affected. Called when an object of the class is created.
+pub(crate) fn plain_type_name<T: PyTypeInfo>(py: Python<'_>, name: &'static std::ffi::CStr) {
+    let ty = T::type_object_raw(py);
+    // SAFETY: attached; `ty` is the class's type object, which lives as long
+    // as the interpreter. A heap type owns the buffer of its original name
+    // separately (`_ht_tpname`), so pointing `tp_name` at a static string
+    // leaks and frees nothing; CPython's `__name__` setter does the same.
+    unsafe {
+        if !std::ptr::eq((*ty).tp_name, name.as_ptr()) {
+            (*ty).tp_name = name.as_ptr();
+            ffi::PyType_Modified(ty);
+        }
+    }
 }
 
 /// The name CPython uses for the type of `value` in error messages

@@ -48,6 +48,18 @@ KNOWN_DIFFERENCES: dict[str, dict[str, str]] = {
         "unused capture: ['b']": r"unused capture: \['b', 'subject'\]",
         "in the body: []": r"in the body: \['attribute', 'subject'\]",
     },
+    # Warnings caused by native code are attributed to `<sys>:0`: the default
+    # filters hide `DeprecationWarning`s there and show a warning once. A
+    # task's repr does not say where its native coroutine is.
+    "coroutine_warnings": {
+        "DeprecationWarning shown with the default filters: 1": (
+            r"DeprecationWarning shown with the default filters: 0"
+        ),
+        "RuntimeWarning shown with the default filters: 2": (
+            r"RuntimeWarning shown with the default filters: 1"
+        ),
+        "task repr says where: True": r"task repr says where: False",
+    },
     "frames_logging": {
         "WARNING frames_logging.py:16 step: native step 1": (
             r"WARNING __init__\.py:\d+ warning: native step 1"

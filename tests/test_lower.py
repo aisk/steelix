@@ -82,6 +82,30 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
             5,
         ),
         ("x = t'{a}'\n", "t-string", 1, 5),
+        (
+            "print(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)\n",
+            "call with more than 12 arguments",
+            1,
+            1,
+        ),
+        (
+            "print(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, sep=s)\n",
+            "call with more than 12 arguments",
+            1,
+            1,
+        ),
+        (
+            "f(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, k=v)\n",
+            "call with more than 12 arguments",
+            1,
+            1,
+        ),
+        (
+            "def f():\n    raise ValueError(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)\n",
+            "call with more than 12 arguments",
+            2,
+            11,
+        ),
     ],
 )
 def test_unsupported_constructs_report_location(
@@ -576,11 +600,11 @@ def test_coroutines_are_awaited_in_place_only_by_await() -> None:
     # Bound first: `m.global("asyncio")?` would live across the await.
     assert 'let sleep = m.global("asyncio")?.method1("sleep", (0,))?;\n' in out
     assert "rt::await_(sleep).await?;" in out
-    assert "Box::pin(f(m, x)).await" in out
+    assert "rt::delegate(Box::pin(f(m, x))).await" in out
     assert 'let coro = m.global("f")?.call1((1,))?;' in out
     assert 'm.global("g")?.call0()?' in out
-    assert "f(m, &rt::int(py, 2)).await?" in out
+    assert "rt::delegate(f(m, &rt::int(py, 2))).await?" in out
     assert "rt::await_(&coro).await?" in out
-    assert "g(m).await?;" in out
+    assert "rt::delegate(g(m)).await?;" in out
     assert "rt::def!(m, async f(x))?;" in out
     assert "rt::def!(m, gen g())?;" in out

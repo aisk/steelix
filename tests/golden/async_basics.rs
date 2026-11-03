@@ -25,9 +25,9 @@ pub async fn fib<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bo
         if n.lt(2)? {
             return Ok(n.clone());
         }
-        Box::pin(fib(m, &n.sub(1)?))
+        rt::delegate(Box::pin(fib(m, &n.sub(1)?)))
             .await?
-            .add(Box::pin(fib(m, &n.sub(2)?)).await?)
+            .add(rt::delegate(Box::pin(fib(m, &n.sub(2)?))).await?)
     })
 }
 
@@ -40,7 +40,7 @@ pub async fn is_even<'py>(
         Ok(if n.eq(0)? {
             rt::bool(m.py(), true)
         } else {
-            Box::pin(is_odd(m, &n.sub(1)?)).await?
+            rt::delegate(Box::pin(is_odd(m, &n.sub(1)?))).await?
         })
     })
 }
@@ -54,7 +54,7 @@ pub async fn is_odd<'py>(
         Ok(if n.eq(0)? {
             rt::bool(m.py(), false)
         } else {
-            Box::pin(is_even(m, &n.sub(1)?)).await?
+            rt::delegate(Box::pin(is_even(m, &n.sub(1)?))).await?
         })
     })
 }
@@ -115,7 +115,7 @@ pub async fn raises<'py>(
 pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "handles", 49, async |frame| {
-        match raises(m, &rt::str(py, "first")).await {
+        match rt::delegate(raises(m, &rt::str(py, "first"))).await {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let e = frame.catch(err);
@@ -127,7 +127,7 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) => return Err(err),
         }
         let value: Bound<'py, PyAny>;
-        match double(m, &rt::int(py, 21)).await {
+        match rt::delegate(double(m, &rt::int(py, 21))).await {
             Ok(value2) => {
                 value = value2;
                 rt::builtins::print(py, ("else", &value))?;
@@ -162,7 +162,7 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py.check_signals()?;
         }
         loop {
-            match raises(m, &rt::str(py, "in loop")).await {
+            match rt::delegate(raises(m, &rt::str(py, "in loop"))).await {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyValueError>(py) => {
                     let _handling = rt::Handling::new(&frame.catch(err));
@@ -275,13 +275,13 @@ pub async fn outer<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
 pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "main", 145, async |frame| {
-        rt::builtins::print(py, (double(m, &rt::int(py, 4)).await?,))?;
-        rt::builtins::print(py, (fib(m, &rt::int(py, 10)).await?,))?;
+        rt::builtins::print(py, (rt::delegate(double(m, &rt::int(py, 4))).await?,))?;
+        rt::builtins::print(py, (rt::delegate(fib(m, &rt::int(py, 10))).await?,))?;
         rt::builtins::print(
             py,
             (
-                is_even(m, &rt::int(py, 7)).await?,
-                is_odd(m, &rt::int(py, 7)).await?,
+                rt::delegate(is_even(m, &rt::int(py, 7))).await?,
+                rt::delegate(is_odd(m, &rt::int(py, 7))).await?,
             ),
         )?;
         let mut log = PyList::empty(py).into_any();
@@ -327,7 +327,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        rt::builtins::print(py, ("handles returned", handles(m).await?))?;
+        rt::builtins::print(py, ("handles returned", rt::delegate(handles(m)).await?))?;
         let awaitable = m.global("add")?.call1((1, 2))?;
         rt::builtins::print(py, (rt::await_(awaitable).await?,))?;
         let acc = make_accumulator(m)?;
@@ -338,7 +338,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 rt::await_(acc.call1((2,))?).await?,
             ),
         )?;
-        rt::builtins::print(py, (outer(m, &rt::int(py, 3)).await?,))?;
+        rt::builtins::print(py, (rt::delegate(outer(m, &rt::int(py, 3))).await?,))?;
         let make = m.global("Derived")?.method1("make", (4,))?;
         let d = rt::await_(make).await?;
         let __name__ = d.get_type().attr("__name__")?;

@@ -1,5 +1,5 @@
 //! Native coroutines (`async def`) and generator functions (design §8,
-//! "协程和生成器"). PoC: the transpiler does not emit these yet.
+//! "协程和生成器").
 //!
 //! The body of an `async def` (or of a function containing `yield`) is a
 //! Rust `async fn`, and the state machine is the one rustc generates for it.
@@ -39,8 +39,9 @@
 //! arguments of the call ([`Locals`]), and the future that `rt::def!` stores
 //! awaits the `async fn` with references to them. A native coroutine
 //! awaiting another one it can call directly awaits the Rust future itself,
-//! without a Python object in between: `add(m, &x, &y).await?`. A generator
-//! function is the same with `rt::yield_` (`rt::def!(m, gen count(n))`).
+//! without a Python object in between: `rt::delegate(add(m, &x, &y)).await?`
+//! ([`delegate`]). A generator function is the same with `rt::yield_`
+//! (`rt::def!(m, gen count(n))`).
 //!
 //! # What the GC sees
 //!
@@ -97,7 +98,7 @@ use pyo3::exceptions::{
     PyStopIteration, PyTypeError, PyValueError,
 };
 use pyo3::prelude::*;
-use pyo3::types::PyString;
+use pyo3::types::{PyString, PyTuple};
 use pyo3::{PyClass, PyTraverseError, PyVisit, ffi};
 
 use crate::Module;
@@ -242,7 +243,9 @@ struct Names {
 /// (`throw`, `close`).
 enum Input {
     Send(Py<PyAny>),
-    Throw(PyErr),
+    /// The exception, and the arguments `throw()` was called with, which
+    /// an object delegated to that is not a generator gets as they are.
+    Throw(PyErr, Option<Py<PyTuple>>),
 }
 
 /// What happened when the body ran: it suspended with a value for the
@@ -311,7 +314,7 @@ impl Core {
                     // Nothing waits for the first `None`; an exception is
                     // raised by the frame before the first statement.
                     Input::Send(_) => (body, None, None),
-                    Input::Throw(err) => (body, None, Some(Input::Throw(err))),
+                    Input::Throw(err, args) => (body, None, Some(Input::Throw(err, args))),
                 },
                 State::Suspended { body, handled } => (body, handled, Some(input)),
                 State::Running => {
@@ -399,7 +402,7 @@ impl Core {
                 "cannot reuse already awaited coroutine",
             )),
             (Flavor::Generator, Input::Send(_)) => Ok(Step::Returned(py.None().into_bound(py))),
-            (Flavor::Generator, Input::Throw(err)) => Err(err),
+            (Flavor::Generator, Input::Throw(err, _)) => Err(err),
         }
     }
 
@@ -426,7 +429,14 @@ impl Core {
             )?;
         }
         let exception = crate::generator::thrown(typ, val, tb)?;
-        match self.resume(py, Input::Throw(PyErr::from_value(exception)))? {
+        // `_gen_throw` passes on what it got, up to the first missing one.
+        let args = match (val, tb) {
+            (_, Some(tb)) => PyTuple::new(py, [typ, val.unwrap_or(&py.None().into_bound(py)), tb])?,
+            (Some(val), None) => PyTuple::new(py, [typ, val])?,
+            (None, None) => PyTuple::new(py, [typ])?,
+        };
+        let input = Input::Throw(PyErr::from_value(exception), Some(args.unbind()));
+        match self.resume(py, input)? {
             Step::Yielded(value) => Ok(value),
             Step::Returned(value) => Err(stop_iteration(value)),
         }
@@ -452,7 +462,7 @@ impl Core {
             return Ok(py.None().into_bound(py));
         }
         let exit = crate::raised(PyGeneratorExit::new_err(()));
-        match self.resume(py, Input::Throw(exit)) {
+        match self.resume(py, Input::Throw(exit, None)) {
             Ok(Step::Yielded(_)) => Err(PyRuntimeError::new_err(format!(
                 "{} ignored GeneratorExit",
                 self.flavor.noun()
@@ -705,26 +715,53 @@ impl Channel {
         if !self.own_handled.get() {
             return err;
         }
-        let exception = err.into_value(py).into_bound(py);
-        // SAFETY: attached; `exception` is an exception instance. The poll
-        // made the body's exception the one being handled, so
-        // `PyErr_SetObject` chains it as `raise` would; the raised exception
-        // is taken back right away.
-        unsafe {
-            ffi::PyErr_SetObject(ffi::Py_TYPE(exception.as_ptr()).cast(), exception.as_ptr());
-            PyErr::from_value(Bound::from_owned_ptr(py, ffi::PyErr_GetRaisedException()))
+        chain_handled(py, err)
+    }
+
+    /// An exception entering the body at a [`delegate`] that something was
+    /// thrown into: like [`Channel::thrown`], with the exception the body is
+    /// handling at that point, which the delegate may have changed since the
+    /// poll started.
+    fn raise_in_body(&self, py: Python<'_>, err: PyErr) -> PyErr {
+        match handled_exception(py) {
+            Some(handled) if handled.as_ptr() != self.caller.get() => chain_handled(py, err),
+            _ => err,
         }
+    }
+
+    /// Runs `f` with the caller's exception as the one being handled, not
+    /// the body's.
+    fn as_caller<R>(&self, py: Python<'_>, f: impl FnOnce() -> R) -> R {
+        let body = handled_exception(py);
+        // SAFETY: attached; null or the caller's exception, which the poll
+        // keeps alive.
+        unsafe { ffi::PyErr_SetHandledException(self.caller.get()) };
+        let result = f();
+        set_handled_exception(py, body.as_ref());
+        result
     }
 
     /// Takes the exception thrown in before the body started, if any.
     fn take_thrown(&self) -> Option<PyErr> {
         match self.input.take() {
-            Some(Input::Throw(err)) => Some(err),
+            Some(Input::Throw(err, _)) => Some(err),
             other => {
                 self.input.set(other);
                 None
             }
         }
+    }
+}
+
+/// Gives `err` the exception being handled as `__context__`, as `raise`
+/// would (`PyErr_SetObject`, which also breaks cycles).
+fn chain_handled(py: Python<'_>, err: PyErr) -> PyErr {
+    let exception = err.into_value(py).into_bound(py);
+    // SAFETY: attached; `exception` is an exception instance. The raised
+    // exception is taken back right away.
+    unsafe {
+        ffi::PyErr_SetObject(ffi::Py_TYPE(exception.as_ptr()).cast(), exception.as_ptr());
+        PyErr::from_value(Bound::from_owned_ptr(py, ffi::PyErr_GetRaisedException()))
     }
 }
 
@@ -997,6 +1034,167 @@ pub fn yield_from<'py>(iterable: impl AsRef<Bound<'py, PyAny>>) -> Await<'py> {
     }
 }
 
+/// `await f(x)` or `yield from g(x)` where `f` is a native coroutine function
+/// (or `g` a native generator function) called directly: runs its future in
+/// place, without a coroutine object in between, and returns its result.
+///
+/// ```ignore
+/// let total = rt::delegate(add(m, &x, &y)).await?;
+/// let rest = rt::delegate(Box::pin(countdown(m, &n))).await?;
+/// ```
+///
+/// What the caller sends and throws goes to the awaits of the delegate as
+/// they are, which is what CPython does with a delegate too, except for
+/// `close()` (and `throw(GeneratorExit)`): CPython closes the delegate first
+/// (`gen_close_iter`), discarding what it returns, and then raises
+/// `GeneratorExit` at the `yield from` or `await` regardless, or the error
+/// of closing the delegate (`RuntimeError: generator ignored GeneratorExit`
+/// if it yields again). This does the same. An exception that comes out of
+/// the delegate when something is thrown in enters the delegating body like
+/// a thrown one, with the exception the body handles there as `__context__`
+/// (`_gen_throw`), like [`await_`] does.
+pub async fn delegate<'py, F>(future: F) -> PyResult<Bound<'py, PyAny>>
+where
+    F: Future<Output = PyResult<Bound<'py, PyAny>>>,
+{
+    let mut future = std::pin::pin!(future);
+    // Whether the delegate suspended in the last poll: the input of the
+    // next one is for it.
+    let mut suspended = false;
+    let mut started = false;
+    // The exception the delegating body was handling when the delegate
+    // started, as an address, if it was the body's own (which keeps it
+    // alive until the delegate ends). While the delegate does not handle
+    // one of its own, this is the one a poll makes current.
+    let mut outer = std::ptr::null_mut();
+    std::future::poll_fn(move |cx| {
+        let Some(channel) = channel(cx) else {
+            return future.as_mut().poll(cx);
+        };
+        Python::attach(|py| {
+            let handled = handled_exception(py);
+            let handled_ptr = handled.as_ref().map_or(std::ptr::null_mut(), Bound::as_ptr);
+            if !started {
+                started = true;
+                if handled_ptr != channel.caller.get() {
+                    outer = handled_ptr;
+                }
+            }
+            let poll = match channel.input.take() {
+                Some(Input::Throw(err, args)) if suspended => {
+                    // CPython throws into the frame of the delegate, where
+                    // the delegating body's exception is not handled.
+                    let inherited = !outer.is_null() && handled_ptr == outer;
+                    let own_handled = channel.own_handled.get();
+                    let caller = channel.caller.get();
+                    if inherited {
+                        channel.own_handled.set(false);
+                        // SAFETY: attached; `caller` is null or the exception
+                        // the poll keeps alive.
+                        unsafe { ffi::PyErr_SetHandledException(caller) };
+                    }
+                    let poll = if err.is_instance_of::<PyGeneratorExit>(py) {
+                        Poll::Ready(Err(close_delegate(py, channel, future.as_mut(), cx, err)))
+                    } else {
+                        channel.input.set(Some(Input::Throw(err, args)));
+                        future.as_mut().poll(cx)
+                    };
+                    channel.own_handled.set(own_handled);
+                    let now = handled_exception(py);
+                    if inherited
+                        && now.as_ref().map_or(std::ptr::null_mut(), Bound::as_ptr) == caller
+                    {
+                        set_handled_exception(py, handled.as_ref());
+                    }
+                    match poll {
+                        Poll::Ready(Err(err)) => Poll::Ready(Err(channel.raise_in_body(py, err))),
+                        poll => poll,
+                    }
+                }
+                input => {
+                    channel.input.set(input);
+                    future.as_mut().poll(cx)
+                }
+            };
+            suspended = poll.is_pending();
+            poll
+        })
+    })
+    .await
+}
+
+/// `close()` or `throw(GeneratorExit)` of a body suspended in [`delegate`]:
+/// closes the delegate like `gen_close` (a new `GeneratorExit` where it is
+/// suspended) and returns the exception to raise in the delegating body,
+/// `exit` or the error of closing the delegate.
+fn close_delegate<'py, F>(
+    py: Python<'_>,
+    channel: &Channel,
+    mut future: Pin<&mut F>,
+    cx: &mut Context<'_>,
+    exit: PyErr,
+) -> PyErr
+where
+    F: Future<Output = PyResult<Bound<'py, PyAny>>>,
+{
+    // SAFETY: the owner of the running poll's channel is the `Core` whose
+    // `resume` is on the stack below this poll.
+    let noun = unsafe { &*channel.owner }.flavor.noun();
+    let ignored = || {
+        crate::raised(PyRuntimeError::new_err(format!(
+            "{noun} ignored GeneratorExit"
+        )))
+    };
+    // `gen_close`: `Ok(true)` if the delegate yielded again.
+    let mut close = || -> PyResult<bool> {
+        // Created where `close()` was called, like CPython's: the context is
+        // the caller's exception (the delegate's own replaces it).
+        let new_exit = PyGeneratorExit::new_err(());
+        // SAFETY: a valid exception object; `caller` is null or the
+        // exception the poll keeps alive, and the call steals the new
+        // reference.
+        unsafe {
+            let caller = channel.caller.get();
+            if !caller.is_null() {
+                ffi::Py_IncRef(caller);
+            }
+            ffi::PyException_SetContext(new_exit.value(py).as_ptr(), caller);
+        }
+        channel.input.set(Some(Input::Throw(new_exit, None)));
+        let poll = future.as_mut().poll(cx);
+        channel.input.set(None);
+        match poll {
+            Poll::Pending => {
+                drop(channel.output.take());
+                Ok(true)
+            }
+            Poll::Ready(Err(err)) if !err.is_instance_of::<PyGeneratorExit>(py) => Err(err),
+            Poll::Ready(_) => Ok(false),
+        }
+    };
+    match close() {
+        Ok(false) => exit,
+        Err(err) => err,
+        Ok(true) => {
+            // CPython drops the delegate as this error leaves the `yield
+            // from`, and its finalizer closes it once more.
+            let again = match close() {
+                Ok(false) => None,
+                Ok(true) => Some(ignored()),
+                Err(err) => Some(err),
+            };
+            if let Some(again) = again {
+                again.restore(py);
+                let message = format!("Exception ignored while closing {noun}");
+                let message = std::ffi::CString::new(message).expect("no NUL in the message");
+                // SAFETY: an exception is set; the message has no `%`.
+                unsafe { PyErr_FormatUnraisable(message.as_ptr()) };
+            }
+            ignored()
+        }
+    }
+}
+
 /// `async for`: the asynchronous iterator of `iterable` (`GET_AITER`),
 /// which [`anext`] steps through.
 ///
@@ -1132,8 +1330,11 @@ impl<'py> Future for Await<'py> {
                     Some(Input::Send(value)) => send(&iter, value.bind(py)),
                     // Whatever comes out of the iterator then enters the
                     // body as a thrown exception (`_gen_throw`).
-                    Some(Input::Throw(err)) => {
-                        throw(&iter, err).map_err(|err| channel.thrown(py, err))
+                    Some(Input::Throw(err, args)) => {
+                        // CPython throws into the delegate where `throw()`
+                        // was called, outside the body's frame.
+                        let step = channel.as_caller(py, || throw(&iter, err, args));
+                        step.map_err(|err| channel.thrown(py, err))
                     }
                     None => send(&iter, &py.None().into_bound(py)),
                 };
@@ -1255,8 +1456,14 @@ fn send<'py>(iter: &Bound<'py, PyAny>, value: &Bound<'py, PyAny>) -> PyResult<St
 
 /// Throws `err` into the iterator the body is delegating to, like CPython's
 /// `_gen_throw` with a delegate: `GeneratorExit` closes the iterator and is
-/// raised here, anything else goes to its `throw` method if it has one.
-fn throw<'py>(iter: &Bound<'py, PyAny>, err: PyErr) -> PyResult<Step<'py>> {
+/// raised here, anything else goes to its `throw` method if it has one. A
+/// generator or coroutine gets the exception, anything else the arguments
+/// of the `throw()` call (`args`) if there was one.
+fn throw<'py>(
+    iter: &Bound<'py, PyAny>,
+    err: PyErr,
+    args: Option<Py<PyTuple>>,
+) -> PyResult<Step<'py>> {
     let py = iter.py();
     if err.is_instance_of::<PyGeneratorExit>(py) {
         close_iter(iter)?;
@@ -1265,7 +1472,17 @@ fn throw<'py>(iter: &Bound<'py, PyAny>, err: PyErr) -> PyResult<Step<'py>> {
     let Some(throw) = iter.getattr_opt(crate::interned(py, "throw"))? else {
         return Err(err);
     };
-    match throw.call1((err.into_value(py),)) {
+    // SAFETY: valid object pointer.
+    let generator = unsafe {
+        ffi::PyGen_CheckExact(iter.as_ptr()) != 0 || ffi::PyCoro_CheckExact(iter.as_ptr()) != 0
+    } || iter.is_instance_of::<Coroutine>()
+        || iter.is_instance_of::<Generator>()
+        || iter.is_instance_of::<crate::Generator>();
+    let result = match args {
+        Some(args) if !generator => throw.call1(args.bind(py)),
+        _ => throw.call1((err.into_value(py),)),
+    };
+    match result {
         Ok(value) => Ok(Step::Yielded(value)),
         Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
             let value = err.value(py).getattr(crate::interned(py, "value"))?;
@@ -1326,7 +1543,7 @@ impl<'py> Future for Yield<'py> {
         }
         Poll::Ready(match channel.input.take() {
             Some(Input::Send(value)) => Ok(value.into_bound(py)),
-            Some(Input::Throw(err)) => Err(channel.thrown(py, err)),
+            Some(Input::Throw(err, _)) => Err(channel.thrown(py, err)),
             None => Ok(py.None().into_bound(py)),
         })
     }
@@ -1374,10 +1591,12 @@ pub(crate) fn create<'py>(
         names: Mutex::new(Names { name, qualname }),
     };
     if generator {
+        crate::plain_type_name::<Generator>(py, c"generator");
         let object = Bound::new(py, Generator(core))?;
         install_finalizer(&object, &GENERATOR_DEALLOC);
         Ok(object.into_any())
     } else {
+        crate::plain_type_name::<Coroutine>(py, c"coroutine");
         let object = Bound::new(py, Coroutine(core))?;
         install_finalizer(&object, &COROUTINE_DEALLOC);
         Ok(object.into_any())
@@ -1393,11 +1612,19 @@ pub(crate) fn create<'py>(
 /// on deallocation and the warning for a coroutine that was never awaited.
 /// `asyncio` accepts it (`collections.abc.Coroutine`); it is not a
 /// `types.CoroutineType` (design §12).
-#[pyclass(frozen, weakref, name = "coroutine", module = "steelix_runtime")]
+#[pyclass(frozen, weakref, name = "coroutine")]
 pub struct Coroutine(Core);
 
 #[pymethods]
 impl Coroutine {
+    /// None, like CPython's coroutine objects, instead of the Rust
+    /// documentation above.
+    #[classattr]
+    #[pyo3(name = "__doc__")]
+    fn doc(py: Python<'_>) -> Py<PyAny> {
+        py.None()
+    }
+
     fn send<'py>(&self, value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         self.0.send(value)
     }
@@ -1424,6 +1651,7 @@ impl Coroutine {
         if slf.get().0.suspended() {
             return Err(being_awaited());
         }
+        crate::plain_type_name::<CoroutineWrapper>(slf.py(), c"coroutine_wrapper");
         Ok(CoroutineWrapper {
             coroutine: slf.clone().unbind(),
         })
@@ -1496,11 +1724,19 @@ impl Coroutine {
 
 /// The object of a call of a native generator function. See [`Coroutine`];
 /// it is not a `types.GeneratorType` (design §12).
-#[pyclass(frozen, weakref, name = "generator", module = "steelix_runtime")]
+#[pyclass(frozen, weakref, name = "generator")]
 pub struct Generator(Core);
 
 #[pymethods]
 impl Generator {
+    /// None, like CPython's generator objects, instead of the Rust
+    /// documentation above.
+    #[classattr]
+    #[pyo3(name = "__doc__")]
+    fn doc(py: Python<'_>) -> Py<PyAny> {
+        py.None()
+    }
+
     fn __iter__<'py>(slf: &Bound<'py, Self>) -> Bound<'py, Self> {
         slf.clone()
     }
@@ -1591,13 +1827,20 @@ impl Generator {
 
 /// What `coroutine.__await__()` returns, like CPython's `coroutine_wrapper`:
 /// an iterator that drives the coroutine.
-#[pyclass(frozen, name = "coroutine_wrapper", module = "steelix_runtime")]
+#[pyclass(frozen, name = "coroutine_wrapper")]
 pub struct CoroutineWrapper {
     coroutine: Py<Coroutine>,
 }
 
 #[pymethods]
 impl CoroutineWrapper {
+    /// CPython's, instead of the Rust documentation above.
+    #[classattr]
+    #[pyo3(name = "__doc__")]
+    fn doc() -> &'static str {
+        "A wrapper object implementing __await__ for coroutines."
+    }
+
     fn __iter__<'py>(slf: &Bound<'py, Self>) -> Bound<'py, Self> {
         slf.clone()
     }

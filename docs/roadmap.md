@@ -357,6 +357,19 @@ if let Some([item, direction]) = rt::match_seq(&subject)?
 
 runtime 的公开接口多了 `matching.rs` 的 11 个函数（`rt::match_seq` 等），生成的代码用到了它们，下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`（和 M13 的变化一起）。
 
+## M13/M14 之后的修复 ✅
+
+M13、M14 之后的独立 review 发现的问题。
+
+- [x] 原生函数之间直接委托（`yield from g(x)`、`await f(x)`）时 `close()` 和 `throw(GeneratorExit)` 不符合 CPython 的 `_gen_throw`：内层吞掉 `GeneratorExit` 之后外层会继续执行，内层又暂停时 `RuntimeError` 从外层的 `close()` 出来而不是在外层的委托处抛出。直接委托改写成 `rt::delegate(g(m, &x)).await?`（递归的是 `rt::delegate(Box::pin(..))`），先关闭内层，再在外层抛出 `GeneratorExit` 或关闭内层的错误，多层委托每层各做一次，`__context__` 也和 CPython 一样（design §8 "直接 await 和递归"，`generator_close` 用例比较直接委托和经过变量的委托）
+- [x] 超过 12 个位置参数的 `print(..)` 和 `raise ValueError(..)` 生成的代码编译不过（特化绕过了参数个数的检查），带关键字参数的调用也一样。现在和一般的调用一样保留为 Python（`many_arguments` 用例）
+- [x] `gen.throw(ExcType)` 给不是生成器的委托对象的 `throw` 传的是实例，CPython 传原来的参数
+- [x] 原生的 `generator`、`coroutine`、`coroutine_wrapper`、生成器表达式的对象和 `__annotate__` 的 `__doc__` 是 Rust 的文档注释，改成和 CPython 一样
+- [x] 报错信息里的类型名是 `steelix_runtime.generator`（`cannot pickle 'steelix_runtime.generator' object`），改成 `generator`，类型的 `__module__` 和 CPython 一样是 `builtins`
+- [x] design §12 补上原生帧的警告位置（`<sys>:0`）带来的后果（默认 filter 不显示 `DeprecationWarning`，多个 never awaited 只显示一次）和 `repr(asyncio.Task)` 没有 `running at`（`coroutine_warnings` 用例）
+
+runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和 M13、M14 的变化一起发版。
+
 ## 性能的候选项（未排期）
 
 只做语义不变的。

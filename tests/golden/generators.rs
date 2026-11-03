@@ -155,7 +155,7 @@ pub async fn python_delegate<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         let iter = PyList::new(py, [1, 2])?.try_iter()?;
         let mut result = rt::yield_from(iter).await?;
         rt::builtins::print(py, ("python delegate result", &result))?;
-        result = averager(m).await?;
+        result = rt::delegate(averager(m)).await?;
         Ok(result)
     })
 }
@@ -164,18 +164,18 @@ pub async fn python_delegate<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
 pub async fn native_delegate<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "native_delegate", 91, async |_| {
-        let total = averager(m).await?;
+        let total = rt::delegate(averager(m)).await?;
         rt::builtins::print(py, ("native delegate total", &total))?;
-        let rest = count(m, &rt::int(py, 2)).await?;
+        let rest = rt::delegate(count(m, &rt::int(py, 2))).await?;
         rt::builtins::print(py, ("count returned", &rest))?;
-        in_loops(
+        rt::delegate(in_loops(
             m,
             PyList::new(
                 py,
                 [PyList::new(py, [&rt::int(py, 1), &rt::str(py, "end")])?.as_any()],
             )?
             .as_any(),
-        )
+        ))
         .await?;
         Ok(total)
     })
@@ -192,7 +192,7 @@ pub async fn tree<'py>(
         if node.is_instance(&rt::builtin(py, "list")?)? {
             for child in node.try_iter()? {
                 let child = child?;
-                Box::pin(tree(m, &child)).await?;
+                rt::delegate(Box::pin(tree(m, &child))).await?;
                 py.check_signals()?;
             }
         } else {
@@ -209,7 +209,7 @@ pub async fn ping<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
         if n.is_truthy()? {
             let value = PyTuple::new(py, [&rt::str(py, "ping"), n])?;
             rt::yield_(value).await?;
-            Box::pin(pong(m, &n.sub(1)?)).await?;
+            rt::delegate(Box::pin(pong(m, &n.sub(1)?))).await?;
         }
         Ok(rt::none(py))
     })
@@ -222,7 +222,7 @@ pub async fn pong<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
         if n.is_truthy()? {
             let value = PyTuple::new(py, [&rt::str(py, "pong"), n])?;
             rt::yield_(value).await?;
-            Box::pin(ping(m, &n.sub(1)?)).await?;
+            rt::delegate(Box::pin(ping(m, &n.sub(1)?))).await?;
         }
         Ok(rt::none(py))
     })

@@ -368,28 +368,38 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "main", 209, async |_| {
         rt::builtins::print(
             py,
-            (with_flow(
+            (rt::delegate(with_flow(
                 m,
                 PyList::new(py, ["x", "skip", "y", "stop", "z"])?.as_any(),
-            )
+            ))
             .await?,),
         )?;
         rt::builtins::print(
             py,
-            (with_flow(m, PyList::new(py, ["x", "return"])?.as_any()).await?,),
+            (rt::delegate(with_flow(m, PyList::new(py, ["x", "return"])?.as_any())).await?,),
         )?;
-        rt::builtins::print(py, (for_flow(m, &rt::int(py, 5)).await?,))?;
-        nested(m).await?;
+        rt::builtins::print(py, (rt::delegate(for_flow(m, &rt::int(py, 5))).await?,))?;
+        rt::delegate(nested(m)).await?;
         rt::builtins::print(
             py,
             (
-                found_in(m, &m.global("Countdown")?.call1((5,))?, &rt::int(py, 2)).await?,
-                found_in(m, &m.global("Countdown")?.call1((2,))?, &rt::int(py, 7)).await?,
+                rt::delegate(found_in(
+                    m,
+                    &m.global("Countdown")?.call1((5,))?,
+                    &rt::int(py, 2),
+                ))
+                .await?,
+                rt::delegate(found_in(
+                    m,
+                    &m.global("Countdown")?.call1((2,))?,
+                    &rt::int(py, 7),
+                ))
+                .await?,
             ),
         )?;
-        rt::builtins::print(py, (unpacking(m).await?,))?;
-        errors(m).await?;
-        library(m).await?;
+        rt::builtins::print(py, (rt::delegate(unpacking(m)).await?,))?;
+        rt::delegate(errors(m)).await?;
+        rt::delegate(library(m)).await?;
         Ok(rt::none(py))
     })
 }

@@ -41,7 +41,7 @@ pub async fn delegate<'py>(
             py.check_signals()?;
         }
         rt::yield_(&total).await?;
-        numbers(m, n).await?;
+        rt::delegate(numbers(m, n)).await?;
         Ok(rt::none(py))
     })
 }
@@ -71,7 +71,8 @@ pub async fn middle<'py>(
     rt::frame!(m, "middle", 39, async |frame| {
         if let rt::Flow::Return(value) = frame
             .async_with(&m.global("Guard")?.call0()?, async |_| {
-                let result: PyResult<Bound<'py, PyAny>> = async { leaf(m, n).await }.await;
+                let result: PyResult<Bound<'py, PyAny>> =
+                    async { rt::delegate(leaf(m, n)).await }.await;
                 let finally = frame.finally(result);
                 rt::builtins::print(py, ("middle finally",))?;
                 Ok(rt::Flow::Return(finally.resume()?))
@@ -88,8 +89,8 @@ pub async fn middle<'py>(
 pub async fn top<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "top", 47, async |_| {
-        rt::builtins::print(py, (leaf(m, &rt::int(py, 2)).await?,))?;
-        middle(m, &rt::int(py, 5)).await
+        rt::builtins::print(py, (rt::delegate(leaf(m, &rt::int(py, 2))).await?,))?;
+        rt::delegate(middle(m, &rt::int(py, 5))).await
     })
 }
 

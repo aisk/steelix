@@ -80,7 +80,7 @@ struct Names {
 /// when it runs re-entrantly, the `RuntimeError` replacing a `StopIteration`
 /// raised in its body (PEP 479), `__name__`, `__qualname__` and `repr`. It
 /// is not a `types.GeneratorType` (design §12).
-#[pyclass(frozen, weakref, name = "generator", module = "steelix_runtime")]
+#[pyclass(frozen, weakref, name = "generator")]
 pub struct Generator {
     step: Step,
     globals: Py<PyDict>,
@@ -117,6 +117,7 @@ impl Generator {
                 qualname: PyString::new(py, qualname).unbind(),
             }),
         };
+        crate::plain_type_name::<Generator>(py, c"generator");
         Ok(Bound::new(py, generator)?.into_any())
     }
 
@@ -181,6 +182,14 @@ impl Generator {
 
 #[pymethods]
 impl Generator {
+    /// None, like CPython's generator objects, instead of the Rust
+    /// documentation above.
+    #[classattr]
+    #[pyo3(name = "__doc__")]
+    fn doc(py: Python<'_>) -> Py<PyAny> {
+        py.None()
+    }
+
     fn __iter__<'py>(slf: &Bound<'py, Self>) -> Bound<'py, Self> {
         slf.clone()
     }

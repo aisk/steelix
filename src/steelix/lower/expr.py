@@ -73,7 +73,7 @@ class Value:
     """A temporary of the generated code, which its single owned use may move."""
     awaited: bool = False
     """The result of a native coroutine or generator awaited in place,
-    `f(m, &x).await?` for `await f(x)` or `yield from f(x)`."""
+    `rt::delegate(f(m, &x)).await?` for `await f(x)` or `yield from f(x)`."""
 
     @property
     def is_pure(self) -> bool:
@@ -920,10 +920,11 @@ class ExprLowering(ComprehensionLowering):
             special = self.global_call(func.id, node, plain)
             if special is not None:
                 return special
+        if len(args) > MAX_CALL_ARGS and not any(isinstance(a, ast.Starred) for a in args):
+            # A tuple of them would not implement PyO3's `PyCallArgs`.
+            raise self.ctx.unsupported(f"call with more than {MAX_CALL_ARGS} arguments", node)
         if not plain:
             return self.call_macro(func, args, keywords)
-        if len(args) > MAX_CALL_ARGS:
-            raise self.ctx.unsupported(f"call with more than {MAX_CALL_ARGS} arguments", node)
         if isinstance(func, ast.Attribute):
             return self.method_call(func, args)
         callee, *values = self.operands([func, *args])
@@ -1046,7 +1047,7 @@ class ExprLowering(ComprehensionLowering):
             return self.direct_call(resolution, node)
         if resolution is not Lookup.BUILTIN or not plain:
             return None
-        if name == "print":
+        if name == "print" and len(args) <= MAX_CALL_ARGS:
             values = self.operands(list(args))
             tuple_ = rs.Tuple(tuple(v.arg() for v in values))
             call = rs.Call(rs.Path("rt::builtins::print"), (self.py(), tuple_))
@@ -1152,7 +1153,7 @@ class ExprLowering(ComprehensionLowering):
         if caller is not None and module.callgraph.in_cycle(caller.node, fn):
             # A recursive future would contain itself.
             call = rs.Call(rs.Path("Box::pin"), (call,))
-        return Value(_try(rs.Await(call)), Kind.OWNED, awaited=True)
+        return Value(_try(rs.Await(_rt("delegate", call))), Kind.OWNED, awaited=True)
 
     def tuple_of(self, values: list[Value]) -> rs.Expr:
         self.use("pyo3::types::PyTuple")

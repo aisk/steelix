@@ -40,10 +40,10 @@ pub async fn handle<'py>(
         let extra: Bound<'py, PyAny>;
         let mut total: Bound<'py, PyAny>;
         {
-            let subject = fetch(m, request).await?;
+            let subject = rt::delegate(fetch(m, request)).await?;
             if let Some([name, action2]) = rt::match_map(&subject, ["user", "action"])?
                 && action2.eq("login")?
-                && allowed(m, &name).await?.is_truthy()?
+                && rt::delegate(allowed(m, &name)).await?.is_truthy()?
             {
                 let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
                 rt::await_(sleep).await?;
@@ -55,7 +55,8 @@ pub async fn handle<'py>(
             } else if let Some([action]) = rt::match_map(&subject, ["action"])?
                 && let rest = rt::match_rest(&subject, ["action"])?
             {
-                extra = fetch(m, &rt::builtin(py, "sorted")?.call1((&rest,))?).await?;
+                extra =
+                    rt::delegate(fetch(m, &rt::builtin(py, "sorted")?.call1((&rest,))?)).await?;
                 return rt::fstring(
                     py,
                     (rt::format(&action, "")?, " with ", rt::format(&extra, "")?),
@@ -64,7 +65,7 @@ pub async fn handle<'py>(
                 total = first.clone();
                 for other in others.try_iter()? {
                     let other = other?;
-                    total = rt::iadd(&total, fetch(m, &other).await?)?;
+                    total = rt::iadd(&total, rt::delegate(fetch(m, &other)).await?)?;
                     py.check_signals()?;
                 }
                 return rt::fstring(py, ("sum ", rt::format(&total, "")?));
@@ -101,7 +102,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .into_any();
         for request in requests.try_iter()? {
             let request = request?;
-            rt::builtins::print(py, (handle(m, &request).await?,))?;
+            rt::builtins::print(py, (rt::delegate(handle(m, &request)).await?,))?;
             py.check_signals()?;
         }
         let mut a: Option<Bound<'py, PyAny>> = None;
@@ -112,10 +113,10 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             if let Some([a2, b2]) = rt::match_seq(&subject)? {
                 a = Some(a2);
                 b = Some(b2);
-                if fetch(
+                if rt::delegate(fetch(
                     m,
                     &rt::local(&a, "a")?.rich_compare(rt::local(&b, "b")?, CompareOp::Gt)?,
-                )
+                ))
                 .await?
                 .is_truthy()?
                 {
