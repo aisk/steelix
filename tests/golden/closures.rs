@@ -251,9 +251,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ),
         )?;
         frame.line(83);
-        let [other, __] = rt::unpack(&make_counter(m, &rt::int(py, 0))?)?;
+        let [other, underscore] = rt::unpack(&make_counter(m, &rt::int(py, 0))?)?;
         m.set_global("other", other)?;
-        m.set_global("_", __)?;
+        m.set_global("_", underscore)?;
         frame.line(84);
         rt::builtins::print(
             py,

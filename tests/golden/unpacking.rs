@@ -103,9 +103,9 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             .call_method0("items")?
             .try_iter()?
         {
-            let [key2, value3] = rt::unpack(&item4?)?;
+            let [key2, value2] = rt::unpack(&item4?)?;
             key = Some(key2);
-            value = value3;
+            value = value2;
             frame.line(34);
             rt::builtins::print(py, (rt::local(&key, "key")?, &value))?;
             py.check_signals()?;

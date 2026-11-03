@@ -26,17 +26,17 @@ pub fn lookup<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bou
     rt::frame!(m, "lookup", 18, |frame| {
         frame.line(20);
         match load(m, key) {
-            Ok(value) => return Ok(value),
+            Ok(value) => Ok(value),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(22);
-                return Err(frame.raise_from(
+                Err(frame.raise_from(
                     PyLookupError::new_err((rt::str(py, "no such key: ").add(key)?.unbind(),)),
                     &e,
-                ));
+                ))
             }
-            Err(err) => return Err(err),
+            Err(err) => Err(err),
         }
     })
 }

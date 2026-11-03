@@ -267,26 +267,28 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(m, "late_binding.<locals>.<lambda>", 79, |_| i.get())
         }
         frame.line(79);
-        let i_ = rt::Cell::empty(py, "i")?;
-        let list = PyList::empty(py);
-        for item in m.global("range")?.call1((3,))?.try_iter()? {
-            i_.set(item?)?;
-            list.append(rt::function!(
-                m,
-                lambda[&i_ as "i"](),
-                qualname = "late_binding.<locals>.<lambda>"
-            )?)?;
-            py.check_signals()?;
-        }
-        let funcs = list.into_any();
+        let funcs = {
+            let i_ = rt::Cell::empty(py, "i")?;
+            let list = PyList::empty(py);
+            for item in m.global("range")?.call1((3,))?.try_iter()? {
+                i_.set(item?)?;
+                list.append(rt::function!(
+                    m,
+                    lambda[&i_ as "i"](),
+                    qualname = "late_binding.<locals>.<lambda>"
+                )?)?;
+                py.check_signals()?;
+            }
+            list.into_any()
+        };
         frame.line(80);
-        let list2 = PyList::empty(py);
+        let list = PyList::empty(py);
         for f in funcs.try_iter()? {
             let f = f?;
-            list2.append(f.call0()?)?;
+            list.append(f.call0()?)?;
             py.check_signals()?;
         }
-        Ok(list2.into_any())
+        Ok(list.into_any())
     })
 }
 
@@ -311,13 +313,13 @@ pub fn default_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
         }
         let funcs = list.into_any();
         frame.line(85);
-        let list2 = PyList::empty(py);
+        let list = PyList::empty(py);
         for f in funcs.try_iter()? {
             let f = f?;
-            list2.append(f.call0()?)?;
+            list.append(f.call0()?)?;
             py.check_signals()?;
         }
-        Ok(list2.into_any())
+        Ok(list.into_any())
     })
 }
 
@@ -393,7 +395,7 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             print.call1((&list,))
         })() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("StopIteration")?)? => {
+            Err(err) if frame.matches(&err, 100, || m.global("StopIteration"))? => {
                 let exc = frame.catch(err);
                 let _handling = rt::Handling::new(&exc);
                 frame.line(101);
@@ -505,7 +507,7 @@ pub mod bad {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Bad.__next__", 121, |frame| {
             frame.line(122);
-            return Err(frame.raise(m.global("ValueError")?.call1(("next failed",))?));
+            Err(frame.raise(m.global("ValueError")?.call1(("next failed",))?))
         })
     }
 }
@@ -527,23 +529,23 @@ pub mod config {
                 list.append(i.mul(2)?)?;
                 py.check_signals()?;
             }
-            ns.set("doubled", &list)?;
+            ns.set("doubled", list)?;
             frame.line(134);
             match (|| -> PyResult<Bound<'py, PyAny>> {
                 frame.line(134);
-                let list2 = PyList::empty(py);
+                let list = PyList::empty(py);
                 for i in ns.get("range")?.call1((2,))?.try_iter()? {
                     let i = i?;
-                    list2.append(m.global("size")?)?;
+                    list.append(m.global("size")?)?;
                     py.check_signals()?;
                 }
                 frame.line(133);
-                Ok(list2.into_any())
+                Ok(list.into_any())
             })() {
                 Ok(value) => {
                     ns.set("broken", &value)?;
                 }
-                Err(err) if rt::matches(&err, &ns.get("NameError")?)? => {
+                Err(err) if frame.matches(&err, 135, || ns.get("NameError"))? => {
                     let exception = frame.catch(err);
                     ns.set("exc", &exception)?;
                     let _handling = rt::Handling::new(&exception);
@@ -560,7 +562,7 @@ pub mod config {
                 dict.set_item(&n, m.global("len")?.call1((&n,))?)?;
                 py.check_signals()?;
             }
-            ns.set("names", &dict)?;
+            ns.set("names", dict)?;
             Ok(())
         })
     }
@@ -836,7 +838,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             frame.line(168);
             match (|| m.global("call")?.call1((m.global("arg")?,)))() {
                 Ok(_) => {}
-                Err(err) if rt::matches(&err, &m.global("ZeroDivisionError")?)? => {
+                Err(err) if frame.matches(&err, 169, || m.global("ZeroDivisionError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("exc", &exception)?;
                     let _handling = rt::Handling::new(&exception);
@@ -852,7 +854,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         frame.line(172);
         match (|| m.global("failing_iteration")?.call0())() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 173, || m.global("ValueError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("exc", &exception)?;
                 let _handling = rt::Handling::new(&exception);
@@ -885,31 +887,33 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             py.check_signals()?;
         }
-        m.set_global("module_level", &list)?;
+        m.set_global("module_level", list)?;
         frame.line(179);
-        let print = m.global("print")?;
-        let module_level = m.global("module_level")?;
-        let list2 = PyList::empty(py);
-        for w in PyTuple::new(py, ["ab", "c"])?.try_iter()? {
-            let w = w?;
-            let list3 = PyList::empty(py);
-            for c in w.try_iter()? {
-                let c = c?;
-                list3.append(&c)?;
+        {
+            let print = m.global("print")?;
+            let module_level = m.global("module_level")?;
+            let list = PyList::empty(py);
+            for w in PyTuple::new(py, ["ab", "c"])?.try_iter()? {
+                let w = w?;
+                let list2 = PyList::empty(py);
+                for c in w.try_iter()? {
+                    let c = c?;
+                    list2.append(&c)?;
+                    py.check_signals()?;
+                }
+                list.append(&list2)?;
                 py.check_signals()?;
             }
-            list2.append(&list3)?;
-            py.check_signals()?;
+            let set = PySet::empty(py)?;
+            for n in m.global("range")?.call1((5,))?.try_iter()? {
+                let n = n?;
+                set.add(n.rem(2)?)?;
+                py.check_signals()?;
+            }
+            print.call1((module_level, list, set))?;
         }
-        let set = PySet::empty(py)?;
-        for n in m.global("range")?.call1((5,))?.try_iter()? {
-            let n = n?;
-            set.add(n.rem(2)?)?;
-            py.check_signals()?;
-        }
-        print.call1((&module_level, &list2, &set))?;
         frame.line(180);
-        let print2 = m.global("print")?;
+        let print = m.global("print")?;
         let value = m.globals().clone().into_any().contains("n")?;
         let dict = PyDict::new(py);
         for item2 in m
@@ -921,7 +925,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             dict.set_item(&k, &v)?;
             py.check_signals()?;
         }
-        print2.call1((value, &dict))?;
+        print.call1((value, dict))?;
         Ok(())
     })
 }

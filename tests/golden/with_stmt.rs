@@ -87,7 +87,7 @@ pub fn suppressing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             &rt::call!(m.global("Manager")?, "quiet", suppress = true)?,
             |_| -> PyResult<()> {
                 frame.line(70);
-                return Err(frame.raise(m.global("ValueError")?.call1(("suppressed",))?));
+                Err(frame.raise(m.global("ValueError")?.call1(("suppressed",))?))
             },
         )?;
         frame.line(71);
@@ -105,13 +105,13 @@ pub fn not_suppressing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
                 &m.global("Manager")?.call1(("loud",))?,
                 |_| -> PyResult<()> {
                     frame.line(77);
-                    return Err(frame.raise(m.global("ValueError")?.call1(("propagates",))?));
+                    Err(frame.raise(m.global("ValueError")?.call1(("propagates",))?))
                 },
             )?;
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 78, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(79);
@@ -141,7 +141,7 @@ pub fn enter_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("RuntimeError")?)? => {
+            Err(err) if frame.matches(&err, 86, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(87);
@@ -162,13 +162,13 @@ pub fn exit_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 &rt::call!(m.global("Manager")?, "ok", fail_exit = true)?,
                 |_| -> PyResult<()> {
                     frame.line(93);
-                    return Err(frame.raise(m.global("ValueError")?.call1(("original",))?));
+                    Err(frame.raise(m.global("ValueError")?.call1(("original",))?))
                 },
             )?;
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+            Err(err) if frame.matches(&err, 94, || m.global("KeyError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(95);
@@ -263,7 +263,7 @@ pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(())
             })() {
                 Ok(()) => {}
-                Err(err) if rt::matches(&err, &m.global("TypeError")?)? => {
+                Err(err) if frame.matches(&err, 122, || m.global("TypeError"))? => {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
                     frame.line(123);
@@ -317,7 +317,7 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &module.global("TypeError")?)? => {
+            Err(err) if frame.matches(&err, 133, || module.global("TypeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(134);
@@ -656,7 +656,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             &rt::call!(m.global("Manager")?, "module quiet", suppress = true)?,
             |_| -> PyResult<()> {
                 frame.line(164);
-                return Err(frame.raise(m.global("ValueError")?.call1(("module",))?));
+                Err(frame.raise(m.global("ValueError")?.call1(("module",))?))
             },
         )?;
         frame.line(165);

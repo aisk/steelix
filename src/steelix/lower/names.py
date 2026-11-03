@@ -47,6 +47,9 @@ def rust_ident(name: str) -> str:
     """The Rust spelling of a Python identifier, ignoring collisions."""
     if name in _NOT_RAW:
         return _NOT_RAW[name]
+    if not name.strip("_0123456789"):
+        # `__`, `_1`: clippy wants a more descriptive name.
+        return "underscore" + name.strip("_")
     if name in RUST_KEYWORDS:
         return f"r#{name}"
     return name

@@ -389,7 +389,12 @@ class ComprehensionLowering:
             some = rs.Call(rs.Path("Some"), (stored or value.owned(),))
             self.prelude.append(rs.Assign(rs.Path(rust), some))
             return value
-        self.prelude.append(rs.Assign(rs.Path(rust), value.owned()))
+        if fn.locals.declared_at.get(name) is node:
+            # The first assignment of the local, which always runs.
+            mutable = name in fn.locals.mutable
+            self.prelude.append(rs.Let(rust, mutable, init=value.owned()))
+        else:
+            self.prelude.append(rs.Assign(rs.Path(rust), value.owned()))
         return Value(rs.Path(rust), Kind.PLACE, pure=False, base=name)
 
 

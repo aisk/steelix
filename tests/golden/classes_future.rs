@@ -43,7 +43,7 @@ pub mod meta {
                 }
                 py.check_signals()?;
             }
-            rt::builtins::print(py, (name, &list))?;
+            rt::builtins::print(py, (name, list))?;
             frame.line(13);
             rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, ns))
         })
@@ -67,16 +67,18 @@ pub mod config {
             frame.line(20);
             ns.annotate("size", "int")?;
             frame.line(21);
-            let name = ns.get("name")?;
-            ns.set(
-                "ratio",
-                if name.is_truthy()? {
-                    rt::float(m.py(), 0.5)
-                } else {
-                    name
-                },
-            )?;
-            ns.annotate("ratio", "float")?;
+            {
+                let name = ns.get("name")?;
+                ns.set(
+                    "ratio",
+                    if name.is_truthy()? {
+                        rt::float(m.py(), 0.5)
+                    } else {
+                        name
+                    },
+                )?;
+                ns.annotate("ratio", "float")?;
+            }
             frame.line(23);
             ns.set(
                 "scaled",
@@ -201,13 +203,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .getattr("get_type_hints")?
                 .call1((m.global("Config")?,))?,),
         )?;
-        frame.line(31);
-        let dataclass = m.global("dataclasses")?.getattr("dataclass")?;
-        frame.line(32);
-        let pair = rt::class!(m, "Pair"(), pair::body, line = 31)?;
-        frame.line(31);
-        let pair = dataclass.call1((pair,))?;
-        m.set_global("Pair", pair)?;
+        {
+            frame.line(31);
+            let dataclass = m.global("dataclasses")?.getattr("dataclass")?;
+            frame.line(32);
+            let pair = rt::class!(m, "Pair"(), pair::body, line = 31)?;
+            frame.line(31);
+            let pair = dataclass.call1((pair,))?;
+            m.set_global("Pair", pair)?;
+        }
         frame.line(37);
         rt::builtins::print(
             py,

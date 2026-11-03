@@ -13,22 +13,22 @@ class Base:
 
 class Mixed(Base):
     native_before = 1
-    squares = [*(i * i for i in range(4))]
+    squares = list(i * j for i in range(4) for j in [i])
     native_after = squares[-1]
 
     def greet(self):
         return "native:" + super().greet()
 
     def kept_greet(self):
-        values = [*super().items()]
+        values = list(v for v in super().items() for _ in "1")
         return f"kept:{super().greet()}:{values}:{__class__.__name__}"
 
     @staticmethod
     def kept_static(n):
-        return sum([*range(n)])
+        return sum(i for i in range(n) for _ in "1")
 
     def __private(self):
-        return [*("private",)][0]
+        return next(s for s in ("private",) for _ in "1")
 
     def call_private(self):
         return self.__private()
@@ -39,10 +39,10 @@ class Mixed(Base):
     def uses_kept(self):
         return self.kept_greet() + "|" + str(self.kept_static(4))
 
-    lookup = {**dict([("a", 1)])}
+    lookup = dict(kv for kv in [("a", 1)] for _ in "1")
 
     def failing(self):
-        return [*(1 / 0 for _ in range(1))]
+        return list(1 / 0 for _ in range(1) for _ in "1")
 
 
 m = Mixed()
@@ -61,7 +61,7 @@ except StopIteration as stop:
 
 class KeptSub(Mixed):
     def greet(self):
-        return [*["sub:" + super().greet()]][0]
+        return next(s for s in ["sub:" + super().greet()] for _ in "1")
 
 
 class NativeSub(KeptSub):
@@ -75,13 +75,13 @@ print(NativeSub().greet(), isinstance(NativeSub(), Mixed), issubclass(KeptSub, B
 class Outer:
     class Inner:
         def kept(self):
-            return [*[type(self).__qualname__]][0] + ":" + __class__.__qualname__
+            return next(s for s in [type(self).__qualname__] for _ in "1") + ":" + __class__.__qualname__
 
         def __hidden(self):
             return "hidden"
 
         def kept_hidden(self):
-            return [*[self.__hidden()]][0]
+            return next(s for s in [self.__hidden()] for _ in "1")
 
 
 print(Outer.Inner().kept(), Outer.Inner().kept_hidden(), Outer.Inner.kept.__qualname__)
@@ -98,7 +98,7 @@ def decorate(cls):
 @decorate
 class Decorated:
     def kept(self):
-        return [*[super().__repr__()[:9]]][0] + ":" + __class__.__name__
+        return next(s for s in [super().__repr__()[:9]] for _ in "1") + ":" + __class__.__name__
 
 
 print(Decorated().kept(), Decorated.__mro__[1]().kept())

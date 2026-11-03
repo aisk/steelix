@@ -52,9 +52,11 @@ pub mod account {
                 )?,
             )?;
             frame.line(23);
-            let decorator = ns.get("staticmethod")?;
-            let function = rt::function!(ns, count(), qualname = "Account.count")?;
-            ns.set("count", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("staticmethod")?;
+                let function = rt::function!(ns, count(), qualname = "Account.count")?;
+                ns.set("count", decorator.call1((function,))?)?;
+            }
             frame.line(26);
             ns.set(
                 "_Account__Inner",
@@ -99,17 +101,21 @@ pub mod account {
             frame.line(9);
             slf.setattr("_Account__owner", owner)?;
             frame.line(10);
-            let __class__ = slf.getattr("__class__")?;
-            __class__.setattr(
-                "_Account__count",
-                rt::iadd(&__class__.getattr("_Account__count")?, 1)?,
-            )?;
+            {
+                let __class__ = slf.getattr("__class__")?;
+                __class__.setattr(
+                    "_Account__count",
+                    rt::iadd(&__class__.getattr("_Account__count")?, 1)?,
+                )?;
+            }
             frame.line(11);
-            let Account = m.global("Account")?;
-            Account.setattr(
-                "_Account__count",
-                rt::iadd(&Account.getattr("_Account__count")?, 0)?,
-            )?;
+            {
+                let Account = m.global("Account")?;
+                Account.setattr(
+                    "_Account__count",
+                    rt::iadd(&Account.getattr("_Account__count")?, 0)?,
+                )?;
+            }
             Ok(rt::none(m.py()))
         })
     }
@@ -201,18 +207,16 @@ pub mod account {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.handler", 35, |frame| {
-            match (|| -> PyResult<()> {
-                frame.line(37);
-                return Err(frame.raise(PyKeyError::new_err("k")));
-            })() {
+            frame.line(37);
+            match Err(frame.raise(PyKeyError::new_err("k"))) {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyKeyError>(m.py()) => {
                     let _Account__err = frame.catch(err);
                     let _handling = rt::Handling::new(&_Account__err);
                     frame.line(39);
-                    return Ok(_Account__err.repr()?.into_any());
+                    Ok(_Account__err.repr()?.into_any())
                 }
-                Err(err) => return Err(err),
+                Err(err) => Err(err),
             }
         })
     }

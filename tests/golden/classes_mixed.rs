@@ -1,18 +1,18 @@
 //! Parts of `classes_mixed.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 16, `assign` statement: unpacking in a display
-//! - line 22, `def kept_greet`: unpacking in a display
-//! - line 26, `def kept_static`: unpacking in a display
-//! - line 30, `def __private`: unpacking in a display
+//! - line 16, `assign` statement: generator expression with several for clauses
+//! - line 22, `def kept_greet`: generator expression with several for clauses
+//! - line 26, `def kept_static`: generator expression with several for clauses
+//! - line 30, `def __private`: generator expression with several for clauses
 //! - line 36, `def kept_async`: async function
-//! - line 42, `assign` statement: unpacking in a display
-//! - line 44, `def failing`: unpacking in a display
-//! - line 63, `def greet`: unpacking in a display
-//! - line 77, `def kept`: unpacking in a display
-//! - line 83, `def kept_hidden`: unpacking in a display
+//! - line 42, `assign` statement: generator expression with several for clauses
+//! - line 44, `def failing`: generator expression with several for clauses
+//! - line 63, `def greet`: generator expression with several for clauses
+//! - line 77, `def kept`: generator expression with several for clauses
+//! - line 83, `def kept_hidden`: generator expression with several for clauses
 //! - line 90, `def decorate`: class definition in a function
-//! - line 100, `def kept`: unpacking in a display
+//! - line 100, `def kept`: generator expression with several for clauses
 //! - line 107, `class WholeKept`: annotation in a compound statement of a class body
 
 use pyo3::exceptions::PyStopIteration;
@@ -68,12 +68,12 @@ pub mod mixed {
             let __class__ = ns.class_cell();
             frame.line(15);
             ns.set("native_before", 1)?;
-            // classes_mixed.py:16, kept as Python: unpacking in a display at 16:16
+            // classes_mixed.py:16, kept as Python: generator expression with several for clauses at 16:19
             rt::exec_python!(
                 ns,
                 line = 16,
                 r#"
-    squares = [*(i * i for i in range(4))]
+    squares = list(i * j for i in range(4) for j in [i])
 "#
             )?;
             frame.line(17);
@@ -87,33 +87,33 @@ pub mod mixed {
                     qualname = "Mixed.greet"
                 )?,
             )?;
-            // classes_mixed.py:22, kept as Python: unpacking in a display at 23:19
+            // classes_mixed.py:22, kept as Python: generator expression with several for clauses at 23:22
             rt::exec_python!(
                 ns,
                 line = 22,
                 r#"
     def kept_greet(self):
-        values = [*super().items()]
+        values = list(v for v in super().items() for _ in "1")
         return f"kept:{super().greet()}:{values}:{__class__.__name__}"
 "#
             )?;
-            // classes_mixed.py:26, kept as Python: unpacking in a display at 28:21
+            // classes_mixed.py:26, kept as Python: generator expression with several for clauses at 28:19
             rt::exec_python!(
                 ns,
                 line = 26,
                 r#"
     @staticmethod
     def kept_static(n):
-        return sum([*range(n)])
+        return sum(i for i in range(n) for _ in "1")
 "#
             )?;
-            // classes_mixed.py:30, kept as Python: unpacking in a display at 31:17
+            // classes_mixed.py:30, kept as Python: generator expression with several for clauses at 31:20
             rt::exec_python!(
                 ns,
                 line = 30,
                 r#"
     def __private(self):
-        return [*("private",)][0]
+        return next(s for s in ("private",) for _ in "1")
 "#
             )?;
             frame.line(33);
@@ -143,21 +143,21 @@ pub mod mixed {
                     qualname = "Mixed.uses_kept"
                 )?,
             )?;
-            // classes_mixed.py:42, kept as Python: unpacking in a display at 42:17
+            // classes_mixed.py:42, kept as Python: generator expression with several for clauses at 42:18
             rt::exec_python!(
                 ns,
                 line = 42,
                 r#"
-    lookup = {**dict([("a", 1)])}
+    lookup = dict(kv for kv in [("a", 1)] for _ in "1")
 "#
             )?;
-            // classes_mixed.py:44, kept as Python: unpacking in a display at 45:17
+            // classes_mixed.py:44, kept as Python: generator expression with several for clauses at 45:20
             rt::exec_python!(
                 ns,
                 line = 44,
                 r#"
     def failing(self):
-        return [*(1 / 0 for _ in range(1))]
+        return list(1 / 0 for _ in range(1) for _ in "1")
 "#
             )?;
             Ok(())
@@ -208,13 +208,13 @@ pub mod kept_sub {
     /// The body of `class KeptSub`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "KeptSub", 62, |_| {
-            // classes_mixed.py:63, kept as Python: unpacking in a display at 64:17
+            // classes_mixed.py:63, kept as Python: generator expression with several for clauses at 64:20
             rt::exec_python!(
                 ns,
                 line = 63,
                 r#"
     def greet(self):
-        return [*["sub:" + super().greet()]][0]
+        return next(s for s in ["sub:" + super().greet()] for _ in "1")
 "#
             )?;
             Ok(())
@@ -285,13 +285,13 @@ pub mod outer {
         /// The body of `class Outer.Inner`, run in its namespace `ns`.
         pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
             rt::frame!(ns, "Outer.Inner", 76, |frame| {
-                // classes_mixed.py:77, kept as Python: unpacking in a display at 78:21
+                // classes_mixed.py:77, kept as Python: generator expression with several for clauses at 78:24
                 rt::exec_python!(
                     ns,
                     line = 77,
                     r#"
         def kept(self):
-            return [*[type(self).__qualname__]][0] + ":" + __class__.__qualname__
+            return next(s for s in [type(self).__qualname__] for _ in "1") + ":" + __class__.__qualname__
 "#
                 )?;
                 frame.line(80);
@@ -303,13 +303,13 @@ pub mod outer {
                         qualname = "Outer.Inner.__hidden"
                     )?,
                 )?;
-                // classes_mixed.py:83, kept as Python: unpacking in a display at 84:21
+                // classes_mixed.py:83, kept as Python: generator expression with several for clauses at 84:24
                 rt::exec_python!(
                     ns,
                     line = 83,
                     r#"
         def kept_hidden(self):
-            return [*[self.__hidden()]][0]
+            return next(s for s in [self.__hidden()] for _ in "1")
 "#
                 )?;
                 Ok(())
@@ -333,13 +333,13 @@ pub mod decorated {
     /// The body of `class Decorated`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Decorated", 98, |_| {
-            // classes_mixed.py:100, kept as Python: unpacking in a display at 101:17
+            // classes_mixed.py:100, kept as Python: generator expression with several for clauses at 101:20
             rt::exec_python!(
                 ns,
                 line = 100,
                 r#"
     def kept(self):
-        return [*[super().__repr__()[:9]]][0] + ":" + __class__.__name__
+        return next(s for s in [super().__repr__()[:9]] for _ in "1") + ":" + __class__.__name__
 "#
             )?;
             Ok(())
@@ -511,13 +511,15 @@ def decorate(cls):
     return Wrapper
 "#
         )?;
-        frame.line(98);
-        let decorate = m.global("decorate")?;
-        frame.line(99);
-        let decorated = rt::class!(m, "Decorated"(), decorated::body, line = 98)?;
-        frame.line(98);
-        let decorated = decorate.call1((decorated,))?;
-        m.set_global("Decorated", decorated)?;
+        {
+            frame.line(98);
+            let decorate = m.global("decorate")?;
+            frame.line(99);
+            let decorated = rt::class!(m, "Decorated"(), decorated::body, line = 98)?;
+            frame.line(98);
+            let decorated = decorate.call1((decorated,))?;
+            m.set_global("Decorated", decorated)?;
+        }
         frame.line(104);
         rt::builtins::print(
             py,
@@ -578,7 +580,7 @@ class WholeKept:
                     )?)?;
                     py.check_signals()?;
                 }
-                rt::builtins::print(py, (&list,))?;
+                rt::builtins::print(py, (list,))?;
                 m.unbind_global("err")?;
             }
             Err(err) => return Err(err),

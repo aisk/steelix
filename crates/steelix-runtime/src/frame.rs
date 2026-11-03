@@ -162,16 +162,51 @@ impl<'py> Frame<'py> {
     pub fn catch(&self, err: PyErr) -> Bound<'py, PyAny> {
         let py = self.py();
         let exception = err.into_value(py).into_bound(py).into_any();
+        self.enter(&exception);
+        self.entered.borrow_mut().take();
+        exception
+    }
+
+    /// Gives `exception` this frame's traceback entry at the current line,
+    /// unless it already has it, and remembers that it has it.
+    fn enter(&self, exception: &Bound<'py, PyAny>) {
         let entered = self.entered.borrow_mut().take();
-        let here = entered.is_some_and(|entered| entered.is(&exception))
-            || self.raised_by_kept_code(&exception);
+        let here = entered.is_some_and(|entered| entered.is(exception))
+            || self.raised_by_kept_code(exception);
         if !here {
             // Adding the entry can only fail when Python itself is in
             // trouble (no memory, no stack left); the traceback then just
             // lacks this frame.
-            let _ = self.add_entry(&exception);
+            let _ = self.add_entry(exception);
         }
-        exception
+        *self.entered.borrow_mut() = Some(exception.clone());
+    }
+
+    /// `except handler:` on `line`, where `handler` is not a builtin
+    /// exception class: evaluates `handler` and tells whether `err` is an
+    /// instance of it (or of a class in a tuple of classes).
+    ///
+    /// Like CPython, the handler expression runs with `err` as the exception
+    /// being handled, on the line of the `except`: an exception it raises,
+    /// or the `TypeError` for a handler that is not an exception class, has
+    /// `err` as its `__context__` and is reported on that line.
+    ///
+    /// ```ignore
+    /// Err(err) if frame.matches(&err, 7, || m.global("ParseError"))? => { .. }
+    /// ```
+    pub fn matches(
+        &self,
+        err: &PyErr,
+        line: u32,
+        handler: impl FnOnce() -> PyResult<Bound<'py, PyAny>>,
+    ) -> PyResult<bool> {
+        let exception = err.value(self.py()).as_any();
+        self.enter(exception);
+        self.line(line);
+        let _handling = Handling::new(exception);
+        let handler = handler()?;
+        self.line(line);
+        matches(err, &handler)
     }
 
     /// `raise exception`: an exception class or instance, or a `PyErr` such
@@ -444,10 +479,10 @@ impl Drop for Handling<'_> {
     }
 }
 
-/// `except handler:` where the handler is not a builtin exception: whether
+/// [`Frame::matches`] for an evaluated handler: whether
 /// `err` is an instance of the class (or of one in a tuple of classes),
 /// raising `TypeError` like CPython if it is not an exception class.
-pub fn matches<'py>(err: &PyErr, handler: &Bound<'py, PyAny>) -> PyResult<bool> {
+fn matches<'py>(err: &PyErr, handler: &Bound<'py, PyAny>) -> PyResult<bool> {
     let py = handler.py();
     let classes = match handler.cast::<PyTuple>() {
         Ok(tuple) => tuple.iter().collect(),

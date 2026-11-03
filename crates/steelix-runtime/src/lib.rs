@@ -25,6 +25,8 @@ mod cell;
 #[doc(hidden)]
 pub mod class;
 #[doc(hidden)]
+pub mod display;
+#[doc(hidden)]
 pub mod function;
 #[doc(hidden)]
 pub mod generator;
@@ -42,7 +44,7 @@ pub mod builtins;
 #[doc(hidden)]
 pub mod frame;
 
-pub use frame::{Flow, Frame, Handling, IntoException, matches};
+pub use frame::{Flow, Frame, Handling, IntoException};
 
 pub use cell::Cell;
 pub use class::{Namespace, super_};
@@ -181,6 +183,15 @@ pub(crate) fn raised(err: PyErr) -> PyErr {
         err.value(py);
     });
     err
+}
+
+/// The name CPython uses for the type of `value` in error messages
+/// (`tp_name`, e.g. `int` or `datetime.date`).
+pub(crate) fn type_name(value: &Bound<'_, PyAny>) -> String {
+    // SAFETY: the type of a valid object has a NUL-terminated `tp_name`.
+    unsafe { std::ffi::CStr::from_ptr((*value.get_type_ptr()).tp_name) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Reads a local variable that might not be assigned yet, raising

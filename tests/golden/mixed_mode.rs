@@ -2,9 +2,8 @@
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
 //! - line 35, `def evens`: yield
-//! - line 48, `assign` statement: unpacking in a display
+//! - line 48, `assign` statement: generator expression with several for clauses
 //! - line 74, `def twice`: function redefinition
-//! - line 87, `assign` statement: unpacking in a display
 //! - line 96, `def chunks`: yield from
 
 use pyo3::exceptions::PyImportError;
@@ -180,12 +179,12 @@ def evens(limit):
         rt::def!(m, use_counter(start))?;
         frame.line(47);
         log(m, &rt::str(py, "native statement after the class"))?;
-        // mixed_mode.py:48, kept as Python: unpacking in a display at 48:12
+        // mixed_mode.py:48, kept as Python: generator expression with several for clauses at 48:15
         rt::exec_python!(
             m,
             line = 48,
             r#"
-squares = [*map(double, range(4))]
+squares = list(s for s in map(double, range(4)) for _ in "1")
 "#
         )?;
         frame.line(49);
@@ -282,13 +281,14 @@ def twice():
         rt::def!(m, set_mode(mode))?;
         frame.line(86);
         set_mode(m, &rt::str(py, "set by native code"))?;
-        // mixed_mode.py:87, kept as Python: unpacking in a display at 87:12
-        rt::exec_python!(
-            m,
-            line = 87,
-            r#"
-MODES = {**{"a": MODE}, "b": MODE}
-"#
+        frame.line(87);
+        m.set_global(
+            "MODES",
+            rt::dict!(
+                py,
+                **[("a", &m.global("MODE")?)].into_py_dict(py)?,
+                ("b", m.global("MODE")?)
+            )?,
         )?;
         frame.line(88);
         rt::builtins::print(py, (m.global("MODES")?,))?;
@@ -313,12 +313,14 @@ def chunks(items):
         rt::builtins::print(py, (m.global("events")?,))?;
         // `:=` in a comprehension binds a global, here shadowing a builtin.
         frame.line(105);
-        let list = PyList::empty(py);
-        for v in PyTuple::new(py, [3, 7])?.try_iter()? {
-            let v = v?;
-            m.set_global("min", &v)?;
-            list.append(&v)?;
-            py.check_signals()?;
+        {
+            let list = PyList::empty(py);
+            for v in PyTuple::new(py, [3, 7])?.try_iter()? {
+                let v = v?;
+                m.set_global("min", &v)?;
+                list.append(&v)?;
+                py.check_signals()?;
+            }
         }
         frame.line(106);
         rt::builtins::print(py, (m.global("min")?,))?;

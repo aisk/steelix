@@ -38,13 +38,15 @@ pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bo
                     })
                 }
                 frame.line(13);
-                let decorator = m.global("functools")?.call_method1("wraps", (r#fn,))?;
-                let function = rt::function!(
-                    m,
-                    wrapper[label, r#fn](*args, **kwargs),
-                    qualname = "trace.<locals>.decorate.<locals>.wrapper"
-                )?;
-                let wrapper = decorator.call1((&function,))?;
+                let wrapper = {
+                    let decorator = m.global("functools")?.call_method1("wraps", (r#fn,))?;
+                    let function = rt::function!(
+                        m,
+                        wrapper[label, r#fn](*args, **kwargs),
+                        qualname = "trace.<locals>.decorate.<locals>.wrapper"
+                    )?;
+                    decorator.call1((function,))?
+                };
                 Ok(wrapper)
             })
         }
@@ -143,38 +145,48 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, trace(label))?;
         rt::def!(m, default_value(label))?;
         frame.line(31);
-        let decorator = trace(m, &rt::str(py, "outer"))?;
-        let decorator2 = trace(m, &rt::str(py, "inner"))?;
-        let function = rt::function!(
-            m,
-            greet(name, punct = default_value(m, &rt::str(py, "!"))?),
-            doc = "Say hello."
-        )?;
-        let function = decorator2.call1((&function,))?;
-        m.set_global("greet", decorator.call1((&function,))?)?;
+        {
+            let decorator = trace(m, &rt::str(py, "outer"))?;
+            let decorator2 = trace(m, &rt::str(py, "inner"))?;
+            let function = rt::function!(
+                m,
+                greet(name, punct = default_value(m, &rt::str(py, "!"))?),
+                doc = "Say hello."
+            )?;
+            let function = decorator2.call1((&function,))?;
+            m.set_global("greet", decorator.call1((function,))?)?;
+        }
         rt::def!(m, register(r#fn))?;
         frame.line(41);
         m.set_global("registry", PyList::empty(py))?;
         frame.line(45);
-        let decorator3 = m.global("register")?;
-        let function2 = rt::function!(m, first())?;
-        m.set_global("first", decorator3.call1((&function2,))?)?;
+        {
+            let decorator = m.global("register")?;
+            let function = rt::function!(m, first())?;
+            m.set_global("first", decorator.call1((function,))?)?;
+        }
         frame.line(50);
-        let decorator4 = m.global("register")?;
-        let function3 = rt::function!(m, second())?;
-        m.set_global("second", decorator4.call1((&function3,))?)?;
+        {
+            let decorator = m.global("register")?;
+            let function = rt::function!(m, second())?;
+            m.set_global("second", decorator.call1((function,))?)?;
+        }
         frame.line(55);
-        let decorator5 = rt::call!(
-            m.global("functools")?.getattr("lru_cache")?,
-            maxsize = py.None()
-        )?;
-        let function4 = rt::function!(m, fib(n))?;
-        m.set_global("fib", decorator5.call1((&function4,))?)?;
+        {
+            let decorator = rt::call!(
+                m.global("functools")?.getattr("lru_cache")?,
+                maxsize = py.None()
+            )?;
+            let function = rt::function!(m, fib(n))?;
+            m.set_global("fib", decorator.call1((function,))?)?;
+        }
         rt::def!(m, replace(r#fn))?;
         frame.line(66);
-        let decorator6 = m.global("replace")?;
-        let function5 = rt::function!(m, gone())?;
-        m.set_global("gone", decorator6.call1((&function5,))?)?;
+        {
+            let decorator = m.global("replace")?;
+            let function = rt::function!(m, gone())?;
+            m.set_global("gone", decorator.call1((function,))?)?;
+        }
         frame.line(70);
         rt::builtins::print(py, (m.global("greet")?.call1(("world",))?,))?;
         frame.line(71);

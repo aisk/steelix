@@ -57,7 +57,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         frame.line(19);
         let plain2 = m.global("plain")?;
-        m.global("me")?.setattr("other", &plain2)?;
+        m.global("me")?.setattr("other", plain2)?;
         frame.line(20);
         m.global("print")?
             .call1((m.global("other")?.call1((1,))?,))?;

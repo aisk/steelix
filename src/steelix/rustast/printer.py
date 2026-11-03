@@ -101,6 +101,9 @@ def print_stmt(stmt: rs.Stmt, level: int) -> str:
         case rs.ExprStmt(rs.Match() as match):
             # A `match` statement needs no semicolon.
             return print_expr(match, level)
+        case rs.ExprStmt(rs.BlockExpr(block)):
+            # A block of its own, for the lifetime of its temporaries.
+            return print_block(block, level)
         case rs.ExprStmt(expr):
             return f"{print_expr(expr, level)};"
         case rs.Return(value):

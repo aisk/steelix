@@ -40,8 +40,6 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
             1,
             5,
         ),
-        ("x = [*a]\n", "unpacking in a display", 1, 6),
-        ("x = {**a}\n", "unpacking in a display", 1, 8),
         ("x: int = 1\n", "annotated assignment at module level", 1, 1),
         ("def f(a):\n    a.b: int\n", "annotated assignment", 2, 5),
         ("from . import x\n", "relative import", 1, 1),
@@ -58,7 +56,7 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
         ),
         ("try:\n    pass\nexcept* E:\n    pass\n", "try/except*", 1, 1),
         (
-            "def f():\n    try:\n        pass\n    except E as e:\n        pass\n    return e\n",
+            "def f():\n    try:\n        g()\n    except E as e:\n        pass\n    return e\n",
             "except-as name used outside its handler",
             4,
             5,
@@ -147,7 +145,8 @@ def test_value_is_evaluated_before_the_assignment_target() -> None:
         """
     )
     assert "let value = g.call0()?;" in out
-    assert "g.call0()?.set_item(h.call0()?, &value)?;" in out
+    # Moved into its last use, which drops it with the statement.
+    assert "g.call0()?.set_item(h.call0()?, value)?;" in out
 
 
 def test_in_evaluates_the_item_first() -> None:
@@ -329,7 +328,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
             # inside the class
             pass
         ys = 2j  # squares
-        zs = [*ys]
+        zs = t"{ys}"
         def gen():
             yield 1
         print(x)
@@ -340,23 +339,21 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
     assert comments in out
     assert "// inside the class" not in out
     assert '"\nclass A[T]:\n    # inside the class\n    pass\n"' in out
-    simple = "ys = 2j  # squares\nzs = [*ys]\n"
+    simple = 'ys = 2j  # squares\nzs = t"{ys}"\n'
     assert f'"\n{simple}"' in out
-    assert (
-        "// m.py:7, kept as Python: complex constant at 7:6, unpacking in a display at 8:7\n" in out
-    )
+    assert "// m.py:7, kept as Python: complex constant at 7:6, t-string at 8:6\n" in out
     assert "// m.py:9, kept as Python: yield at 10:5\n" in out
 
 
 def test_python_statement_after_semicolon() -> None:
-    out = lower("x = 1; y = [*'ab']; print(y)\n")
+    out = lower("x = 1; y = t'ab'; print(y)\n")
     assert 'm.set_global("x", 1)?;' in out
-    assert "line = 1,\n            r#\"\ny = [*'ab']\n\"#" in out
+    assert "line = 1,\n            r#\"\ny = t'ab'\n\"#" in out
     assert 'rt::builtins::print(m.py(), (m.global("y")?,))?;' in out
 
 
 def test_raw_string_delimiter_avoids_the_source() -> None:
-    out = lower("""x = [*('"#', '"##')]\n""")
+    out = lower("""x = (1j, '"#', '"##')\n""")
     assert 'r###"\n' in out
 
 
@@ -400,7 +397,7 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
             def f():
                 yield x
         else:
-            ys = [*range(3)]
+            ys = [1j]
             print(ys)
         """
     )
@@ -409,13 +406,13 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
     assert 'rt::builtins::print(m.py(), (m.global("ys")?,))?;' in out
     # Indented as in the file.
     assert 'r#"\n    def f():\n        yield x\n"#' in out
-    assert 'r#"\n    ys = [*range(3)]\n"#' in out
+    assert 'r#"\n    ys = [1j]\n"#' in out
 
 
 def test_unsupported_header_keeps_the_whole_statement() -> None:
     assert kept_lines(
         """
-        if [*range(3)]:
+        if 1j:
             print(1)
         for x in (i for i in range(3) for j in ()):
             print(x)
@@ -440,7 +437,7 @@ def test_loop_with_jump_in_kept_statement_is_kept_whole() -> None:
         """
         for i in range(3):
             if i:
-                ys = [*range(i)]
+                ys = [i * 1j]
                 break
             for j in range(i):
                 match j:

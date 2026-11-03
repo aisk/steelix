@@ -81,33 +81,47 @@ pub mod vector {
                 )?,
             )?;
             frame.line(40);
-            let decorator = ns.get("property")?;
-            let function = rt::function!(ns, length(slf as "self"), qualname = "Vector.length")?;
-            ns.set("length", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("property")?;
+                let function =
+                    rt::function!(ns, length(slf as "self"), qualname = "Vector.length")?;
+                ns.set("length", decorator.call1((function,))?)?;
+            }
             frame.line(44);
-            let decorator2 = ns.get("property")?;
-            let function2 = rt::function!(ns, label(slf as "self"), qualname = "Vector.label")?;
-            ns.set("label", decorator2.call1((&function2,))?)?;
+            {
+                let decorator = ns.get("property")?;
+                let function = rt::function!(ns, label(slf as "self"), qualname = "Vector.label")?;
+                ns.set("label", decorator.call1((function,))?)?;
+            }
             frame.line(48);
-            let decorator3 = ns.get("label")?.getattr("setter")?;
-            let function3 = rt::function!(
-                ns,
-                label_(slf as "self", value),
-                qualname = "Vector.label"
-            )?;
-            ns.set("label", decorator3.call1((&function3,))?)?;
+            {
+                let decorator = ns.get("label")?.getattr("setter")?;
+                let function = rt::function!(
+                    ns,
+                    label_(slf as "self", value),
+                    qualname = "Vector.label"
+                )?;
+                ns.set("label", decorator.call1((function,))?)?;
+            }
             frame.line(53);
-            let decorator4 = ns.get("label")?.getattr("deleter")?;
-            let function4 = rt::function!(ns, label__(slf as "self"), qualname = "Vector.label")?;
-            ns.set("label", decorator4.call1((&function4,))?)?;
+            {
+                let decorator = ns.get("label")?.getattr("deleter")?;
+                let function =
+                    rt::function!(ns, label__(slf as "self"), qualname = "Vector.label")?;
+                ns.set("label", decorator.call1((function,))?)?;
+            }
             frame.line(58);
-            let decorator5 = ns.get("classmethod")?;
-            let function5 = rt::function!(ns, zero(cls), qualname = "Vector.zero")?;
-            ns.set("zero", decorator5.call1((&function5,))?)?;
+            {
+                let decorator = ns.get("classmethod")?;
+                let function = rt::function!(ns, zero(cls), qualname = "Vector.zero")?;
+                ns.set("zero", decorator.call1((function,))?)?;
+            }
             frame.line(62);
-            let decorator6 = ns.get("staticmethod")?;
-            let function6 = rt::function!(ns, dot(a, b), qualname = "Vector.dot")?;
-            ns.set("dot", decorator6.call1((&function6,))?)?;
+            {
+                let decorator = ns.get("staticmethod")?;
+                let function = rt::function!(ns, dot(a, b), qualname = "Vector.dot")?;
+                ns.set("dot", decorator.call1((function,))?)?;
+            }
             frame.line(65);
             ns.set(
                 "__len__",
@@ -157,8 +171,10 @@ pub mod vector {
             frame.line(14);
             slf.setattr("y", y)?;
             frame.line(15);
-            let Vector = m.global("Vector")?;
-            Vector.setattr("instances", rt::iadd(&Vector.getattr("instances")?, 1)?)?;
+            {
+                let Vector = m.global("Vector")?;
+                Vector.setattr("instances", rt::iadd(&Vector.getattr("instances")?, 1)?)?;
+            }
             Ok(rt::none(m.py()))
         })
     }

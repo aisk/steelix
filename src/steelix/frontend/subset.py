@@ -326,16 +326,10 @@ class SubsetChecker:
                 self.check_index(index)
             case ast.List(elts) | ast.Tuple(elts) | ast.Set(elts):
                 for elt in elts:
-                    if isinstance(elt, ast.Starred):
-                        self.fail("unpacking in a display", elt)
-                        self.check_expr(elt.value)
-                    else:
-                        self.check_expr(elt)
+                    self.check_expr(elt.value if isinstance(elt, ast.Starred) else elt)
             case ast.Dict(keys, values):
                 for key, value in zip(keys, values, strict=True):
-                    if key is None:
-                        self.fail("unpacking in a display", value)
-                    else:
+                    if key is not None:
                         self.check_expr(key)
                     self.check_expr(value)
             case ast.JoinedStr(values):

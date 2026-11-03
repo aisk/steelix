@@ -57,7 +57,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             list.append(repeat(m, &rt::str(py, "x"), &n)?)?;
             py.check_signals()?;
         }
-        rt::builtins::print(py, (&list,))?;
+        rt::builtins::print(py, (list,))?;
         Ok(())
     })
 }

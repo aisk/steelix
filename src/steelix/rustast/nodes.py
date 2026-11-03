@@ -93,6 +93,9 @@ class Ref(Expr):
 
     expr: Expr
     mutable: bool = False
+    into: bool = False
+    """An `impl IntoPyObject` argument, which could take `expr` itself
+    instead (`lower.temps` moves temporaries this way)."""
 
 
 @dataclass(frozen=True)

@@ -340,16 +340,15 @@ def _scope_children(node: ast.AST) -> list[ast.AST]:
 
 
 def _bound_names(node: ast.AST) -> list[str]:
-    """Names bound directly by `node` (not by its children)."""
+    """Names bound (or unbound) directly by `node`, not by its children. The
+    one definition of a binding that the other helpers build on."""
     match node:
         case ast.Name(id, ast.Store() | ast.Del()):
             return [id]
         case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef():
             return [binding_name(node)]
         case ast.Import(names) | ast.ImportFrom(names=names):
-            return [
-                alias.asname or alias.name.split(".")[0] for alias in names if alias.name != "*"
-            ]
+            return [_import_name(alias) for alias in names if alias.name != "*"]
         case ast.ExceptHandler(name=str(name)):
             return [name]
         case ast.MatchAs(name=str(name)) | ast.MatchStar(name=str(name)):
@@ -376,9 +375,9 @@ class LocalsInfo:
     """Locals read (or deleted) where they might be unassigned: `Option<Bound>`."""
     mutable: set[str] = field(default_factory=set)
     """Locals (and parameters) assigned while possibly already assigned."""
-    declared_at: dict[str, ast.stmt] = field(default_factory=dict)
-    """Locals declared with `let` at their first assignment (or import) instead
-    of at the top."""
+    declared_at: dict[str, ast.stmt | ast.NamedExpr] = field(default_factory=dict)
+    """Locals declared with `let` at their first assignment (or import, or
+    `:=` that always runs) instead of at the top."""
     loop_scoped: dict[str, ast.For] = field(default_factory=dict)
     """Loop variables only bound by one `for` and only read inside its body, which
     are declared with `let` at the start of each iteration."""
@@ -406,6 +405,9 @@ class LocalsInfo:
     """Region scoped locals declared at the start of the region's closure."""
     with_params: set[str] = field(default_factory=set)
     """`with .. as name` names bound by the parameter of the `with` closure."""
+    infallible_tries: set[ast.Try] = field(default_factory=set)
+    """`try` statements whose body can not raise (`try: x = 1`): their
+    handlers never run, and their statements are unreachable."""
 
 
 @dataclass(frozen=True)
@@ -457,6 +459,8 @@ class _DefiniteAssignment:
         self.region_entry: dict[Region, _Flow] = {}
         self.candidates: dict[Region, set[str]] = {}
         """Locals whose every occurrence is in the region (innermost)."""
+        self.tries: dict[ast.Try, bool] = {}
+        """Whether the body of each `try` may raise, on some path analysed."""
 
     def run(self, body: list[ast.stmt]) -> LocalsInfo:
         params = frozenset(self.scope.params)
@@ -470,6 +474,7 @@ class _DefiniteAssignment:
         self._region_candidates(body)
         end = self.block(body, _Flow(params, params))
         self.info.end_reachable = end is not None
+        self._infallible_tries()
         self._loop_scoped(body)
         self._regions(body)
         self._declarations(body)
@@ -581,7 +586,10 @@ class _DefiniteAssignment:
         else:
             raised = body_entry
         ends: list[State] = []
-        for handler in stmt.handlers:
+        raises = not self._cannot_raise(stmt.body, body_entry)
+        if self.recording:
+            self.tries[stmt] = self.tries.get(stmt, False) or raises
+        for handler in stmt.handlers if raises else ():
             state = raised
             if handler.type is not None:
                 state = self.expr(handler.type, state)
@@ -603,6 +611,45 @@ class _DefiniteAssignment:
         if normal is None:
             return None
         return self.silently(lambda: self.block(stmt.finalbody, normal))
+
+    def _cannot_raise(self, body: list[ast.stmt], state: _Flow) -> bool:
+        """Whether running `body` in `state` can not raise: `pass`, or one
+        statement storing a constant, an assigned local or a tuple of those
+        in a local (`x = 1`, `y = a, b`), or returning or evaluating it."""
+        if all(isinstance(stmt, ast.Pass) for stmt in body):
+            return True
+        if len(body) != 1:
+            return False
+        match body[0]:
+            case ast.Expr(value) | ast.Return(ast.expr() as value):
+                return self._cannot_fail(value, state)
+            case ast.Assign([ast.Name(name)], value):
+                return self._plain_local(name) and self._cannot_fail(value, state)
+        return False
+
+    def _cannot_fail(self, expr: ast.expr, state: _Flow) -> bool:
+        match expr:
+            case ast.Constant():
+                return True
+            case ast.Name(name, ast.Load()):
+                return self._plain_local(name) and name in state.definite
+            case ast.Tuple(elts, ast.Load()):
+                return all(self._cannot_fail(elt, state) for elt in elts)
+        return False
+
+    def _plain_local(self, name: str) -> bool:
+        """A local that is a plain Rust variable, not a cell."""
+        return self.scope.is_local(name) and name not in self.scope.cells
+
+    def _infallible_tries(self) -> None:
+        """Record the `try` statements whose body never raised on any path
+        analysed, and make their handlers unreachable."""
+        for stmt, raises in self.tries.items():
+            if raises:
+                continue
+            self.info.infallible_tries.add(stmt)
+            for handler in stmt.handlers:
+                self.info.unreachable.update(handler.body)
 
     def with_(self, stmt: ast.With, state: _Flow) -> State:
         entry = state
@@ -816,39 +863,18 @@ class _DefiniteAssignment:
     def _occurrences(self, stmt: ast.stmt) -> list[str]:
         """Names of this scope in `stmt`, in source order. A nested function
         counts as an occurrence of the variables it captures."""
-        found: list[tuple[int, int, str]] = []
-        for node in walk_scope(stmt):
-            match node:
-                case ast.Name(name):
-                    found.append((node.lineno, node.col_offset, name))
-                case ast.FunctionDef() | ast.Lambda() | ast.GeneratorExp():
-                    position = (node.lineno, node.col_offset)
-                    if isinstance(node, ast.FunctionDef):
-                        found.append((*position, node.name))
-                    found += [(*position, name) for name in self._nested_frees(node)]
-                case ast.Import(names) | ast.ImportFrom(names=names):
-                    position = (node.lineno, node.col_offset)
-                    found += [(*position, _import_name(alias)) for alias in names]
-                case ast.ExceptHandler(name=str(name)):
-                    found.append((node.lineno, node.col_offset, name))
-        found.sort(key=lambda item: item[:2])
+        found = [
+            (node.lineno, node.col_offset, name)
+            for node in walk_scope(stmt)
+            for name in _names_bound_or_used(node, self._nested_frees)
+        ]
+        found.sort(key=lambda item: item[:2])  # stable: a def's name before its frees
         return [name for _, _, name in found]
 
     def _binding_counts(self, body: list[ast.stmt]) -> Counter[str]:
-        bindings: Counter[str] = Counter()
-        for stmt in body:
-            for node in walk_scope(stmt):
-                match node:
-                    case ast.Name(name, ast.Store() | ast.Del()):
-                        bindings[name] += 1
-                    case ast.FunctionDef(name):
-                        bindings[name] += 1
-                    case ast.Import(names) | ast.ImportFrom(names=names):
-                        for alias in names:
-                            bindings[_import_name(alias)] += 1
-                    case ast.ExceptHandler(name=str(name)):
-                        bindings[name] += 1
-        return bindings
+        return Counter(
+            name for stmt in body for node in walk_scope(stmt) for name in _bound_names(node)
+        )
 
     def _local_names(self, target: ast.expr) -> list[str]:
         return [
@@ -902,12 +928,11 @@ class _DefiniteAssignment:
             seen.update(first)
             info.order += first
             first = [name for name in first if name not in elsewhere]
-            declared = self._declarable(stmt, first)
-            for name in first:
-                if name in declared:
-                    info.declared_at[name] = stmt
-                else:
+            for name, node in self._declaring(stmt, first).items():
+                if node is None:
                     info.declared_at_top.append(name)
+                else:
+                    info.declared_at[name] = node
         # Locals that live in a closure region are declared there, the same way.
         by_region: dict[Region, set[str]] = {}
         for name, region in info.scoped.items():
@@ -927,12 +952,11 @@ class _DefiniteAssignment:
                     if name in names and name not in seen
                 ]
                 seen.update(first)
-                declared = self._declarable(stmt, first)
-                for name in first:
-                    if name in declared:
-                        info.declared_at[name] = stmt
-                    else:
+                for name, node in self._declaring(stmt, first).items():
+                    if node is None:
                         top.append(name)
+                    else:
+                        info.declared_at[name] = node
             top.sort(key=info.order.index)
 
     def _handler_scoped(self, body: list[ast.stmt]) -> set[str]:
@@ -965,7 +989,7 @@ class _DefiniteAssignment:
                     if node in bound:
                         continue
                     if name in _names_bound_or_used(node, self._nested_frees) and (
-                        id(node) not in inside or _binds(node, name)
+                        id(node) not in inside or name in _bound_names(node)
                     ):
                         ok = False
             if ok:
@@ -1006,7 +1030,7 @@ class _DefiniteAssignment:
         self._with_params(body)
         for region, entry in self.region_entry.items():
             inner = region_node_ids(region)
-            for name in _assigned_names(region.nodes()):
+            for name in _assigned_names(region.nodes(), skip=info.unreachable):
                 if not self.scope.is_local(name) or name in self.scope.cells:
                     continue
                 if name in info.handler_scoped or name in info.loop_scoped:
@@ -1053,6 +1077,67 @@ class _DefiniteAssignment:
                 continue  # a `with` binding it inside another
             info.with_params.add(name)
 
+    def _declaring(
+        self, stmt: ast.stmt, first: list[str]
+    ) -> dict[str, ast.stmt | ast.NamedExpr | None]:
+        """Where each of the locals `first` seen in the top-level statement
+        `stmt` is declared with `let`: at `stmt`, at a `:=` in it, or at the
+        top (`None`)."""
+        if (
+            isinstance(stmt, ast.Try)
+            and stmt in self.info.infallible_tries
+            and not stmt.finalbody
+            and len(stmt.body) == 1
+        ):
+            # Its body runs in place, as if the `try` was not there.
+            inner = self._declaring(stmt.body[0], first)
+            return {name: inner.get(name) for name in first}
+        declared = self._declarable(stmt, first)
+        walrus: dict[str, ast.NamedExpr] = {}
+        if stmt not in self.info.unreachable:
+            for node in _unconditional_walrus(_header_expr(stmt)):
+                name = node.target.id  # type: ignore[union-attr]
+                if (
+                    name in first
+                    and name not in declared
+                    and name not in walrus
+                    and name not in self.info.optional
+                    and name not in self.scope.cells
+                ):
+                    walrus[name] = node
+        return {name: stmt if name in declared else walrus.get(name) for name in first}
+
+    def _try_assigned(self, stmt: ast.Try) -> str | None:
+        """`x` for a `try` that assigns it a value on every way out, which
+        is then `let x = match .. { Ok(value) => value, .. }`: the body is
+        `x = expr`, and each handler ends assigning `x` (only there) or
+        leaves (`raise`, `return`, `break`, `continue`)."""
+        if stmt.finalbody or stmt.orelse or expression_body(stmt) is None:
+            return None
+        match stmt.body[0]:
+            case ast.Assign([ast.Name(name)]) if self._plain_local(name):
+                pass
+            case _:
+                return None
+        for handler in stmt.handlers:
+            body = [s for s in handler.body if s not in self.info.unreachable]
+            if not body or handler.name == name:
+                return None
+            match body[-1]:
+                case ast.Assign([ast.Name(target)]) if target == name:
+                    rest = [*body[:-1], body[-1].value]
+                case ast.Raise() | ast.Return() | ast.Break() | ast.Continue():
+                    rest = body
+                case _:
+                    return None
+            if name in _assigned_names(rest) or any(
+                isinstance(node, ast.Name) and node.id == name
+                for part in rest
+                for node in walk_scope(part)
+            ):
+                return None
+        return name
+
     def _declarable(self, stmt: ast.stmt, first: list[str]) -> set[str]:
         """Names a reachable top-level assignment can declare with `let`."""
         if stmt in self.info.unreachable:
@@ -1063,6 +1148,11 @@ class _DefiniteAssignment:
             read.update(self._nested_frees(stmt))
             name = stmt.name
             if name in first and name not in read and name not in self.info.optional:
+                return {name}
+            return set()
+        if isinstance(stmt, ast.Try):
+            name = self._try_assigned(stmt)
+            if name is not None and name in first and name not in self.info.optional:
                 return {name}
             return set()
         if isinstance(stmt, ast.Import | ast.ImportFrom):
@@ -1128,21 +1218,12 @@ def _after_exception(state: _Flow, nodes: list[ast.AST]) -> _Flow:
     return _Flow(state.definite - _deleted_names(nodes), state.maybe | _assigned_names(nodes))
 
 
-def _assigned_names(nodes: list[ast.AST]) -> set[str]:
-    """Names bound (or unbound) by `nodes`, not counting nested functions."""
-    names = set()
-    for part in nodes:
-        for node in walk_scope(part):
-            match node:
-                case ast.Name(id, ast.Store() | ast.Del()):
-                    names.add(id)
-                case ast.FunctionDef() | ast.ClassDef():
-                    names.add(binding_name(node))
-                case ast.ExceptHandler(name=str(name)):
-                    names.add(name)
-                case ast.Import(aliases) | ast.ImportFrom(names=aliases):
-                    names.update(_import_name(alias) for alias in aliases)
-    return names
+def _assigned_names(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> set[str]:
+    """Names bound (or unbound) by `nodes`, not counting nested functions or
+    the nodes in `skip`."""
+    return {
+        name for part in nodes for node in walk_scope(part, skip) for name in _bound_names(node)
+    }
 
 
 def _deleted_names(nodes: list[ast.AST]) -> set[str]:
@@ -1159,30 +1240,60 @@ def _deleted_names(nodes: list[ast.AST]) -> set[str]:
 
 
 def _names_bound_or_used(node: ast.AST, frees) -> list[str]:  # type: ignore[no-untyped-def]
-    """The names `node` itself reads, binds or captures (not its children)."""
+    """The names `node` itself reads, binds or captures (not its children):
+    `frees(node)` are the variables a nested function captures."""
     match node:
         case ast.Name(id):
             return [id]
-        case ast.FunctionDef(name):
-            return [name, *frees(node)]
-        case ast.Lambda() | ast.GeneratorExp():
-            return list(frees(node))
-        case ast.Import(aliases) | ast.ImportFrom(names=aliases):
-            return [_import_name(alias) for alias in aliases]
-        case ast.ExceptHandler(name=str(name)):
-            return [name]
-    return []
+        case ast.FunctionDef() | ast.Lambda() | ast.GeneratorExp():
+            return [*_bound_names(node), *frees(node)]
+    return _bound_names(node)
 
 
-def _binds(node: ast.AST, name: str) -> bool:
-    match node:
-        case ast.Name(id, ast.Store() | ast.Del()):
-            return id == name
-        case ast.FunctionDef(defined) | ast.ExceptHandler(name=str(defined)):
-            return defined == name
-        case ast.Import(aliases) | ast.ImportFrom(names=aliases):
-            return any(_import_name(alias) == name for alias in aliases)
-    return False
+def _header_expr(stmt: ast.stmt) -> ast.expr | None:
+    """The expression a statement evaluates first, whose prelude runs right
+    before the statement (not in a block or loop of its own)."""
+    match stmt:
+        case ast.Expr(value) | ast.Assign(value=value):
+            return value
+        case ast.If(test):
+            return test
+        case ast.For(iter=iter_):
+            return iter_
+    return None
+
+
+def _unconditional_walrus(expr: ast.expr | None) -> list[ast.NamedExpr]:
+    """The `:=` in `expr` that run whenever `expr` is evaluated, in order,
+    leaving out those in parts with statements of their own: the right
+    side of `and`/`or`, the branches of a conditional expression, the later
+    comparisons of a chain, comprehensions, lambdas and displays with `*`."""
+    match expr:
+        case None | ast.Lambda() | ast.GeneratorExp():
+            return []
+        case ast.ListComp() | ast.SetComp() | ast.DictComp():
+            return []
+        case ast.NamedExpr(ast.Name(), value):
+            return [*_unconditional_walrus(value), expr]
+        case ast.BoolOp(_, [first, *_]):
+            return _unconditional_walrus(first)
+        case ast.IfExp(test):
+            return _unconditional_walrus(test)
+        case ast.Compare(left, _, [first, *_]):
+            return _unconditional_walrus(left) + _unconditional_walrus(first)
+        case ast.List(elts) | ast.Tuple(elts) | ast.Set(elts) if any(
+            isinstance(elt, ast.Starred) for elt in elts
+        ):
+            return []
+        case ast.Dict(keys) if None in keys:
+            return []
+    found = []
+    for child in ast.iter_child_nodes(expr):
+        if isinstance(child, ast.expr):
+            found += _unconditional_walrus(child)
+        elif isinstance(child, ast.keyword):
+            found += _unconditional_walrus(child.value)
+    return found
 
 
 def _within(inner: Region, outer: Region, outer_ids: set[int]) -> bool:

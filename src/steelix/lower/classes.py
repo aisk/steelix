@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from steelix.frontend.bindings import analyze_class_flow
 from steelix.frontend.desugar import binding_name
-from steelix.frontend.fallback import first_line, python_runs
+from steelix.frontend.fallback import first_line
 from steelix.frontend.scope import ClassScope
 from steelix.lower.context import NAMESPACE, ClassBody, Context, ModuleContext
 from steelix.lower.docstrings import docstring
@@ -197,11 +197,7 @@ def lower_class_mod(module: ModuleContext, scope: ClassScope, name: str) -> rs.M
         set_doc = rs.MethodCall(rs.Path(NAMESPACE), "set", (rs.StrLit("__doc__"), rs.StrLit(doc)))
         body += lowering.at_line(node.body[0].lineno)
         body.append(rs.ExprStmt(rs.Try(set_doc)))
-    for run in python_runs(lowering.reachable(node.body), plan):
-        if isinstance(run, list):
-            body += lowering.exec_python(run)
-        else:
-            body += lowering.stmt(run)
+    body += lowering.block(node.body).stmts
     ok = rs.Call(rs.Path("Ok"), (rs.Tuple(()),))
     block = rs.Block(tuple(body), ok if flow.end_reachable else None)
     framed = in_frame(NAMESPACE, scope.qualname, line, block)

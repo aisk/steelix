@@ -45,7 +45,7 @@ pub fn star_args<'py>(
         return Err(crate::raised(PyTypeError::new_err(format!(
             "{} argument after * must be an iterable, not {}",
             function_str(function)?,
-            value.get_type().name()?
+            crate::type_name(value)
         ))));
     }
     // SAFETY: valid object pointer; returns a new `tuple` reference or NULL.
@@ -62,7 +62,7 @@ pub fn extend_args(args: &Bound<'_, PyList>, value: &Bound<'_, PyAny>) -> PyResu
         Err(err) if err.is_instance_of::<PyTypeError>(value.py()) && !is_iterable(value) => {
             Err(crate::raised(PyTypeError::new_err(format!(
                 "Value after * must be an iterable, not {}",
-                value.get_type().name()?
+                crate::type_name(value)
             ))))
         }
         Err(err) => Err(err),
@@ -85,7 +85,7 @@ pub fn merge_kwargs<'py>(
                 return Err(crate::raised(PyTypeError::new_err(format!(
                     "{} argument after ** must be a mapping, not {}",
                     function_str(function)?,
-                    value.get_type().name()?
+                    crate::type_name(value)
                 ))));
             }
         }

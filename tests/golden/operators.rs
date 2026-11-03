@@ -154,36 +154,38 @@ pub fn values<'py>(
             ),
         )?;
         frame.line(40);
-        let result = rt::int(py, 1).rich_compare(a, CompareOp::Lt)?;
-        let value = if result.is_truthy()? {
-            a.rich_compare(5, CompareOp::Lt)?
-        } else {
-            result
-        };
-        let result2 = rt::int(py, 1).rich_compare(a, CompareOp::Lt)?;
-        let value2 = if result2.is_truthy()? {
-            let result3 = a.rich_compare(b, CompareOp::Lt)?;
-            if result3.is_truthy()? {
-                b.rich_compare(10, CompareOp::Lt)?
+        {
+            let result = rt::int(py, 1).rich_compare(a, CompareOp::Lt)?;
+            let value = if result.is_truthy()? {
+                a.rich_compare(5, CompareOp::Lt)?
             } else {
-                result3
-            }
-        } else {
-            result2
-        };
-        let result4 = a.rich_compare(b, CompareOp::Eq)?;
-        rt::builtins::print(
-            py,
-            (
-                &value,
-                &value2,
-                if result4.is_truthy()? {
-                    b.rich_compare(3, CompareOp::Eq)?
+                result
+            };
+            let result2 = rt::int(py, 1).rich_compare(a, CompareOp::Lt)?;
+            let value2 = if result2.is_truthy()? {
+                let result3 = a.rich_compare(b, CompareOp::Lt)?;
+                if result3.is_truthy()? {
+                    b.rich_compare(10, CompareOp::Lt)?
                 } else {
-                    result4
-                },
-            ),
-        )?;
+                    result3
+                }
+            } else {
+                result2
+            };
+            let result4 = a.rich_compare(b, CompareOp::Eq)?;
+            rt::builtins::print(
+                py,
+                (
+                    value,
+                    value2,
+                    if result4.is_truthy()? {
+                        b.rich_compare(3, CompareOp::Eq)?
+                    } else {
+                        result4
+                    },
+                ),
+            )?;
+        }
         frame.line(41);
         if rt::int(py, 0).le(a)? && a.lt(10)? {
             frame.line(42);
@@ -258,25 +260,27 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         frame.line(59);
         m.set_global("nothing", py.None())?;
         frame.line(60);
-        let nothing = m.global("nothing")?;
-        let value = if nothing.is_truthy()? {
-            nothing
-        } else {
-            rt::str(py, "default")
-        };
-        let nothing2 = m.global("nothing")?;
-        rt::builtins::print(
-            py,
-            (
-                &value,
-                if nothing2.is_truthy()? {
-                    rt::int(py, 1)
-                } else {
-                    nothing2
-                },
-                "last",
-            ),
-        )?;
+        {
+            let nothing = m.global("nothing")?;
+            let value = if nothing.is_truthy()? {
+                nothing
+            } else {
+                rt::str(py, "default")
+            };
+            let nothing2 = m.global("nothing")?;
+            rt::builtins::print(
+                py,
+                (
+                    value,
+                    if nothing2.is_truthy()? {
+                        rt::int(py, 1)
+                    } else {
+                        nothing2
+                    },
+                    "last",
+                ),
+            )?;
+        }
         frame.line(61);
         rt::builtins::print(
             py,

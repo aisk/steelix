@@ -188,13 +188,15 @@ pub mod meta {
         rt::frame!(ns, "Meta", 43, |frame| {
             let __class__ = ns.class_cell();
             frame.line(45);
-            let decorator = ns.get("classmethod")?;
-            let function = rt::function!(
-                ns,
-                __prepare__(mcls, name, bases, **kwargs),
-                qualname = "Meta.__prepare__"
-            )?;
-            ns.set("__prepare__", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("classmethod")?;
+                let function = rt::function!(
+                    ns,
+                    __prepare__(mcls, name, bases, **kwargs),
+                    qualname = "Meta.__prepare__"
+                )?;
+                ns.set("__prepare__", decorator.call1((function,))?)?;
+            }
             frame.line(49);
             ns.set(
                 "__new__",
@@ -234,7 +236,7 @@ pub mod meta {
                 list.append(b.getattr("__name__")?)?;
                 py.check_signals()?;
             }
-            rt::builtins::print(py, ("prepare", name, &list, kwargs))?;
+            rt::builtins::print(py, ("prepare", name, list, kwargs))?;
             frame.line(47);
             m.global("Logged")?.call0()
         })
@@ -766,13 +768,15 @@ pub mod bad_prepare {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "BadPrepare", 224, |frame| {
             frame.line(226);
-            let decorator = ns.get("classmethod")?;
-            let function = rt::function!(
-                ns,
-                __prepare__(mcls, name, bases),
-                qualname = "BadPrepare.__prepare__"
-            )?;
-            ns.set("__prepare__", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("classmethod")?;
+                let function = rt::function!(
+                    ns,
+                    __prepare__(mcls, name, bases),
+                    qualname = "BadPrepare.__prepare__"
+                )?;
+                ns.set("__prepare__", decorator.call1((function,))?)?;
+            }
             Ok(())
         })
     }
@@ -1105,25 +1109,27 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, deco(label))?;
         frame.line(21);
         m.set_global("Base", rt::class!(m, "Base"(), base::body, line = 21)?)?;
-        frame.line(25);
-        let decorator = deco(m, &rt::str(py, "outer"))?;
-        frame.line(26);
-        let decorator2 = deco(m, &rt::str(py, "inner"))?;
-        frame.line(27);
-        let ordered = rt::class!(
-            m,
-            "Ordered"(
-                trace(m, &rt::str(py, "base"), &m.global("Base")?)?,
-                metaclass = trace(m, &rt::str(py, "meta"), &rt::builtin(py, "type")?)?
-            ),
-            ordered::body,
-            line = 25
-        )?;
-        frame.line(26);
-        let ordered = decorator2.call1((ordered,))?;
-        frame.line(25);
-        let ordered = decorator.call1((ordered,))?;
-        m.set_global("Ordered", ordered)?;
+        {
+            frame.line(25);
+            let decorator = deco(m, &rt::str(py, "outer"))?;
+            frame.line(26);
+            let decorator2 = deco(m, &rt::str(py, "inner"))?;
+            frame.line(27);
+            let ordered = rt::class!(
+                m,
+                "Ordered"(
+                    trace(m, &rt::str(py, "base"), &m.global("Base")?)?,
+                    metaclass = trace(m, &rt::str(py, "meta"), &rt::builtin(py, "type")?)?
+                ),
+                ordered::body,
+                line = 25
+            )?;
+            frame.line(26);
+            let ordered = decorator2.call1((ordered,))?;
+            frame.line(25);
+            let ordered = decorator.call1((ordered,))?;
+            m.set_global("Ordered", ordered)?;
+        }
         frame.line(34);
         rt::builtins::print(
             py,
@@ -1547,13 +1553,15 @@ def replaced(cls):
     return Replacement
 "#
         )?;
-        frame.line(318);
-        let replaced = m.global("replaced")?;
-        frame.line(319);
-        let original = rt::class!(m, "Original"(), original::body, line = 318)?;
-        frame.line(318);
-        let original = replaced.call1((original,))?;
-        m.set_global("Original", original)?;
+        {
+            frame.line(318);
+            let replaced = m.global("replaced")?;
+            frame.line(319);
+            let original = rt::class!(m, "Original"(), original::body, line = 318)?;
+            frame.line(318);
+            let original = replaced.call1((original,))?;
+            m.set_global("Original", original)?;
+        }
         frame.line(327);
         rt::builtins::print(
             py,

@@ -45,7 +45,7 @@ def use_counter(start):
 
 
 log("native statement after the class")
-squares = [*map(double, range(4))]
+squares = list(s for s in map(double, range(4)) for _ in "1")
 print(squares, use_counter(3))
 print(Counter.__module__, Counter.bump.__qualname__, evens.__qualname__, evens.__module__)
 print(os.path.basename(evens.__code__.co_filename), evens.__code__.co_firstlineno)

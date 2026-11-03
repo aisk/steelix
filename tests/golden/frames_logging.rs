@@ -113,7 +113,7 @@ def kept_step(n):
         frame.line(31);
         let show_warning2 = m.global("show_warning")?;
         m.global("warnings")?
-            .setattr("showwarning", &show_warning2)?;
+            .setattr("showwarning", show_warning2)?;
         frame.line(32);
         m.global("warnings")?
             .call_method1("simplefilter", ("always",))?;

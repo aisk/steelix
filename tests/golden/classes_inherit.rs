@@ -144,13 +144,18 @@ pub mod color {
                 )?,
             )?;
             frame.line(43);
-            let decorator = ns.get("classmethod")?;
-            let function = rt::function!(ns, default(cls), qualname = "Color.default")?;
-            ns.set("default", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("classmethod")?;
+                let function = rt::function!(ns, default(cls), qualname = "Color.default")?;
+                ns.set("default", decorator.call1((function,))?)?;
+            }
             frame.line(47);
-            let decorator2 = ns.get("property")?;
-            let function2 = rt::function!(ns, is_warm(slf as "self"), qualname = "Color.is_warm")?;
-            ns.set("is_warm", decorator2.call1((&function2,))?)?;
+            {
+                let decorator = ns.get("property")?;
+                let function =
+                    rt::function!(ns, is_warm(slf as "self"), qualname = "Color.is_warm")?;
+                ns.set("is_warm", decorator.call1((function,))?)?;
+            }
             Ok(())
         })
     }
@@ -218,9 +223,12 @@ pub mod planet {
                 )?,
             )?;
             frame.line(64);
-            let decorator = ns.get("property")?;
-            let function = rt::function!(ns, gravity(slf as "self"), qualname = "Planet.gravity")?;
-            ns.set("gravity", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("property")?;
+                let function =
+                    rt::function!(ns, gravity(slf as "self"), qualname = "Planet.gravity")?;
+                ns.set("gravity", decorator.call1((function,))?)?;
+            }
             Ok(())
         })
     }
@@ -366,9 +374,11 @@ pub mod shape {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Shape", 114, |frame| {
             frame.line(116);
-            let decorator = ns.get("abc")?.getattr("abstractmethod")?;
-            let function = rt::function!(ns, area(slf as "self"), qualname = "Shape.area")?;
-            ns.set("area", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("abc")?.getattr("abstractmethod")?;
+                let function = rt::function!(ns, area(slf as "self"), qualname = "Shape.area")?;
+                ns.set("area", decorator.call1((function,))?)?;
+            }
             frame.line(119);
             ns.set(
                 "describe",
@@ -689,7 +699,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             list.append(k.getattr("__name__")?)?;
             py.check_signals()?;
         }
-        rt::builtins::print(py, (&value, &list))?;
+        rt::builtins::print(py, (value, list))?;
         frame.line(31);
         rt::builtins::print(
             py,
@@ -896,13 +906,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "workers",
             if false {
-                let list2 = PyList::empty(py);
+                let list = PyList::empty(py);
                 for n in PyTuple::new(py, [10, 100])?.try_iter()? {
                     let n = n?;
-                    list2.append(m.global("Worker")?.call1((&n,))?)?;
+                    list.append(m.global("Worker")?.call1((&n,))?)?;
                     py.check_signals()?;
                 }
-                list2.into_any()
+                list.into_any()
             } else {
                 PyList::new(
                     py,
@@ -931,19 +941,19 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             frame.line(151);
         }
         frame.line(153);
+        let list2 = PyList::empty(py);
+        for w in m.global("workers")?.try_iter()? {
+            let w = w?;
+            list2.append(w.getattr("result")?)?;
+            py.check_signals()?;
+        }
         let list3 = PyList::empty(py);
         for w in m.global("workers")?.try_iter()? {
             let w = w?;
-            list3.append(w.getattr("result")?)?;
+            list3.append(w.getattr("name")?)?;
             py.check_signals()?;
         }
-        let list4 = PyList::empty(py);
-        for w in m.global("workers")?.try_iter()? {
-            let w = w?;
-            list4.append(w.getattr("name")?)?;
-            py.check_signals()?;
-        }
-        rt::builtins::print(py, (&list3, &list4))?;
+        rt::builtins::print(py, (list2, list3))?;
         frame.line(156);
         m.set_global(
             "Upper",

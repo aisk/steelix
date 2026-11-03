@@ -11,13 +11,14 @@ from dataclasses import dataclass
 
 from steelix.frontend.bindings import is_constant_true
 from steelix.frontend.desugar import annotation_source, binding_name
-from steelix.frontend.fallback import first_line, python_runs, python_source
+from steelix.frontend.fallback import COMPOUND, first_line, loop_jumps, python_runs, python_source
 from steelix.lower.comprehension import line_marker, unpack_pattern
 from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
 from steelix.lower.function import cell_declared_at, lower_nested
 from steelix.lower.handling import HandlingLowering
 from steelix.lower.rustflow import diverges, fallible, statement_line
+from steelix.lower.temps import settle
 from steelix.rustast import nodes as rs
 from steelix.rustast.rewrite import map_exprs
 
@@ -122,7 +123,7 @@ class StmtLowering(HandlingLowering):
 
     def stmt(self, stmt: ast.stmt) -> list[rs.Stmt]:
         markers = self.exprs.markers
-        self.exprs.line = stmt.lineno if isinstance(stmt, _COMPOUND) else statement_line(stmt)
+        self.exprs.line = stmt.lineno if isinstance(stmt, _HEADED) else statement_line(stmt)
         try:
             return self._lower(stmt)
         finally:
@@ -137,23 +138,35 @@ class StmtLowering(HandlingLowering):
         if isinstance(stmt, ast.ClassDef):
             from steelix.lower.classes import lower_class_def
 
-            return comments + lower_class_def(self, stmt)
+            return comments + self.settle(lower_class_def(self, stmt))
         if isinstance(stmt, ast.Break | ast.Continue):
             # Not worth a line of its own: the signal check before the next
             # iteration then reports the line before.
             return comments + self._stmt(stmt)
-        if isinstance(stmt, _COMPOUND):
+        if isinstance(stmt, _HEADED):
             # They mark the line of their header themselves.
             with self.exprs.fresh() as prelude:
                 out = self._stmt(stmt)
-            return comments + self.flush_items() + prelude + out
+            return comments + self.flush_items() + self.settle(prelude + out)
         with self.exprs.fresh() as prelude:
             out = self._stmt(stmt)
         items = self.flush_items()
         rust = prelude + out
         if isinstance(stmt, ast.FunctionDef):
             rust = _without_def_macros(rust)
-        return comments + items + self.mark(statement_line(stmt), rust) + prelude + out
+        marker = self.mark(statement_line(stmt), rust)
+        return comments + items + marker + self.settle(prelude + out)
+
+    def settle(self, stmts: list[rs.Stmt]) -> list[rs.Stmt]:
+        """`stmts` of one statement with no temporary outliving it (`lower.temps`).
+        Its temporaries are gone (or shadowed) afterwards, so later
+        statements may take their names again."""
+        temps = self.ctx.taken_temps()
+        declared = [s.name for s in stmts if isinstance(s, rs.Let) and s.name in temps]
+        settled = settle(stmts, temps - self.ctx.pinned)
+        for name in declared:
+            self.ctx.release(name)
+        return settled
 
     def comments(self, stmt: ast.stmt) -> list[rs.Stmt]:
         if isinstance(stmt, ast.FunctionDef):
@@ -248,7 +261,7 @@ class StmtLowering(HandlingLowering):
                 out = [rs.ExprStmt(self.exprs.function_value(stmt, rust, bind=True).expr)]
         items = self.flush_items()
         line = self.mark(stmt.lineno, _without_def_macros(prelude + out))
-        return items + line + prelude + out
+        return items + line + self.settle(prelude + out)
 
     # --- expressions as statements ---
 
@@ -341,9 +354,10 @@ class StmtLowering(HandlingLowering):
         """The label of the block around a loop with `else`, if `break` needs it."""
         if not self.reachable(stmt.orelse):
             return None
-        for node in _loop_breaks(stmt.body):
-            if node not in self.ctx.flow.unreachable:
-                return self.ctx.label(base)
+        for body_stmt in stmt.body:
+            for node in loop_jumps(body_stmt):
+                if isinstance(node, ast.Break) and node not in self.ctx.flow.unreachable:
+                    return self.ctx.label(base)
         return None
 
     def jump_label(self, loop: _Loop) -> str | None:
@@ -690,6 +704,7 @@ class StmtLowering(HandlingLowering):
         self, stmt: ast.ImportFrom, module: str, names: list[ast.alias]
     ) -> list[rs.Stmt]:
         temp = self.ctx.temp(module.rsplit(".", 1)[-1])
+        self.ctx.pinned.add(temp)  # `sys.modules` keeps the module
         fromlist = rs.Ref(rs.Array(tuple(rs.StrLit(a.name) for a in names)))
         load = _rt("import_names", rs.Path(self.ctx.context()), rs.StrLit(module), fromlist)
         out: list[rs.Stmt] = [rs.Let(temp, init=rs.Try(load))]
@@ -699,7 +714,9 @@ class StmtLowering(HandlingLowering):
         return out
 
 
-_COMPOUND = (ast.If, ast.While, ast.For, ast.Try, ast.With)
+_HEADED = tuple(kind for kind in COMPOUND if kind is not ast.FunctionDef)
+"""Compound statements that mark the line of their header themselves (a
+`def` is marked like a simple statement, a `class` is lowered apart)."""
 
 
 def _without_def_macros(stmts: list[rs.Stmt]) -> list[rs.Stmt]:
@@ -754,23 +771,3 @@ def _target_base(target: ast.expr) -> str:
 
 def _names(target: ast.expr) -> list[str]:
     return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
-
-
-def _loop_breaks(body: list[ast.stmt]):
-    """`break` statements that leave the loop whose body is `body`."""
-    for stmt in body:
-        match stmt:
-            case ast.Break():
-                yield stmt
-            case ast.While() | ast.For():
-                yield from ()  # breaks inside belong to the inner loop
-                for inner in stmt.orelse:
-                    yield from _loop_breaks([inner])
-            case ast.If(_, then, orelse):
-                yield from _loop_breaks(then)
-                yield from _loop_breaks(orelse)
-            case ast.With(body=body):
-                yield from _loop_breaks(body)
-            case ast.Try(body, handlers, orelse, finalbody):
-                for block in (body, *(h.body for h in handlers), orelse, finalbody):
-                    yield from _loop_breaks(block)

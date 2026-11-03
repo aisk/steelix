@@ -13,14 +13,13 @@ use steelix_runtime as rt;
 // try_except.py:13
 pub fn parse<'py>(m: &rt::Module<'py>, s: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "parse", 13, |frame| {
-        let x: Bound<'py, PyAny>;
         frame.line(15);
         let int = m.global("int")?;
-        match int.call1((s,)) {
-            Ok(value) => x = value,
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => x = rt::int(m.py(), 0),
+        let x = match int.call1((s,)) {
+            Ok(value) => value,
+            Err(err) if frame.matches(&err, 16, || m.global("ValueError"))? => rt::int(m.py(), 0),
             Err(err) => return Err(err),
-        }
+        };
         Ok(x)
     })
 }
@@ -35,16 +34,18 @@ pub fn parse_or_none<'py>(
         frame.line(23);
         let int = m.global("int")?;
         match int.call1((s,)) {
-            Ok(value) => return Ok(value),
+            Ok(value) => Ok(value),
             Err(err)
-                if rt::matches(
-                    &err,
-                    PyTuple::new(py, [&m.global("ValueError")?, &m.global("TypeError")?])?.as_any(),
-                )? =>
+                if frame.matches(&err, 24, || {
+                    Ok(
+                        PyTuple::new(py, [&m.global("ValueError")?, &m.global("TypeError")?])?
+                            .into_any(),
+                    )
+                })? =>
             {
-                return Ok(rt::none(py));
+                Ok(rt::none(py))
             }
-            Err(err) => return Err(err),
+            Err(err) => Err(err),
         }
     })
 }
@@ -106,21 +107,22 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
                     result = value;
                     frame.line(56);
                     m.global("print")?.call1(("no error, result", &result))?;
-                    return Ok(rt::str(py, "ok"));
+                    Ok(rt::str(py, "ok"))
                 }
-                Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+                Err(err) if frame.matches(&err, 48, || m.global("KeyError"))? => {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
                     frame.line(49);
                     m.global("print")?.call1(("key error", &e))?;
-                    return Ok(rt::str(py, "key"));
+                    Ok(rt::str(py, "key"))
                 }
                 Err(err)
-                    if rt::matches(
-                        &err,
-                        PyTuple::new(py, [&m.global("ValueError")?, &m.global("AppError")?])?
-                            .as_any(),
-                    )? =>
+                    if frame.matches(&err, 51, || {
+                        Ok(
+                            PyTuple::new(py, [&m.global("ValueError")?, &m.global("AppError")?])?
+                                .into_any(),
+                        )
+                    })? =>
                 {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
@@ -135,15 +137,15 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
                         "sys.exception() is e:",
                         m.global("sys")?.call_method0("exception")?.is(&e),
                     ))?;
-                    return Ok(rt::str(py, "other"));
+                    Ok(rt::str(py, "other"))
                 }
-                Err(err) => return Err(err),
+                Err(err) => Err(err),
             }
         })();
         let finally = frame.finally(result2);
         frame.line(59);
         m.global("print")?.call1(("finally for", kind))?;
-        return finally.resume();
+        finally.resume()
     })
 }
 
@@ -155,7 +157,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             frame.line(65);
             match (|| m.global("risky")?.call1(("value",)))() {
                 Ok(_) => {}
-                Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+                Err(err) if frame.matches(&err, 66, || m.global("ValueError"))? => {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
                     frame.line(67);
@@ -168,7 +170,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("RuntimeError")?)? => {
+            Err(err) if frame.matches(&err, 68, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(69);
@@ -180,7 +182,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             frame.line(72);
             match (|| m.global("risky")?.call1(("key",)))() {
                 Ok(_) => {}
-                Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+                Err(err) if frame.matches(&err, 73, || m.global("KeyError"))? => {
                     let _handling = rt::Handling::new(&frame.catch(err));
                     frame.line(74);
                     return Err(frame.raise(m.global("RuntimeError")?.call1(("implicit",))?));
@@ -190,7 +192,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("RuntimeError")?)? => {
+            Err(err) if frame.matches(&err, 75, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(76);
@@ -202,7 +204,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             frame.line(79);
             match (|| m.global("risky")?.call1(("app",)))() {
                 Ok(_) => {}
-                Err(err) if rt::matches(&err, &m.global("AppError")?)? => {
+                Err(err) if frame.matches(&err, 80, || m.global("AppError"))? => {
                     let _handling = rt::Handling::new(&frame.catch(err));
                     frame.line(81);
                     return Err(
@@ -214,7 +216,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("TypeError")?)? => {
+            Err(err) if frame.matches(&err, 82, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(83);
@@ -233,7 +235,7 @@ pub fn reraise<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(88);
         match (|| m.global("risky")?.call1(("value",)))() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 89, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(90);
@@ -251,7 +253,7 @@ pub fn reraise<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn bare_reraise_helper<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "bare_reraise_helper", 94, |frame| {
         frame.line(95);
-        return Err(frame.reraise());
+        Err(frame.reraise())
     })
 }
 
@@ -261,7 +263,7 @@ pub fn via_helper<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(100);
         match (|| m.global("risky")?.call1(("key",)))() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+            Err(err) if frame.matches(&err, 101, || m.global("KeyError"))? => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 frame.line(102);
                 m.global("bare_reraise_helper")?.call0()?;
@@ -275,12 +277,10 @@ pub fn via_helper<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 // try_except.py:105
 pub fn no_active<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "no_active", 105, |frame| {
-        match (|| -> PyResult<()> {
-            frame.line(107);
-            return Err(frame.reraise());
-        })() {
+        frame.line(107);
+        match Err(frame.reraise()) {
             Ok(()) => unreachable!(),
-            Err(err) if rt::matches(&err, &m.global("RuntimeError")?)? => {
+            Err(err) if frame.matches(&err, 108, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(109);
@@ -296,12 +296,10 @@ pub fn no_active<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "not_an_exception", 112, |frame| {
-        match (|| -> PyResult<()> {
-            frame.line(114);
-            return Err(frame.raise(rt::int(py, 42)));
-        })() {
+        frame.line(114);
+        match Err(frame.raise(rt::int(py, 42))) {
             Ok(()) => unreachable!(),
-            Err(err) if rt::matches(&err, &m.global("TypeError")?)? => {
+            Err(err) if frame.matches(&err, 115, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(116);
@@ -311,10 +309,10 @@ pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
         }
         match (|| -> PyResult<()> {
             frame.line(118);
-            return Err(frame.raise_from(m.global("ValueError")?, 3));
+            Err(frame.raise_from(m.global("ValueError")?, 3))
         })() {
             Ok(()) => unreachable!(),
-            Err(err) if rt::matches(&err, &m.global("TypeError")?)? => {
+            Err(err) if frame.matches(&err, 119, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(120);
@@ -323,7 +321,7 @@ pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
             Err(err) => return Err(err),
         }
         match (|| -> PyResult<()> {
-            let result = (|| -> PyResult<()> { Ok(()) })();
+            let result: PyResult<()> = Ok(());
             let finally = frame.finally(result);
             frame.line(125);
             m.global("risky")?.call1(("value",))?;
@@ -331,7 +329,7 @@ pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("int")?)? => {
+            Err(err) if frame.matches(&err, 126, || m.global("int"))? => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 frame.line(127);
                 m.global("print")?.call1(("unreachable",))?;
@@ -348,7 +346,7 @@ pub fn bad_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(132);
         match (|| m.global("not_an_exception")?.call0())() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("TypeError")?)? => {
+            Err(err) if frame.matches(&err, 133, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(134);
@@ -369,7 +367,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(140);
         match (|| m.global("risky")?.call1(("value",)))() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 141, || m.global("ValueError"))? => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 frame.line(142);
                 m.global("print")?.call1((
@@ -380,7 +378,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 frame.line(144);
                 match (|| m.global("risky")?.call1(("key",)))() {
                     Ok(_) => {}
-                    Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+                    Err(err) if frame.matches(&err, 145, || m.global("KeyError"))? => {
                         let _handling = rt::Handling::new(&frame.catch(err));
                         frame.line(146);
                         m.global("print")?.call1((
@@ -413,7 +411,7 @@ pub fn handler_name_is_deleted<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, 
         frame.line(153);
         match (|| m.global("risky")?.call1(("value",)))() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 154, || m.global("ValueError"))? => {
                 let err = frame.catch(err);
                 let _handling = rt::Handling::new(&err);
                 frame.line(155);
@@ -432,15 +430,13 @@ pub fn bare_except_catches_everything<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "bare_except_catches_everything", 159, |frame| {
-        match (|| -> PyResult<()> {
-            frame.line(161);
-            return Err(frame.raise(exc));
-        })() {
+        frame.line(161);
+        match Err(frame.raise(exc)) {
             Ok(()) => unreachable!(),
-            Err(err) if rt::matches(&err, &m.global("Exception")?)? => {
-                return Ok(rt::str(py, "Exception"));
+            Err(err) if frame.matches(&err, 162, || m.global("Exception"))? => {
+                Ok(rt::str(py, "Exception"))
             }
-            Err(_) => return Ok(rt::str(py, "bare")),
+            Err(_) => Ok(rt::str(py, "bare")),
         }
     })
 }
@@ -456,7 +452,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
                     frame.line(175);
                     m.global("risky")?.call1(("key",))?;
                 }
-                Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+                Err(err) if frame.matches(&err, 172, || m.global("ValueError"))? => {
                     let _handling = rt::Handling::new(&frame.catch(err));
                     frame.line(173);
                     m.global("print")?.call1(("not reached",))?;
@@ -466,7 +462,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+            Err(err) if frame.matches(&err, 176, || m.global("KeyError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(177);
@@ -479,7 +475,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
             frame.line(180);
             match (|| m.global("risky")?.call1(("value",)))() {
                 Ok(_) => {}
-                Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+                Err(err) if frame.matches(&err, 181, || m.global("ValueError"))? => {
                     let _handling = rt::Handling::new(&frame.catch(err));
                     frame.line(182);
                     m.global("risky")?.call1(("key",))?;
@@ -489,7 +485,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+            Err(err) if frame.matches(&err, 183, || m.global("KeyError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(184);
@@ -520,7 +516,7 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("StopIteration")?)? => {
+            Err(err) if frame.matches(&err, 192, || m.global("StopIteration"))? => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 frame.line(193);
                 m.global("print")?.call1(("exhausted",))?;
@@ -548,7 +544,7 @@ pub fn generator_into_native<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             Ok(())
         })() {
             Ok(()) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 206, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(207);
@@ -575,7 +571,7 @@ pub fn loop_with_try<'py>(
             frame.line(214);
             match (|| total.add(m.global("int")?.call1((&item,))?))() {
                 Ok(value) => total = value,
-                Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+                Err(err) if frame.matches(&err, 215, || m.global("ValueError"))? => {
                     py.check_signals()?;
                     frame.line(212);
                     continue;
@@ -726,7 +722,7 @@ def name_after_handler():
         frame.line(250);
         match (|| m.global("reraise")?.call0())() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+            Err(err) if frame.matches(&err, 251, || m.global("ValueError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
                 let _handling = rt::Handling::new(&exception);
@@ -740,7 +736,7 @@ def name_after_handler():
         frame.line(254);
         match (|| m.global("via_helper")?.call0())() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("KeyError")?)? => {
+            Err(err) if frame.matches(&err, 255, || m.global("KeyError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
                 let _handling = rt::Handling::new(&exception);
@@ -787,7 +783,7 @@ def name_after_handler():
         frame.line(269);
         match (|| m.global("risky")?.call1(("app",)))() {
             Ok(_) => {}
-            Err(err) if rt::matches(&err, &m.global("AppError")?)? => {
+            Err(err) if frame.matches(&err, 270, || m.global("AppError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
                 let _handling = rt::Handling::new(&exception);

@@ -147,19 +147,26 @@ def _contains(stmt: ast.stmt, line: int, col: int) -> bool:
 
 def _jumps_out(stmt: ast.AST) -> bool:
     """Whether `stmt` contains a `break` or `continue` of a loop around it."""
-    match stmt:
+    return next(loop_jumps(stmt), None) is not None
+
+
+def loop_jumps(node: ast.AST) -> Iterator[ast.Break | ast.Continue]:
+    """The `break` and `continue` statements in `node` that leave a loop
+    around it, in source order."""
+    match node:
         case ast.Break() | ast.Continue():
-            return True
+            yield node
+            return
         case ast.For(orelse=orelse) | ast.AsyncFor(orelse=orelse) | ast.While(orelse=orelse):
             # Jumps in the body belong to this loop, those in `else` to an outer one.
-            return any(_jumps_out(s) for s in orelse)
+            for stmt in orelse:
+                yield from loop_jumps(stmt)
+            return
         case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef():
-            return False
-    return any(
-        _jumps_out(child)
-        for child in ast.iter_child_nodes(stmt)
-        if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
-    )
+            return
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case):
+            yield from loop_jumps(child)
 
 
 def first_line(stmt: ast.stmt) -> int:
@@ -222,7 +229,7 @@ def python_runs(stmts: list[ast.stmt], plan: FallbackPlan) -> Iterator[ast.stmt 
         yield run
 
 
-_COMPOUND = (
+COMPOUND = (
     ast.FunctionDef,
     ast.AsyncFunctionDef,
     ast.ClassDef,
@@ -239,7 +246,7 @@ _COMPOUND = (
 
 
 def _is_compound(stmt: ast.stmt) -> bool:
-    return isinstance(stmt, _COMPOUND)
+    return isinstance(stmt, COMPOUND)
 
 
 def python_source(lines: list[str], stmts: list[ast.stmt], pad: bool = False) -> str:

@@ -34,7 +34,8 @@ from typing import TYPE_CHECKING
 from steelix.frontend.regions import Region, expression_body
 from steelix.frontend.resolve import Lookup, resolve_global
 from steelix.lower.expr import Kind, Value
-from steelix.lower.rustflow import diverges, statement_line
+from steelix.lower.function import BOUND
+from steelix.lower.rustflow import children, diverges, returns_as_tail, statement_line
 from steelix.rustast import nodes as rs
 from steelix.rustast.pyo3 import BUILTIN_EXCEPTIONS
 from steelix.rustast.rewrite import map_exprs
@@ -42,7 +43,6 @@ from steelix.rustast.rewrite import map_exprs
 if TYPE_CHECKING:
     from steelix.lower.stmt import StmtLowering
 
-BOUND = "Bound<'py, PyAny>"
 FRAME = rs.Path("frame")
 JUMPS = ("return", "break", "continue")
 
@@ -136,9 +136,9 @@ class HandlingLowering:
         if jumps == {"return"} and not next_:
             mode = "value"
             stmts = [_unflow(s) for s in stmts]
-            stmts, tail = _return_as_tail(stmts)
+            stmts, tail = returns_as_tail(stmts)
         elif jumps:
-            stmts, tail = _return_as_tail(stmts)
+            stmts, tail = returns_as_tail(stmts)
             mode = "flow"
             if next_:
                 tail = _ok(_flow("Next"))
@@ -146,6 +146,8 @@ class HandlingLowering:
             mode = "unit"
             if next_:
                 tail = _ok(rs.Tuple(()))
+            else:
+                stmts, tail = returns_as_tail(stmts)
         lifetime = self.ctx.lifetime()
         result = {
             "unit": "()",
@@ -241,7 +243,16 @@ class HandlingLowering:
         lowered = self.finish_closure(closure, stmts)
         result = self.ctx.temp("result")
         finally_ = self.ctx.temp("finally")
-        out: list[rs.Stmt] = [rs.Let(result, init=rs.Call(lowered.call, ()))]
+        closure = lowered.call
+        assert isinstance(closure, rs.Closure)
+        inlined = _inlined(closure)
+        out: list[rs.Stmt]
+        if inlined is not None:
+            # Nothing to catch: `let result: PyResult<..> = Ok(..);`
+            before, outcome = inlined
+            out = [*before, rs.Let(result, ty=closure.ret, init=outcome)]
+        else:
+            out = [rs.Let(result, init=rs.Call(closure, ()))]
         start = len(out)
         # The line is unknown: an exception may come from anywhere.
         self.line = None
@@ -259,6 +270,9 @@ class HandlingLowering:
 
     def try_except(self: StmtLowering, stmt: ast.Try) -> list[rs.Stmt]:
         """`try` with handlers (and `else`), without the `finally` part."""
+        if stmt in self.ctx.flow.infallible_tries:
+            # The handlers never run (`try: x = 1`).
+            return [*self.block(stmt.body).stmts, *self.block(stmt.orelse).stmts]
         expr = expression_body(stmt)
         prelude: list[rs.Stmt] = []
         if expr is not None:
@@ -277,9 +291,14 @@ class HandlingLowering:
             elif _has_try(scrutinee):
                 # So can parts of the expression. `Ok(..)` says nothing about
                 # the error type, a `PyResult` returned by PyO3 does.
-                typed = isinstance(scrutinee, rs.Call) and scrutinee.func == rs.Path("Ok")
+                typed = _is_ok(scrutinee)
                 closure = rs.Closure((), rs.Block((), scrutinee), ret if typed else None)
                 scrutinee = rs.Call(closure, ())
+            elif _is_ok(scrutinee):
+                # It can not raise, but the analysis did not see that (a
+                # global target, a captured variable): `Ok` needs its type.
+                assert isinstance(scrutinee, rs.Call)
+                scrutinee = rs.Call(rs.Path("Ok::<_, PyErr>"), scrutinee.args)
             handler_line = self.line
             ok_arms = self.expression_arms(stmt, body)
         else:
@@ -287,7 +306,19 @@ class HandlingLowering:
                 [Region(stmt, "body")], lambda: list(self.block(stmt.body).stmts)
             )
             lowered = self.finish_closure(closure, stmts)
-            scrutinee = rs.Call(lowered.call, ())
+            assert isinstance(lowered.call, rs.Closure)
+            inlined = _inlined(lowered.call)
+            if inlined is not None:
+                # Only the outcome can be an error (`try: raise E`): the
+                # statements run before the `match` on it.
+                prelude, scrutinee = inlined
+                if isinstance(scrutinee, rs.BlockExpr):
+                    # With `let`s that must go away before the handlers run.
+                    outcome = self.ctx.temp("result")
+                    prelude = [rs.Let(outcome, ty=lowered.call.ret, init=scrutinee)]
+                    scrutinee = rs.Path(outcome)
+            else:
+                scrutinee = rs.Call(lowered.call, ())
             handler_line = None
             ok_arms = self.dispatch(lowered, [], wrap=True)
             if lowered.next:
@@ -299,7 +330,8 @@ class HandlingLowering:
         catch_all = False
         for handler in stmt.handlers:
             self.line = handler_line
-            arms.append(self.handler_arm(handler))
+            arm, handler_line = self.handler_arm(handler, handler_line)
+            arms.append(arm)
             ends.append(self.line)
             if handler.type is None:
                 catch_all = True
@@ -307,7 +339,22 @@ class HandlingLowering:
             err = self.ctx.binding("err")
             arms.append(rs.Arm(f"Err({err})", rs.Block((_err(rs.Path(err)),))))
         self.line = ends[0] if all(end == ends[0] for end in ends) else None
-        return [*prelude, rs.ExprStmt(rs.Match(scrutinee, tuple(arms)))]
+        match_ = rs.Match(scrutinee, tuple(arms))
+        fn = self.ctx.function
+        body = stmt.body[0]
+        if (
+            fn is not None
+            and isinstance(body, ast.Assign)
+            and isinstance(body.targets[0], ast.Name)
+            and fn.locals.declared_at.get(body.targets[0].id) is stmt
+        ):
+            # `let x = match int.call1((s,)) { Ok(value) => value, .. };`
+            name = body.targets[0].id
+            rust = fn.names[name]
+            valued = tuple(rs.Arm(a.pattern, _assigned_value(a.body, rust), a.guard) for a in arms)
+            mutable = name in fn.locals.mutable
+            return [*prelude, rs.Let(rust, mutable, init=rs.Match(scrutinee, valued))]
+        return [*prelude, rs.ExprStmt(match_)]
 
     def expression_arms(
         self: StmtLowering, stmt: ast.Try, body: ast.stmt
@@ -354,6 +401,7 @@ class HandlingLowering:
                 return node
             if name not in hoisted:
                 hoisted[name] = (self.ctx.temp(name), call)
+                self.ctx.pinned.add(hoisted[name][0])  # `builtins` keeps it
             return rs.Path(hoisted[name][0])
 
         rewritten = map_exprs(rs.ExprStmt(expr), visit).expr
@@ -362,7 +410,11 @@ class HandlingLowering:
         lets: list[rs.Stmt] = [rs.Let(temp, init=rs.Try(call)) for temp, call in hoisted.values()]
         return rewritten, lets
 
-    def handler_arm(self: StmtLowering, handler: ast.ExceptHandler) -> rs.Arm:
+    def handler_arm(
+        self: StmtLowering, handler: ast.ExceptHandler, line: int | None
+    ) -> tuple[rs.Arm, int | None]:
+        """The `match` arm of `handler`, and the traceback line once its
+        test ran (`line` before it)."""
         err = self.ctx.binding("err")
         fn = self.ctx.function
         name = handler.name
@@ -372,7 +424,10 @@ class HandlingLowering:
                 err = "err"
         guard: rs.Expr | None = None
         if handler.type is not None:
-            guard = self.handler_test(handler.type, rs.Path(err))
+            guard = self.handler_test(handler, rs.Path(err))
+            if _has_try(guard):
+                # `frame.matches` moved the line to the `except`.
+                line = self.line = handler.lineno
         trivial = name is None and _trivial(handler.body, self)
         head: list[rs.Stmt] = []
         tail: list[rs.Stmt] = []
@@ -402,10 +457,14 @@ class HandlingLowering:
         if tail and not diverges(body):
             body += tail
         pattern = f"Err({err})" if guard is not None or not trivial else "Err(_)"
-        return rs.Arm(pattern, rs.Block((*head, *body)), guard)
+        return rs.Arm(pattern, rs.Block((*head, *body)), guard), line
 
-    def handler_test(self: StmtLowering, type_: ast.expr, err: rs.Path) -> rs.Expr:
-        """Whether the exception `err` matches `except type_`."""
+    def handler_test(self: StmtLowering, handler: ast.ExceptHandler, err: rs.Path) -> rs.Expr:
+        """Whether the exception `err` matches `handler`: a test of its type
+        for builtin exceptions, else `frame.matches(&err, line, || handler)?`,
+        which evaluates the handler expression while `err` is being handled."""
+        type_ = handler.type
+        assert type_ is not None
         elts = type_.elts if isinstance(type_, ast.Tuple) else [type_]
         builtin = [self.builtin_exception(e) for e in elts]
         if all(builtin):
@@ -421,11 +480,15 @@ class HandlingLowering:
                 test = rs.Binary("||", test, other)
             return test
         with self.exprs.fresh() as prelude:
-            classes = self.exprs.value(type_)
-            test: rs.Expr = rs.Try(rs.Call(rs.Path("rt::matches"), (rs.Ref(err), classes.ref())))
-        if prelude:
-            return rs.BlockExpr(rs.Block(tuple(prelude), test))
-        return test
+            value = self.exprs.value(type_)
+        if value.kind is Kind.PLACE and not value.temp:
+            # A local: the handler may run again (in a loop), keep it.
+            classes = rs.Call(rs.Path("Ok"), (value.owned(),))
+        else:
+            classes = value.result()
+        closure = rs.Closure((), rs.Block(tuple(prelude), classes))
+        line = rs.IntLit(handler.lineno)
+        return rs.Try(_frame("matches", rs.Ref(err), line, closure))
 
     def builtin_exception(self: StmtLowering, expr: ast.expr) -> str | None:
         """The name of the builtin exception class `expr` refers to, if it
@@ -541,26 +604,18 @@ class HandlingLowering:
             inner_before, inner, _ = self.with_item(stmt, index + 1, closure)
             block = rs.Block((*body, *inner_before), inner)
         else:
-            stmts, tail = _return_as_tail(body + list(self.block(stmt.body).stmts))
-            if tail is not None:
-                pass
-            elif not diverges(stmts):
+            stmts = body + list(self.block(stmt.body).stmts)
+            tail: rs.Expr | None
+            if not diverges(stmts):
                 tail = _ok(_flow("Next") if closure.jumps else rs.Tuple(()))
-            elif not closure.jumps:
-                # A body that always raises says nothing about the type.
-                ret = "PyResult<()>"
+            else:
+                stmts, tail = returns_as_tail(stmts)
+                if not closure.jumps:
+                    # A body that always raises says nothing about the type.
+                    ret = "PyResult<()>"
             block = rs.Block(tuple(stmts), tail)
         call = _frame("with", manager_ref, rs.Closure((param,), block, ret))
         return before, call, entry
-
-
-def _return_as_tail(stmts: list[rs.Stmt]) -> tuple[list[rs.Stmt], rs.Expr | None]:
-    """A final `return Ok(..);` as the tail expression `Ok(..)`."""
-    last = stmts[-1] if stmts else None
-    if isinstance(last, rs.Return) and isinstance(last.value, rs.Call):
-        if last.value.func == rs.Path("Ok"):
-            return stmts[:-1], last.value
-    return stmts, None
 
 
 def _unflow(stmt: rs.Stmt) -> rs.Stmt:
@@ -572,7 +627,8 @@ def _unflow(stmt: rs.Stmt) -> rs.Stmt:
             case rs.Return(
                 rs.Call(rs.Path("Ok"), (rs.Call(rs.Path("rt::Flow::Return"), (value,)),))
             ):
-                return rs.Return(_ok(value))
+                # `Ok(f()?)` is `f()`, as `Value.result` writes it.
+                return rs.Return(value.expr if isinstance(value, rs.Try) else _ok(value))
             case rs.Closure() | rs.Fn():
                 return node
             case rs.Block(stmts, tail):
@@ -594,6 +650,45 @@ def _unflow(stmt: rs.Stmt) -> rs.Stmt:
         return node
 
     return visit(stmt)
+
+
+def _inlined(closure: rs.Closure) -> tuple[list[rs.Stmt], rs.Expr] | None:
+    """The statements and the outcome of a `try` closure that does not
+    need to be one: nothing in it can raise or jump out (no `?`, no
+    `return`), only its outcome may be an `Err`. With `let`s, which must
+    not live on after the `try` (a `frame.finally` guard, a temporary), it
+    becomes a block instead."""
+    body = closure.body
+    if body.tail is None:
+        return None
+
+    def escapes(node: object) -> bool:
+        match node:
+            case rs.Try() | rs.Return():
+                return True
+            case rs.Closure() | rs.Fn():
+                return False
+        return any(escapes(child) for child in children(node))
+
+    if any(escapes(stmt) for stmt in body.stmts) or escapes(body.tail):
+        return None
+    if any(isinstance(stmt, rs.Let) for stmt in body.stmts):
+        return [], rs.BlockExpr(body)
+    return list(body.stmts), body.tail
+
+
+def _assigned_value(body: rs.Block, rust: str) -> rs.Block:
+    """An arm ending in `x = value;` as one whose value is `value`; the
+    others never end (the analysis made sure of it)."""
+    stmts = body.stmts
+    if stmts and isinstance(stmts[-1], rs.Assign) and stmts[-1].target == rs.Path(rust):
+        return rs.Block(stmts[:-1], stmts[-1].value)
+    assert diverges(stmts), stmts
+    return body
+
+
+def _is_ok(expr: rs.Expr) -> bool:
+    return isinstance(expr, rs.Call) and expr.func == rs.Path("Ok")
 
 
 def _has_try(expr: rs.Expr) -> bool:

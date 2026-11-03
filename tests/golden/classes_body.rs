@@ -150,7 +150,7 @@ pub mod body_ {
                 list.append(x.mul(&x)?)?;
                 py.check_signals()?;
             }
-            ns.set("squares", &list)?;
+            ns.set("squares", list)?;
             ns.set("y", 2)?;
             // classes_body.py:46
             fn lambda<'py>(
@@ -364,7 +364,7 @@ pub mod failing_kept {
                 list.append(rt::int(py, 1).div(0)?)?;
                 py.check_signals()?;
             }
-            ns.set("values", &list)?;
+            ns.set("values", list)?;
             Ok(())
         })
     }
@@ -764,7 +764,7 @@ def failing_body():
         frame.with(&m.global("u")?, |value| -> PyResult<()> {
             m.set_global("same", value)?;
             frame.line(149);
-            return Err(frame.raise(PyValueError::new_err("suppressed")));
+            Err(frame.raise(PyValueError::new_err("suppressed")))
         })?;
         frame.line(150);
         rt::builtins::print(py, (m.global("same")?.is(m.global("u")?),))?;

@@ -28,9 +28,12 @@ pub mod account {
                 )?,
             )?;
             frame.line(16);
-            let decorator = ns.get("classmethod")?;
-            let function = rt::function!(ns, opened(cls, balance), qualname = "Account.opened")?;
-            ns.set("opened", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("classmethod")?;
+                let function =
+                    rt::function!(ns, opened(cls, balance), qualname = "Account.opened")?;
+                ns.set("opened", decorator.call1((function,))?)?;
+            }
             Ok(())
         })
     }

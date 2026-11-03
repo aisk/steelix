@@ -182,6 +182,9 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 - 解包赋值的目标都是普通局部变量时，第一次出现写成 `let [a, b] = rt::unpack(&value)?;`，之后写成解构赋值 `[a, b] = rt::unpack(&value)?;`。目标里有属性、下标、全局变量或 `Option` 变量时，先解包到临时变量，再按顺序逐个赋值
 - 函数内的带注解赋值 `x: int = v` 在分析之前改写成 `x = v`（`frontend/desugar.py`），因为局部变量的注解从不求值。没有值的 `x: int` 只让 `x` 成为局部变量，直接去掉
 - 函数顶层第一次出现的 `import` 也直接 `let os = rt::import(m, "os")?;`
+- `:=` 的目标第一次出现在顶层语句一定会求值的部分（表达式语句、赋值的右边、`if` 条件、`for` 的可迭代对象，不包括 `and`/`or` 的右侧、条件表达式的分支、链式比较后面的部分和推导式）时，在那里写 `let x = ..;`，不提前声明（否则 clippy 报 `needless_late_init`）
+- body 不会失败的 `try`（只有 `pass`，或者一条语句把常量、已赋值的普通局部变量或它们组成的元组赋给普通局部变量、作为表达式求值或返回，如 `try: x = 1`）直接生成 body，handler 不可达，变量在 body 的赋值处声明。多条语句的 body 仍然走闭包
+- A 形式的 `try`（§9）`x = expr`，没有 `else`/`finally`，每个 handler 都以给 `x` 赋值结束或者跳走（`raise`、`return`、`break`、`continue`），并且 handler 里别处不用 `x` 时，写成 `let x = match .. { Ok(value) => value, Err(..) => { ..; value } };`
 - 被内层函数捕获并且之后会改变的变量（cell）用 `rt::Cell`，不参与上面的处理，见第 6 节
 - `try` 体、`finally` 之前的部分和 `with` 体在立即调用的闭包里执行（第 9 节），闭包不能初始化外层 fn 里声明了但还没赋值的变量，所以（`frontend/regions.py`、`frontend/bindings.py`）
   - 只在一个闭包区域内出现的局部变量在闭包里声明，规则同上（区域顶层第一次赋值处 `let`，否则在闭包开头声明），每次执行闭包都从未赋值开始
@@ -387,10 +390,32 @@ lowering 给每个子表达式记录它在 Rust 里的形态（`lower/expr.py` �
 ```rust
 // data[trace("i", 1)] = trace("v", 5)
 let value = trace(m, &rt::str(py, "v"), &rt::int(py, 5))?;
-data.set_item(trace(m, &rt::str(py, "i"), &rt::int(py, 1))?, &value)?;
+data.set_item(trace(m, &rt::str(py, "i"), &rt::int(py, 1))?, value)?;
 // g() in h()
 let item = g.call0()?;
 h.call0()?.contains(&item)?
+```
+
+临时变量不能比它所在的 Python 语句活得久（M8a，`lower/temps.py`）。Rust 的 `let` 活到块结束，模块级就是整个 `exec_module`，而 CPython 在语句用完一个值就释放它，`__del__`、weakref 回调、`weakref.finalize` 都能观察到。每条语句（连同 prelude）生成之后
+
+- 临时变量最后一次使用是一定会执行的 `impl IntoPyObject` 参数（`set_item("k", &value)`）时直接 move 进去（`set_item("k", value)`），在那里释放。最后一次使用本来就是 move 的（`Ok(value)`、`into_any()`、`finally.resume()`）不用处理
+- 仍然持有对象的临时变量（被借用、用了两次、只在某些路径上 move）连同语句放进自己的块 `{ let value = ..; .. }`。语句声明了 Python 局部变量时写成 `let x = { ..; value };`。语句总是跳走（`return`、`break`）时不加块
+- 不持有对象的临时变量（Rust `bool`、`usize`、引用，`import` 得到的模块，提前查找的 builtin）不处理，因为别处一直持有这些对象
+- 块结束后临时变量的名字可以重新使用，后面的语句又从 `lhs`、`value` 开始编号
+- 粒度是语句：CPython 可能在语句中途就释放（`print(f() and 1)` 里 `f()` 的结果在 `print` 之前释放），这里要等语句结束。Python 局部变量对应的 Rust 变量不受影响，和 CPython 一样活到重新赋值或者函数返回
+
+```rust
+// x = y = make("pair")
+{
+    let value = make(m, &rt::str(py, "pair"))?;
+    m.set_global("x", &value)?;
+    m.set_global("y", &value)?;
+}
+// h.attr += 1
+{
+    let h = m.global("h")?;
+    h.setattr("attr", rt::iadd(&h.getattr("attr")?, 1)?)?;
+}
 ```
 
 具体写法
@@ -402,6 +427,7 @@ h.call0()?.contains(&item)?
 - 一元运算用 PyO3 的 `neg`/`pos`/`bitnot`，`not` 是 `!cond`
 - 增量赋值的 runtime 函数按 `operator` 模块命名：`rt::iadd`、`rt::itruediv`、`rt::ior` 等。`x += v` 写成 `x = rt::iadd(&x, v)?;`
 - 容器字面量用 PyO3 的构造函数：`PyList::new(py, [1, 2, 3])?`、`PyTuple::new(..)`、`PySet::new(..)`、`[("a", 1)].into_py_dict(py)?`，空的用 `PyList::empty(py)`、`PyDict::new(py)`。元素都是同类型的字面量时直接写，否则统一写成 `&Bound`。所有元素先求值再构造，与 `BUILD_LIST`/`BUILD_MAP` 一致
+- 带展开的容器字面量（M8a）用 runtime 的宏，写法接近 Python：`rt::list!(py, a, *b)?`、`rt::tuple!(..)`、`rt::set!(..)`、`rt::dict!(py, **d, (k, v))?`。宏按书写顺序求值，连续的普通元素成组加入，`*x` 和 `LIST_EXTEND`/`SET_UPDATE` 一样迭代，`**m` 和 `DICT_UPDATE` 一样合并（后面的 key 覆盖前面的），不可迭代、不是 mapping 时的报错与 CPython 一致。`tuple!` 先建 list 再转换，与 CPython 相同
 - 下标 `get_item`/`set_item`/`del_item`，属性 `getattr`/`setattr`/`delattr`。切片用 `rt::slice(py, start, stop)?` 和 `rt::slice_step(..)`，省略的部分是 `py.None()`，因为 `PySlice::new` 只接受整数，而 Python 的切片对象保留 `None`
 - 解包用 `rt::unpack`（固定个数，返回数组）和 `rt::unpack_star`（返回 `([前], 列表, [后])`），按 CPython 的 `UNPACK_SEQUENCE` 逐步迭代，错误信息一致
 - f-string：每个字段是 `rt::format(&value, "spec")?`（`PyObject_Format`，没有 spec 时传 `""`），`!r`/`!s`/`!a` 是 `repr()?`/`str()?`/`rt::ascii(..)?`，嵌套的 spec 本身也是 f-string。多段时用 `rt::fstring(py, (a, " = ", b))?` 拼接（`"".join`），超过 12 段时嵌套
@@ -607,7 +633,8 @@ match int.call1((s,)) {
 
 - 表达式里查找 builtin 或全局名字的 `?` 提到 `match` 前面（`let int = ..;`），这样 scrutinee 里没有 `?`。还有别的 `?` 时写成 `(|| expr)()`
 - `else` 的语句放在 `Ok` 分支里
-- handler 的类型是 builtin 异常时写成 `err.is_instance_of::<PyX>(py)`，元组写成几个 `||`。其余写 `rt::matches(&err, &handler)?`，handler 不是异常类时和 CPython 一样抛 `TypeError`
+- handler 的类型是 builtin 异常时写成 `err.is_instance_of::<PyX>(py)`，元组写成几个 `||`。其余写 `frame.matches(&err, LINE, || handler)?`：先把这一帧补进 traceback 并把异常设为正在处理的异常，再在 `except` 那一行求值 handler 的类型。类型不是异常类时和 CPython 一样抛 `TypeError`，它的 `__context__` 是原来的异常，traceback 指向 `except` 行
+- body 不会失败的 `try` 只生成 body（§5）。scrutinee 是不带 `?` 的 `Ok(..)` 时写成 `Ok::<_, PyErr>(..)`，否则 rustc 推断不出错误类型（E0282）
 - 最后一个分支 `Err(err) => return Err(err)` 把没有匹配的异常传出去
 
 其余的（B）把 `try` 体放进立即调用的闭包，`match` 闭包的结果。闭包里的 `?` 被 `match` 接住，`return`/`break`/`continue` 由闭包返回 `rt::Flow`
@@ -619,7 +646,7 @@ match (|| -> PyResult<()> {
     Ok(())
 })() {
     Ok(()) => {}
-    Err(err) if rt::matches(&err, &m.global("ValueError")?)? => {
+    Err(err) if frame.matches(&err, 66, || m.global("ValueError"))? => {
         let e = frame.catch(err);
         let _handling = rt::Handling::new(&e);
         frame.line(67);
@@ -629,6 +656,8 @@ match (|| -> PyResult<()> {
 }
 ```
 
+- 闭包里没有会被 `match` 接住的东西（没有 `?`，结果只是最后的 `Ok`/`Err`，例如 `try: raise E`）时不生成闭包：前面的语句直接放在 `match` 之前，`match` 的是结果本身。闭包里有 `let` 时写成 `let result: PyResult<()> = { .. }; match result { .. }`，让这些变量在 handler 执行前离开作用域（clippy 的 `redundant_closure_call`、`blocks_in_conditions`）
+- 函数和闭包最后的 `return x;` 写成尾表达式 `x`，最后的 `if`/`match` 每个分支都 `return` 时整体变成表达式（clippy 的 `needless_return`，`lower/rustflow.py` 的 `returns_as_tail`）
 - 闭包的返回类型按块里的跳转决定：没有跳转是 `PyResult<()>`；只有 `return` 并且结尾不可达时直接返回值，写 `return Ok(..)`；其余是 `PyResult<rt::Flow<'py>>`，`Flow` 有 `Next`、`Break`、`Continue`、`Return(value)`。外面按 `Flow` 分派，只有一种跳转时写成 `if let rt::Flow::Return(value) = ..? { return Ok(value); }`，否则写 `match`
 - handler 的 `let e = frame.catch(err);` 把这一帧补进 traceback，得到异常对象。不用 `as` 也要设置正在处理的异常时写 `let _handling = rt::Handling::new(&frame.catch(err));`。handler 只有 `pass`、赋值字面量这类不会调用 Python 代码的语句时省略这两行
 - `rt::Handling` 是 RAII guard：创建时用 `PyErr_GetHandledException`/`PyErr_SetHandledException` 保存并设置正在处理的异常，`Drop` 时恢复。所以 handler 里 `sys.exception()`、`logging.exception()`、`traceback.print_exc()`、新异常的 `__context__`、辅助函数里的裸 `raise` 都和 CPython 一样，从 `?`、`return`、`break`、panic 离开时也会恢复
@@ -1028,7 +1057,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 
 - **单元测试**：rustast 打印、作用域与绑定分析等纯 Python 逻辑
 - **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动
-- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段
+- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段。同一层还对所有 golden 跑 `cargo clippy`（默认 lint 组，警告也算失败）。crate 根上另外 allow 三个 clippy lint：`never_loop`（Python 里 `for` 的第一轮就 `return`/`break` 是常见写法）、`approx_constant`（Python 源码里的 `3.14159` 本来就是那个字面量）、`if_same_then_else`（Python 两个分支写同样的代码是程序本身的事），它们说的是 Python 程序本身，不是生成方式
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码和 stderr。有 traceback 时比较完整的 traceback（M4 起原生函数也有帧，第 9 节），只去掉原生帧没有的 `^^^` 行和 CPython 编译时的 `SyntaxWarning`；少数用例（直接调用的递归，§12）只比较异常类型。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
@@ -1117,6 +1146,15 @@ pub fn percentile<'py>(
 2. **所有方法都改写之后，再把实例换成 Rust 结构体（`#[pyclass]`）。** 实例的属性是方法之间共享的数据，和第二步换容器一样，要等读写它们的方法全部改写。`rt::class!` 的 `attributes = [..]`（`__static_attributes__`）列出了方法给 `self` 赋值的属性，就是结构体字段的起点。改写时 mod 里的方法变成 `#[pymethods]`，`exec_module` 里的 `rt::class!(..)` 换成 `m.set_global("Point", py.get_type::<Point>())`。适用条件见 §10：只继承 object 或原生类型，没有 metaclass 和类体里的逻辑；pickle、`copy`、`__dict__`、被 Python 类继承要另外实现（`__reduce__`、`#[pyclass(dict, subclass)]`）。M9 计划为符合条件的类自动生成这一步
 
 和函数一样，`self.method()` 在生成代码里总是动态调用，改写成原生代码之后，同一个结构体的方法之间可以直接调用，不经过 Python。
+
+第二步的具体约定（M8a，来自 M5 之后的 review）
+
+- **文件位置。** 原生代码和函数一样放在 `src/<module>/native.rs`，由 `src/<module>.rs` 开头的 `mod native;` 引入。`#[pyclass]` 结构体本身要用 PyO3，放在 `src/<module>.rs` 里原来那个类的 mod 中，`native.rs` 只放不依赖 PyO3 的数据和逻辑，结构体的字段可以直接是 `native` 里的类型
+- **类属性用 `#[classattr]`。** 类体里的常量（`UNITS = ("B", "KB")`、`limit = 10`）写成 `#[classattr] fn UNITS(py) -> ..`，Python 一侧通过类和实例都能读到，和原来一样。会被重新赋值的类属性（计数器之类）不能这样写，`#[classattr]` 只在建类时求值一次，这种属性留在类型的 `__dict__` 里（`type.setattr`）
+- **没有可变状态的类用 `frozen`。** 方法只读字段、所有字段都在 `__init__` 里赋值一次的类写成 `#[pyclass(frozen)]`，`&self` 访问不用运行期借用检查，也不会有 `PyBorrowMutError`。字段会被改的用普通的 `#[pyclass]` 加 `#[pyo3(get, set)]`
+- **Python 侧的形状要写明。** 字段的原生类型和 Python 一侧看到的值不一定一一对应。例如原来是 tuple 的属性存成 `Vec<String>` 或 `[f64; 2]` 时，`#[pyo3(get)]` 会转成 list，`p.coords == (1.0, 2.0)` 就变成 False，`hash(p.coords)` 直接报错。这类属性要手写 getter，每次重新构造 tuple（`PyTuple::new(py, &self.coords)`），setter 同样按原来接受的类型转换。改写前先列出每个属性在 Python 一侧的类型，改写后逐个对照
+- **`__module__`、`__qualname__` 和 pickle。** `#[pyclass(module = "app", name = "Point")]` 写明模块名和类名，否则 `__module__` 是 `builtins`，`repr`、错误信息和 pickle 都会出错。嵌套类的 `__qualname__` 要和原来的 `Outer.Inner` 一致。pickle 和 `copy` 需要 `__reduce__`（返回类本身和构造参数），并且类要能通过 `module.qualname` 找到，也就是 `exec_module` 里照旧 `m.set_global("Point", ..)`
+- **`__repr__` 要手写。** 原来没有定义 `__repr__` 的类，`repr` 是 `<app.Point object at 0x..>`，`#[pyclass]` 默认的也类似，但原来用 `@dataclass` 生成的 `Point(x=1, y=2)` 要手写 `__repr__` 照原样格式化（字段顺序、`repr()` 每个字段、嵌套对象调用它们自己的 `repr`）。`__eq__`、`__hash__`、排序这些 dataclass 生成的方法同样要手写，`__eq__` 遇到别的类型返回 `NotImplemented`
 
 ### 改写之后不再成立的东西
 

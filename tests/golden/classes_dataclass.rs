@@ -228,32 +228,36 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         let dataclasses = rt::import_names(m, "dataclasses", &["dataclass", "field"])?;
         m.set_global("dataclass", rt::import_from(&dataclasses, "dataclass")?)?;
         m.set_global("field", rt::import_from(&dataclasses, "field")?)?;
-        frame.line(9);
-        let dataclass = m.global("dataclass")?;
-        frame.line(10);
-        let item = rt::class!(
-            m,
-            "Item"(),
-            item::body,
-            line = 9,
-            annotations = [("name", "str"), ("price", "float"), ("tags", "list")]
-        )?;
-        frame.line(9);
-        let item = dataclass.call1((item,))?;
-        m.set_global("Item", item)?;
-        frame.line(19);
-        let decorator = rt::call!(m.global("dataclass")?, frozen = true, order = true)?;
-        frame.line(20);
-        let version = rt::class!(
-            m,
-            "Version"(),
-            version::body,
-            line = 19,
-            annotations = [("major", "int"), ("minor", "int")]
-        )?;
-        frame.line(19);
-        let version = decorator.call1((version,))?;
-        m.set_global("Version", version)?;
+        {
+            frame.line(9);
+            let dataclass = m.global("dataclass")?;
+            frame.line(10);
+            let item = rt::class!(
+                m,
+                "Item"(),
+                item::body,
+                line = 9,
+                annotations = [("name", "str"), ("price", "float"), ("tags", "list")]
+            )?;
+            frame.line(9);
+            let item = dataclass.call1((item,))?;
+            m.set_global("Item", item)?;
+        }
+        {
+            frame.line(19);
+            let decorator = rt::call!(m.global("dataclass")?, frozen = true, order = true)?;
+            frame.line(20);
+            let version = rt::class!(
+                m,
+                "Version"(),
+                version::body,
+                line = 19,
+                annotations = [("major", "int"), ("minor", "int")]
+            )?;
+            frame.line(19);
+            let version = decorator.call1((version,))?;
+            m.set_global("Version", version)?;
+        }
         frame.line(28);
         m.set_global("item", m.global("Item")?.call1(("pen", 1.5))?)?;
         frame.line(29);
@@ -295,10 +299,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => {}
             Err(err)
-                if rt::matches(
-                    &err,
-                    &m.global("dataclasses")?.getattr("FrozenInstanceError")?,
-                )? =>
+                if frame.matches(&err, 34, || {
+                    m.global("dataclasses")?.getattr("FrozenInstanceError")
+                })? =>
             {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
@@ -327,7 +330,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             list.append(f.getattr("name")?)?;
             py.check_signals()?;
         }
-        rt::builtins::print(py, (&value, &list))?;
+        rt::builtins::print(py, (value, list))?;
         frame.line(37);
         rt::builtins::print(
             py,
@@ -445,19 +448,21 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("Later", rt::class!(m, "Later"(), later::body, line = 71)?)?;
         frame.line(75);
         rt::builtins::print(py, (m.global("Forward")?.getattr("__annotations__")?,))?;
-        frame.line(78);
-        let decorator2 = rt::call!(m.global("dataclass")?, slots = true)?;
-        frame.line(79);
-        let slotted = rt::class!(
-            m,
-            "Slotted"(),
-            slotted::body,
-            line = 78,
-            annotations = [("x", "int"), ("y", "int")]
-        )?;
-        frame.line(78);
-        let slotted = decorator2.call1((slotted,))?;
-        m.set_global("Slotted", slotted)?;
+        {
+            frame.line(78);
+            let decorator = rt::call!(m.global("dataclass")?, slots = true)?;
+            frame.line(79);
+            let slotted = rt::class!(
+                m,
+                "Slotted"(),
+                slotted::body,
+                line = 78,
+                annotations = [("x", "int"), ("y", "int")]
+            )?;
+            frame.line(78);
+            let slotted = decorator.call1((slotted,))?;
+            m.set_global("Slotted", slotted)?;
+        }
         frame.line(87);
         m.set_global("s", m.global("Slotted")?.call1((1,))?)?;
         frame.line(88);
@@ -470,19 +475,21 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtin(py, "hasattr")?.call1((m.global("s")?, "__dict__"))?,
             ),
         )?;
-        frame.line(91);
-        let dataclass2 = m.global("dataclass")?;
-        frame.line(92);
-        let child = rt::class!(
-            m,
-            "Child"(m.global("Item")?),
-            child::body,
-            line = 91,
-            annotations = [("color", "str")]
-        )?;
-        frame.line(91);
-        let child = dataclass2.call1((child,))?;
-        m.set_global("Child", child)?;
+        {
+            frame.line(91);
+            let dataclass = m.global("dataclass")?;
+            frame.line(92);
+            let child = rt::class!(
+                m,
+                "Child"(m.global("Item")?),
+                child::body,
+                line = 91,
+                annotations = [("color", "str")]
+            )?;
+            frame.line(91);
+            let child = dataclass.call1((child,))?;
+            m.set_global("Child", child)?;
+        }
         frame.line(99);
         rt::builtins::print(
             py,

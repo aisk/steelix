@@ -262,7 +262,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             frame.line(30);
             match (|| rt::builtins::print(py, (load(m, &m.global("key")?)?,)))() {
                 Ok(_) => {}
-                Err(err) if rt::matches(&err, &m.global("ConfigError")?)? => {
+                Err(err) if frame.matches(&err, 31, || m.global("ConfigError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
@@ -280,7 +280,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     )?;
                     m.unbind_global("err")?;
                 }
-                Err(err) if rt::matches(&err, &m.global("AppError")?)? => {
+                Err(err) if frame.matches(&err, 33, || m.global("AppError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
                     let _handling = rt::Handling::new(&exception);
@@ -307,13 +307,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         match (|| -> PyResult<()> {
             frame.line(37);
-            return Err(frame.raise_from(
+            Err(frame.raise_from(
                 m.global("ConfigError")?.call1(("a", "b"))?,
                 rt::builtin(py, "KeyError")?.call1(("k",))?,
-            ));
+            ))
         })() {
             Ok(()) => unreachable!(),
-            Err(err) if rt::matches(&err, &m.global("AppError")?)? => {
+            Err(err) if frame.matches(&err, 38, || m.global("AppError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
@@ -341,10 +341,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         match (|| -> PyResult<()> {
             frame.line(48);
-            return Err(frame.raise(m.global("Kept")?.call1(("x", "y"))?));
+            Err(frame.raise(m.global("Kept")?.call1(("x", "y"))?))
         })() {
             Ok(()) => unreachable!(),
-            Err(err) if rt::matches(&err, &m.global("Kept")?)? => {
+            Err(err) if frame.matches(&err, 49, || m.global("Kept"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);

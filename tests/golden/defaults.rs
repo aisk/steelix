@@ -214,13 +214,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // Defaults are read from the function object at call time.
         frame.line(46);
         let value = PyTuple::new(py, ["Howdy"])?;
-        m.global("greet")?.setattr("__defaults__", &value)?;
+        m.global("greet")?.setattr("__defaults__", value)?;
         frame.line(47);
-        let value2 = [("punct", "?!")].into_py_dict(py)?;
-        m.global("greet")?.setattr("__kwdefaults__", &value2)?;
+        let value = [("punct", "?!")].into_py_dict(py)?;
+        m.global("greet")?.setattr("__kwdefaults__", value)?;
         frame.line(48);
-        let value3 = PyTuple::new(py, [3])?;
-        m.global("scale")?.setattr("__defaults__", &value3)?;
+        let value = PyTuple::new(py, [3])?;
+        m.global("scale")?.setattr("__defaults__", value)?;
         frame.line(49);
         rt::builtins::print(
             py,

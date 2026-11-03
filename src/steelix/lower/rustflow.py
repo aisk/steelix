@@ -42,6 +42,46 @@ def _diverges(stmt: rs.Stmt) -> bool:
     return False
 
 
+def returns_as_tail(
+    stmts: tuple[rs.Stmt, ...] | list[rs.Stmt],
+) -> tuple[list[rs.Stmt], rs.Expr | None]:
+    """The statements of a fn or closure body without a final `return`,
+    and the tail expression it becomes: `return Ok(x);` as `Ok(x)`, and a
+    final `match` or `if` whose branches all end in `return` as a `match` or
+    `if` expression with those values (clippy's `needless_return`)."""
+    if not stmts:
+        return list(stmts), None
+    tail = _as_tail(stmts[-1])
+    if tail is None:
+        return list(stmts), None
+    return list(stmts[:-1]), tail
+
+
+def _as_tail(stmt: rs.Stmt) -> rs.Expr | None:
+    match stmt:
+        case rs.Return(value) if value is not None:
+            return value
+        case rs.ExprStmt(rs.Match(scrutinee, arms)) if _diverges(stmt):
+            return rs.Match(scrutinee, tuple(_tail_arm(arm) for arm in arms))
+        case rs.If(cond, then, rs.Block() | rs.If() as orelse, None) if _diverges(stmt):
+            if isinstance(orelse, rs.If):
+                other = _as_tail(orelse)
+                if not isinstance(other, rs.IfExpr):
+                    return None
+                return rs.IfExpr(cond, _tail_block(then), other)
+            return rs.IfExpr(cond, _tail_block(then), _tail_block(orelse))
+    return None
+
+
+def _tail_block(block: rs.Block) -> rs.Block:
+    stmts, tail = returns_as_tail(block.stmts)
+    return block if tail is None else rs.Block(tuple(stmts), tail)
+
+
+def _tail_arm(arm: rs.Arm) -> rs.Arm:
+    return rs.Arm(arm.pattern, _tail_block(arm.body), arm.guard)
+
+
 def _breaks_out(body: rs.Block, label: str | None, loop: bool = True) -> bool:
     """Whether `body` of a loop (or labeled block) contains a `break` that
     leaves it."""
@@ -51,15 +91,15 @@ def _breaks_out(body: rs.Block, label: str | None, loop: bool = True) -> bool:
             case rs.Break(target):
                 return target == label if target is not None else (loop and depth == 0)
             case rs.Loop() | rs.While() | rs.For():
-                return any(visit(child, depth + 1) for child in _children(node))
+                return any(visit(child, depth + 1) for child in children(node))
             case rs.Closure() | rs.Fn():
                 return False
-        return any(visit(child, depth) for child in _children(node))
+        return any(visit(child, depth) for child in children(node))
 
     return any(visit(stmt, 0) for stmt in body.stmts)
 
 
-def _children(node: Any) -> Iterator[Any]:
+def children(node: Any) -> Iterator[Any]:
     if isinstance(node, tuple):
         yield from node
         return
@@ -77,7 +117,7 @@ def walk(node: Any) -> Iterator[Any]:
     """`node` and everything in it, not looking into nested fn items or
     line markers (`frame.line(n)`)."""
     yield node
-    for child in _children(node):
+    for child in children(node):
         if isinstance(child, rs.Fn) or _is_marker(child):
             continue
         yield from walk(child)

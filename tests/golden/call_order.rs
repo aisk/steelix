@@ -78,18 +78,20 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,),
         )?;
         frame.line(19);
-        let a = show(m, &rt::str(py, "1"), &rt::int(py, 1))?;
-        let c = show(m, &rt::str(py, "c"), &rt::int(py, 30))?;
-        rt::builtins::print(
-            py,
-            (fixed(
-                m,
-                &a,
-                &show(m, &rt::str(py, "b"), &rt::int(py, 20))?,
-                &c,
-                &rt::int(py, 4),
-            )?,),
-        )?;
+        {
+            let a = show(m, &rt::str(py, "1"), &rt::int(py, 1))?;
+            let c = show(m, &rt::str(py, "c"), &rt::int(py, 30))?;
+            rt::builtins::print(
+                py,
+                (fixed(
+                    m,
+                    &a,
+                    &show(m, &rt::str(py, "b"), &rt::int(py, 20))?,
+                    &c,
+                    &rt::int(py, 4),
+                )?,),
+            )?;
+        }
         frame.line(20);
         rt::builtins::print(
             py,

@@ -85,9 +85,11 @@ class Value:
     # --- spellings for the different use sites ---
 
     def arg(self) -> rs.Expr:
-        """As an `impl IntoPyObject` argument of a PyO3 method or call tuple."""
+        """As an `impl IntoPyObject` argument of a PyO3 method or call tuple.
+        A temporary is borrowed here, and moved instead if this is its only
+        use (`lower.temps`)."""
         if self.kind is Kind.PLACE:
-            return rs.Ref(self.expr)
+            return rs.Ref(self.expr, into=self.temp)
         return self.expr
 
     def ref(self) -> rs.Expr:
@@ -316,6 +318,8 @@ class ExprLowering(ComprehensionLowering):
         else:
             self.prelude.insert(at, stmt)
         path = rs.Path(name)
+        if value.kind in (Kind.BOOL, Kind.NATIVE, Kind.REF):
+            self.ctx.pinned.add(name)  # holds no object of its own
         match value.kind:
             case Kind.BOOL:
                 return Value(path, Kind.BOOL, _rt("bool", self.py(), path), pure=True)
@@ -424,7 +428,7 @@ class ExprLowering(ComprehensionLowering):
             case ast.Set(elts):
                 return self.sequence("PySet", elts)
             case ast.Dict(keys, values):
-                return self.dict(keys, values)  # type: ignore[arg-type]
+                return self.dict(keys, values)
             case ast.JoinedStr(values):
                 return self.fstring(values)
             case ast.ListComp() | ast.SetComp() | ast.DictComp():
@@ -718,6 +722,8 @@ class ExprLowering(ComprehensionLowering):
 
     def sequence(self, type_name: str, elts: list[ast.expr]) -> Value:
         """A list, tuple or set display."""
+        if any(isinstance(elt, ast.Starred) for elt in elts):
+            return self.unpacking_display(type_name, elts)
         self.use(f"pyo3::types::{type_name}")
         if not elts and type_name != "PySet":
             call: rs.Expr = rs.Call(rs.Path(f"{type_name}::empty"), (self.py(),))
@@ -727,7 +733,33 @@ class ExprLowering(ComprehensionLowering):
         call = _try(rs.Call(rs.Path(f"{type_name}::new"), (self.py(), array)))
         return Value(call, Kind.OWNED, typed=type_name)
 
-    def dict(self, keys: list[ast.expr], values: list[ast.expr]) -> Value:
+    def unpacking_display(self, type_name: str, elts: list[ast.expr]) -> Value:
+        """`[a, *b]`, `(*a,)`, `{*a, b}`: `rt::list!(py, a, *b)?` and so on,
+        which evaluates the elements in order and iterates each `*` value
+        right away, like CPython. An element that needs statements first is
+        a block of its own, so that they run at its turn."""
+        parts: list[rs.Expr] = []
+        for elt in elts:
+            if isinstance(elt, ast.Starred):
+                parts.append(rs.Tokens(("*", self.display_part(elt.value, star=True))))
+            else:
+                parts.append(self.display_part(elt))
+        macro = {"PyList": "rt::list", "PyTuple": "rt::tuple", "PySet": "rt::set"}[type_name]
+        call = _try(rs.MacroCall(macro, (self.py(), *parts)))
+        return Value(call, Kind.OWNED, typed=type_name)
+
+    def display_part(self, expr: ast.expr, star: bool = False) -> rs.Expr:
+        """An element of `rt::list!` and the like: an `impl IntoPyObject`,
+        or with `star`, an expression the macro borrows."""
+        with self.fresh() as prelude:
+            value = self.value(expr)
+        if prelude:
+            return rs.BlockExpr(rs.Block(tuple(prelude), value.owned()))
+        return value.bound() if star else value.arg()
+
+    def dict(self, keys: list[ast.expr | None], values: list[ast.expr]) -> Value:
+        if any(key is None for key in keys):
+            return self.unpacking_dict(keys, values)
         if not keys:
             self.use("pyo3::types::PyDict")
             return Value(rs.Call(rs.Path("PyDict::new"), (self.py(),)), Kind.OWNED, typed="PyDict")
@@ -739,6 +771,18 @@ class ExprLowering(ComprehensionLowering):
             tuple(rs.Tuple((k, v)) for k, v in zip(lowered_keys, lowered_values, strict=True))
         )
         call = _try(rs.MethodCall(pairs, "into_py_dict", (self.py(),)))
+        return Value(call, Kind.OWNED, typed="PyDict")
+
+    def unpacking_dict(self, keys: list[ast.expr | None], values: list[ast.expr]) -> Value:
+        """`{**a, "k": v}`: `rt::dict!(py, **a, ("k", v))?`, merging each
+        `**` mapping right away, like CPython."""
+        parts: list[rs.Expr] = []
+        for key, value in zip(keys, values, strict=True):
+            if key is None:
+                parts.append(rs.Tokens(("**", self.display_part(value, star=True))))
+            else:
+                parts.append(rs.Tuple((self.display_part(key), self.display_part(value))))
+        call = _try(rs.MacroCall("rt::dict", (self.py(), *parts)))
         return Value(call, Kind.OWNED, typed="PyDict")
 
     # --- f-strings ---

@@ -116,7 +116,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, report(args))?;
         frame.line(10);
         let report2 = m.global("report")?;
-        m.global("threading")?.setattr("excepthook", &report2)?;
+        m.global("threading")?.setattr("excepthook", report2)?;
         rt::def!(m, attempt(f, *args, **kwargs))?;
         rt::def!(m, f(a, b = 1))?;
         rt::def!(m, g(x, /, y, *, z))?;

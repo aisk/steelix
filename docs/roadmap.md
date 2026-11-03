@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
 
 ## M0 项目骨架 ✅
 
@@ -141,18 +141,18 @@
 
 覆盖率的变化见 `coverage.md`：6 个工具的原生函数从 37% 到 73%，标准库从 22% 到 90%，和 M3c 时按方法级混合模式的预测一致（71%、88%）。标准库里只有 3 个带类型参数的类整个保留为 Python。顺带修了 `rt::call!` 在被调用的是引用（`rt::local(..)?` 返回的 `&Bound`）时编译失败的问题（`tests/cases/call_ref_callee.py`）。
 
-## M8a M5/M8 之后的修复
+## M8a M5/M8 之后的修复 ✅
 
 来自 M5 之后的 Fable review（前两条已复现）和 M8 的遗留。
 
-- [ ] body 不会失败的 `try`（如 `try: x = 1`）生成的 `match Ok(..)` 编译失败（E0282），给 scrutinee 标类型或在 body 不会失败时不生成 match
-- [ ] 为求值顺序提前计算的临时变量会一直活到所在 Rust 块结束（模块级就是整个程序），`__del__`、weakref、`finalize` 的时机与 CPython 不同。只用一次的临时变量直接 move，或者给语句的 prelude 加块作用域
-- [ ] `except <非异常类>` 抛出的 TypeError 缺少 `__context__`，行号是 `try` 行而不是 `except` 行
-- [ ] 给 M4 的分析补单元测试：`frontend/regions.py`、`lower/rustflow.py`、`_DefiniteAssignment` 里 handler/with/region 相关部分
-- [ ] `bindings.py` 中六处"节点绑定了哪些名字"的实现合并成一个
-- [ ] 容器字面量里的展开（`[*a]`、`{**d}`），现在是剩下最便宜的阻碍（标准库 25 个函数只被它挡住）
-- [ ] walrus 局部变量第一次在顶层 `if` 条件里绑定时 clippy 报 `needless_late_init`
-- [ ] §15 类改写补充：类属性用 `#[classattr]`，没有可变状态的类用 `frozen`，`native.rs` 放在 `src/<module>/` 下，元组之类的属性要明确 Python 侧的形状
+- [x] body 不会失败的 `try`（如 `try: x = 1`）生成的 `match Ok(..)` 编译失败（E0282）：body 不会失败时只生成 body，handler 不可达；其余 `Ok(..)` scrutinee 写成 `Ok::<_, PyErr>(..)`（§5、§9，`try_infallible`）
+- [x] 为求值顺序提前计算的临时变量会一直活到所在 Rust 块结束（模块级就是整个程序），`__del__`、weakref、`finalize` 的时机与 CPython 不同：最后一次使用时 move，仍然活着的给语句加块作用域（§8 `lower/temps.py`，`temp_lifetimes`）
+- [x] `except <非异常类>` 抛出的 TypeError 缺少 `__context__`，行号是 `try` 行而不是 `except` 行：改成 `frame.matches(&err, LINE, || handler)`（§9，`except_bad_type`）
+- [x] 给 M4 的分析补单元测试：`frontend/regions.py`、`lower/rustflow.py`、`_DefiniteAssignment` 里 handler/with/region 相关部分（`tests/test_frontend.py`、`tests/test_rustflow.py`，后者也测 `lower/temps.py`）
+- [x] `bindings.py` 中六处"节点绑定了哪些名字"的实现合并成一个（`_bound_names`），顺带去掉重复的 `_COMPOUND`、break/continue 查找、`BOUND` 和没用的 `class_key`
+- [x] 容器字面量里的展开（`[*a]`、`{**d}`）：runtime 的 `rt::list!`/`tuple!`/`set!`/`dict!`（§8，`displays_unpacking`）。标准库被它挡住的 25 个函数都变成原生的，函数覆盖率 96.4% → 96.7%，行 93.3% → 94.2%
+- [x] walrus 局部变量第一次在顶层 `if` 条件里绑定时 clippy 报 `needless_late_init`：在那里 `let`（§5）。cargo 测试层对所有 golden 跑 clippy（§14）
+- [x] §15 类改写补充：类属性用 `#[classattr]`，没有可变状态的类用 `frozen`，`native.rs` 放在 `src/<module>/` 下，元组之类的属性要明确 Python 侧的形状
 
 ## M6 多模块应用
 

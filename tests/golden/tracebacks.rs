@@ -1,7 +1,7 @@
 //! Parts of `tracebacks.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 31, `def kept_middle`: unpacking in a display
+//! - line 31, `def kept_middle`: generator expression with several for clauses
 
 use pyo3::exceptions::PyException;
 use pyo3::exceptions::PyIndexError;
@@ -297,22 +297,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, show(exc))?;
         rt::def!(m, no_carets(text))?;
         rt::def!(m, leaf(values, key))?;
-        // tracebacks.py:31, kept as Python: unpacking in a display at 32:14
+        // tracebacks.py:31, kept as Python: generator expression with several for clauses at 32:17
         rt::exec_python!(
             m,
             line = 31,
             r#"
 def kept_middle(values, key):
-    pairs = [*enumerate(values)]
+    pairs = list(p for p in enumerate(values) for _ in "1")
     return leaf(values, key) + len(pairs)
 "#
         )?;
         rt::def!(m, native_middle(values, key))?;
         rt::def!(m, decorate(r#fn))?;
         frame.line(47);
-        let decorator = m.global("decorate")?;
-        let function = rt::function!(m, decorated(x))?;
-        m.set_global("decorated", decorator.call1((&function,))?)?;
+        {
+            let decorator = m.global("decorate")?;
+            let function = rt::function!(m, decorated(x))?;
+            m.set_global("decorated", decorator.call1((function,))?)?;
+        }
         rt::def!(m, outer())?;
         rt::def!(m, multiline(a, b))?;
         rt::def!(m, raise_again())?;

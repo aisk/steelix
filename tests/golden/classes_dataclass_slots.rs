@@ -14,9 +14,11 @@ pub mod base {
                 rt::function!(ns, hello(slf as "self"), qualname = "Base.hello")?,
             )?;
             frame.line(15);
-            let decorator = ns.get("property")?;
-            let function = rt::function!(ns, name(slf as "self"), qualname = "Base.name")?;
-            ns.set("name", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("property")?;
+                let function = rt::function!(ns, name(slf as "self"), qualname = "Base.name")?;
+                ns.set("name", decorator.call1((function,))?)?;
+            }
             Ok(())
         })
     }
@@ -41,9 +43,11 @@ pub mod p {
         rt::frame!(ns, "P", 19, |frame| {
             let __class__ = ns.class_cell();
             frame.line(24);
-            let decorator = ns.get("property")?;
-            let function = rt::function!(ns, name(slf as "self"), qualname = "P.name")?;
-            ns.set("name", decorator.call1((&function,))?)?;
+            {
+                let decorator = ns.get("property")?;
+                let function = rt::function!(ns, name(slf as "self"), qualname = "P.name")?;
+                ns.set("name", decorator.call1((function,))?)?;
+            }
             frame.line(27);
             ns.set(
                 "hello",
@@ -86,19 +90,21 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("dataclass", rt::import_from(&dataclasses, "dataclass")?)?;
         frame.line(10);
         m.set_global("Base", rt::class!(m, "Base"(), base::body, line = 10)?)?;
-        frame.line(19);
-        let decorator = rt::call!(m.global("dataclass")?, slots = true)?;
-        frame.line(20);
-        let p = rt::class!(
-            m,
-            "P"(m.global("Base")?),
-            p::body,
-            line = 19,
-            annotations = [("x", "int")]
-        )?;
-        frame.line(19);
-        let p = decorator.call1((p,))?;
-        m.set_global("P", p)?;
+        {
+            frame.line(19);
+            let decorator = rt::call!(m.global("dataclass")?, slots = true)?;
+            frame.line(20);
+            let p = rt::class!(
+                m,
+                "P"(m.global("Base")?),
+                p::body,
+                line = 19,
+                annotations = [("x", "int")]
+            )?;
+            frame.line(19);
+            let p = decorator.call1((p,))?;
+            m.set_global("P", p)?;
+        }
         frame.line(31);
         rt::builtins::print(
             py,

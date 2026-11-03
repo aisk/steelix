@@ -246,14 +246,16 @@ pub fn failing_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
             })
         }
         frame.line(70);
-        frame.line(71);
-        let iter = m.global("Bad")?.call0()?.try_iter()?;
-        frame.line(70);
-        let r#gen = rt::genexpr!(
-            m,
-            genexpr(iter),
-            qualname = "failing_iteration.<locals>.<genexpr>"
-        )?;
+        let r#gen = {
+            frame.line(71);
+            let iter = m.global("Bad")?.call0()?.try_iter()?;
+            frame.line(70);
+            rt::genexpr!(
+                m,
+                genexpr(iter),
+                qualname = "failing_iteration.<locals>.<genexpr>"
+            )?
+        };
         frame.line(72);
         rt::builtin(m.py(), "sum")?.call1((&r#gen,))
     })
@@ -716,26 +718,28 @@ pub fn comprehension_variable<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
             })
         }
         frame.line(149);
-        let x_ = rt::Cell::empty(py, "x")?;
-        let list = PyList::empty(py);
-        for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
-            x_.set(item?)?;
-            list.append(rt::genexpr!(
-                m,
-                genexpr[&x_ as "x"](rt::builtin(py, "range")?.call1((1,))?.try_iter()?),
-                qualname = "comprehension_variable.<locals>.<genexpr>"
-            )?)?;
-            py.check_signals()?;
-        }
-        let gens = list.into_any();
+        let gens = {
+            let x_ = rt::Cell::empty(py, "x")?;
+            let list = PyList::empty(py);
+            for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+                x_.set(item?)?;
+                list.append(rt::genexpr!(
+                    m,
+                    genexpr[&x_ as "x"](rt::builtin(py, "range")?.call1((1,))?.try_iter()?),
+                    qualname = "comprehension_variable.<locals>.<genexpr>"
+                )?)?;
+                py.check_signals()?;
+            }
+            list.into_any()
+        };
         frame.line(150);
-        let list2 = PyList::empty(py);
+        let list = PyList::empty(py);
         for g in gens.try_iter()? {
             let g = g?;
-            list2.append(rt::builtin(py, "list")?.call1((&g,))?)?;
+            list.append(rt::builtin(py, "list")?.call1((&g,))?)?;
             py.check_signals()?;
         }
-        Ok(list2.into_any())
+        Ok(list.into_any())
     })
 }
 
@@ -867,7 +871,7 @@ pub mod bad {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Bad.__next__", 65, |frame| {
             frame.line(66);
-            return Err(frame.raise(PyValueError::new_err("next failed")));
+            Err(frame.raise(PyValueError::new_err("next failed")))
         })
     }
 }

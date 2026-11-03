@@ -21,21 +21,19 @@ pub fn log<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyTuple>) -> PyResult<Bou
 pub fn finally_overrides_return<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "finally_overrides_return", 10, |frame| {
-        let result = (|| -> PyResult<Bound<'py, PyAny>> { Ok(rt::str(py, "try")) })();
+        let result: PyResult<Bound<'py, PyAny>> = Ok(rt::str(py, "try"));
         let _finally = frame.finally(result);
-        return Ok(rt::str(py, "finally"));
+        Ok(rt::str(py, "finally"))
     })
 }
 
 // try_finally.py:17
 pub fn finally_swallows_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "finally_swallows_exception", 17, |frame| {
-        let result = (|| -> PyResult<()> {
-            frame.line(19);
-            return Err(frame.raise(PyValueError::new_err("lost")));
-        })();
+        frame.line(19);
+        let result: PyResult<()> = Err(frame.raise(PyValueError::new_err("lost")));
         let _finally = frame.finally(result);
-        return Ok(rt::str(m.py(), "swallowed"));
+        Ok(rt::str(m.py(), "swallowed"))
     })
 }
 
@@ -48,9 +46,7 @@ pub fn break_in_finally_swallows<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py
             i = Some(item?);
             let result = (|| -> PyResult<()> {
                 frame.line(27);
-                return Err(
-                    frame.raise(PyKeyError::new_err((rt::local(&i, "i")?.clone().unbind(),)))
-                );
+                Err(frame.raise(PyKeyError::new_err((rt::local(&i, "i")?.clone().unbind(),))))
             })();
             let _finally = frame.finally(result);
             break;
@@ -170,7 +166,7 @@ pub fn jumps_run_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
 pub fn nested_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "nested_finally", 72, |frame| {
-        let result2 = (|| -> PyResult<Bound<'py, PyAny>> {
+        let result = (|| -> PyResult<Bound<'py, PyAny>> {
             let result = (|| -> PyResult<Bound<'py, PyAny>> {
                 frame.line(75);
                 log(m, &PyTuple::new(py, ["inner body"])?)?;
@@ -179,12 +175,12 @@ pub fn nested_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let finally = frame.finally(result);
             frame.line(78);
             log(m, &PyTuple::new(py, ["inner finally"])?)?;
-            Ok(finally.resume()?)
+            finally.resume()
         })();
-        let finally2 = frame.finally(result2);
+        let finally = frame.finally(result);
         frame.line(80);
         log(m, &PyTuple::new(py, ["outer finally"])?)?;
-        return finally2.resume();
+        finally.resume()
     })
 }
 
@@ -192,34 +188,35 @@ pub fn nested_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn exception_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "exception_in_finally", 83, |frame| {
-        match (|| -> PyResult<()> {
-            let result = (|| -> PyResult<()> {
+        {
+            let result: PyResult<()> = {
                 frame.line(86);
-                return Err(frame.raise(PyValueError::new_err("first")));
-            })();
-            let _finally = frame.finally(result);
-            frame.line(88);
-            return Err(frame.raise(PyKeyError::new_err("second")));
-        })() {
-            Ok(()) => unreachable!(),
-            Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
-                frame.line(90);
-                log(
-                    m,
-                    &PyTuple::new(
-                        py,
-                        [
-                            &rt::str(py, "caught"),
-                            e.repr()?.as_any(),
-                            &rt::str(py, "context"),
-                            e.getattr("__context__")?.repr()?.as_any(),
-                        ],
-                    )?,
-                )?;
+                let result: PyResult<()> = Err(frame.raise(PyValueError::new_err("first")));
+                let _finally = frame.finally(result);
+                frame.line(88);
+                Err(frame.raise(PyKeyError::new_err("second")))
+            };
+            match result {
+                Ok(()) => unreachable!(),
+                Err(err) if err.is_instance_of::<PyKeyError>(py) => {
+                    let e = frame.catch(err);
+                    let _handling = rt::Handling::new(&e);
+                    frame.line(90);
+                    log(
+                        m,
+                        &PyTuple::new(
+                            py,
+                            [
+                                &rt::str(py, "caught"),
+                                e.repr()?.as_any(),
+                                &rt::str(py, "context"),
+                                e.getattr("__context__")?.repr()?.as_any(),
+                            ],
+                        )?,
+                    )?;
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
         Ok(rt::none(py))
     })
@@ -230,10 +227,8 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
     let py = m.py();
     rt::frame!(m, "exception_state_in_finally", 93, |frame| {
         match (|| -> PyResult<()> {
-            let result = (|| -> PyResult<()> {
-                frame.line(96);
-                return Err(frame.raise(PyValueError::new_err("pending")));
-            })();
+            frame.line(96);
+            let result: PyResult<()> = Err(frame.raise(PyValueError::new_err("pending")));
             let finally = frame.finally(result);
             frame.line(98);
             log(
@@ -253,12 +248,12 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
             Err(err) if err.is_instance_of::<PyValueError>(py) => {}
             Err(err) => return Err(err),
         }
-        let result2 = (|| -> PyResult<()> {
+        let result = (|| -> PyResult<()> {
             frame.line(102);
             log(m, &PyTuple::new(py, ["no exception"])?)?;
             Ok(())
         })();
-        let finally2 = frame.finally(result2);
+        let finally = frame.finally(result);
         frame.line(104);
         log(
             m,
@@ -270,7 +265,7 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
                 ],
             )?,
         )?;
-        finally2.resume()?;
+        finally.resume()?;
         Ok(rt::none(py))
     })
 }
@@ -285,22 +280,22 @@ pub fn finally_after_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
                 frame.line(110);
                 events.call_method1("append", ("body",))?;
                 frame.line(111);
-                return Err(frame.raise(PyIndexError::new_err("x")));
+                Err(frame.raise(PyIndexError::new_err("x")))
             })() {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                     let _handling = rt::Handling::new(&frame.catch(err));
                     frame.line(113);
                     events.call_method1("append", ("handler",))?;
-                    return Ok(events.clone());
+                    Ok(events.clone())
                 }
-                Err(err) => return Err(err),
+                Err(err) => Err(err),
             }
         })();
         let finally = frame.finally(result);
         frame.line(118);
         events.call_method1("append", ("finally",))?;
-        return finally.resume();
+        finally.resume()
     })
 }
 
@@ -473,7 +468,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         frame.line(167);
         for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
             m.set_global("k", item?)?;
-            let result2 = (|| -> PyResult<rt::Flow<'_>> {
+            let result = (|| -> PyResult<rt::Flow<'_>> {
                 frame.line(169);
                 if m.global("k")?.eq(1)? {
                     return Ok(rt::Flow::Continue);
@@ -485,13 +480,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?;
                 Ok(rt::Flow::Next)
             })();
-            let finally2 = frame.finally(result2);
+            let finally = frame.finally(result);
             frame.line(173);
             log(
                 m,
                 &PyTuple::new(py, [&rt::str(py, "module cleanup"), &m.global("k")?])?,
             )?;
-            if let rt::Flow::Continue = finally2.resume()? {
+            if let rt::Flow::Continue = finally.resume()? {
                 py.check_signals()?;
                 frame.line(167);
                 continue;

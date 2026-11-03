@@ -28,8 +28,13 @@ RUNTIME_VERSION = "0.1"
 
 # Crate-wide lint configuration. Python naming does not follow Rust's, Python
 # functions may ignore their parameters, and Python code may assign values it
-# never reads (including `del x`, which becomes `x = None`).
-CRATE_ALLOWS = "#![allow(non_snake_case, unused_variables, unused_assignments)]"
+# never reads (including `del x`, which becomes `x = None`). The clippy lints
+# are about the Python program itself, which the translation keeps as it is:
+# a loop that always leaves in its first iteration, a literal close to `pi`,
+# branches with the same code.
+CRATE_ALLOWS = """\
+#![allow(non_snake_case, unused_variables, unused_assignments)]
+#![allow(clippy::never_loop, clippy::approx_constant, clippy::if_same_then_else)]"""
 
 
 # Unoptimized PyO3 makes every Python operation several times slower, so the

@@ -8,11 +8,8 @@ the value read from the code of each class body.
 
 from __future__ import annotations
 
-import ast
 import dis
 import types
-
-from steelix.frontend.fallback import first_line
 
 
 def static_attributes(source: str, filename: str) -> dict[tuple[str, int], tuple[str, ...]]:
@@ -41,7 +38,3 @@ def _stored_attributes(code: types.CodeType) -> tuple[str, ...] | None:
             return None
         previous = instruction
     return None
-
-
-def class_key(node: ast.ClassDef, qualname: str) -> tuple[str, int]:
-    return (qualname, first_line(node))

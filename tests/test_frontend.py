@@ -641,3 +641,216 @@ def test_unsupported_comprehensions(source: str, feature: str) -> None:
 
     issues = [i for found in find_unsupported(ast.parse(source), "m.py").values() for i in found]
     assert [i.feature for i in issues] == [feature]
+
+
+# --- closure regions -------------------------------------------------------------
+
+
+def try_stmt(source: str) -> ast.Try:
+    tree, _ = parse(source)
+    stmt = tree.body[0]
+    assert isinstance(stmt, ast.Try)
+    return stmt
+
+
+@pytest.mark.parametrize(
+    ("source", "parts"),
+    [
+        # A single expression is matched on directly: no closure.
+        ("try:\n    x = f()\nexcept E:\n    pass\n", []),
+        ("try:\n    return f()\nexcept E:\n    pass\n", []),
+        ("try:\n    f()\nexcept E:\n    pass\n", []),
+        # Anything else runs in a closure.
+        ("try:\n    x.y = f()\nexcept E:\n    pass\n", ["body"]),
+        ("try:\n    f()\n    g()\nexcept E:\n    pass\n", ["body"]),
+        # `finally` alone needs the body; with handlers also what they run.
+        ("try:\n    f()\nfinally:\n    pass\n", ["body"]),
+        ("try:\n    f()\nexcept E:\n    pass\nfinally:\n    pass\n", ["handled"]),
+        ("try:\n    f()\n    g()\nexcept E:\n    pass\nfinally:\n    g()\n", ["handled", "body"]),
+    ],
+)
+def test_try_regions(source: str, parts: list[str]) -> None:
+    from steelix.frontend.regions import try_regions
+
+    assert [region.part for region in try_regions(try_stmt(source))] == parts
+
+
+def test_expression_body() -> None:
+    from steelix.frontend.regions import expression_body
+
+    stmt = try_stmt("try:\n    x = f()\nexcept E:\n    pass\n")
+    assert ast.unparse(expression_body(stmt)) == "f()"  # type: ignore[arg-type]
+    assert expression_body(try_stmt("try:\n    x, y = f()\nexcept E:\n    pass\n")) is None
+    assert expression_body(try_stmt("try:\n    return\nexcept E:\n    pass\n")) is None
+    assert expression_body(try_stmt("try:\n    f()\nfinally:\n    pass\n")) is None
+
+
+def test_region_nodes() -> None:
+    from steelix.frontend.regions import Region, region_node_ids, regions_in
+
+    tree, _ = parse(
+        """
+        with a() as x, b() as y:
+            f(x, y)
+        try:
+            g()
+            h()
+        except E:
+            k()
+        else:
+            m()
+        """
+    )
+    with_stmt, try_ = tree.body
+    assert isinstance(with_stmt, ast.With) and isinstance(try_, ast.Try)
+    assert list(regions_in(tree.body)) == [
+        Region(with_stmt, 0),
+        Region(with_stmt, 1),
+        Region(try_, "body"),
+    ]
+    # The first item's closure gets `x`, then evaluates the later items.
+    first = [ast.unparse(node) for node in Region(with_stmt, 0).nodes()]
+    assert first == ["x", "b()", "y", "f(x, y)"]
+    second = [ast.unparse(node) for node in Region(with_stmt, 1).nodes()]
+    assert second == ["y", "f(x, y)"]
+    handled = Region(try_, "handled").nodes()
+    assert handled[:2] == try_.body and handled[2] is try_.handlers[0]
+    assert handled[3:] == try_.orelse
+    ids = region_node_ids(Region(try_, "body"))
+    assert id(try_.body[0]) in ids and id(try_.handlers[0]) not in ids
+    assert id(try_.orelse[0]) not in ids
+
+
+# --- locals in handlers, `with` and regions ------------------------------------------
+
+
+def test_handler_names_are_scoped_to_their_handler() -> None:
+    info, _ = locals_of(
+        """
+        def f(g):
+            try:
+                g()
+            except ValueError as e:
+                print(e)
+            except KeyError as e:
+                print(e)
+            try:
+                g()
+            except ValueError as kept:
+                pass
+            return kept
+        """
+    )
+    # `kept` is read after its handler (where the implicit `del` unbinds it).
+    assert info.handler_scoped == {"e"}
+    assert "kept" in info.optional
+
+
+def test_with_targets_are_closure_parameters() -> None:
+    info, fn = locals_of(
+        """
+        def f(cm):
+            with cm as w, cm as v:
+                print(w, v)
+            with cm as later:
+                pass
+            return later
+        """
+    )
+    assert info.with_params == {"w", "v"}
+    first = fn.body[0]
+    assert info.scoped["w"].node is first and info.scoped["w"].part == 0
+    assert info.scoped["v"].part == 1
+    # Read after the `with`: it lives outside the closure.
+    assert "later" not in info.with_params
+
+
+def test_locals_of_a_region_are_declared_inside_it() -> None:
+    info, fn = locals_of(
+        """
+        def f(g):
+            try:
+                y = g()
+                if y:
+                    s = 1
+                else:
+                    s = 2
+                print(y, s)
+            finally:
+                pass
+            try:
+                out = g()
+                out = out + 1
+            finally:
+                pass
+            return out
+        """
+    )
+    region = info.scoped["y"]
+    assert region.node is fn.body[0] and region.part == "body"
+    assert info.scoped["s"] == region
+    # `s` is first assigned in a branch: it is declared at the closure's start.
+    assert info.region_top[region] == ["s"]
+    assert info.declared_at["y"] is region.node.body[0]
+    # `out` is used after the `try`: declared outside, before the closure.
+    assert "out" not in info.scoped
+    assert "out" in info.declared_at_top
+
+
+def test_try_that_can_not_raise() -> None:
+    info, fn = locals_of(
+        """
+        def f(g):
+            x = g()
+            try:
+                a = 1
+            except Exception:
+                print("never")
+            try:
+                c = (a, x)
+            except Exception:
+                pass
+            try:
+                pass
+            except Exception:
+                pass
+            try:
+                a = 2
+                b = a
+            except Exception:
+                b = 0
+            try:
+                d = g()
+            except Exception:
+                d = None
+            return a, b, c, d
+        """
+    )
+    first, tuple_, pass_, several, call = fn.body[1:6]
+    assert info.infallible_tries == {first, tuple_, pass_}
+    assert isinstance(first, ast.Try) and isinstance(call, ast.Try)
+    assert first.handlers[0].body[0] in info.unreachable
+    # Declared where the body assigns them, as if there were no `try`.
+    assert info.declared_at["a"] is first.body[0]
+    assert info.declared_at["c"] is tuple_.body[0]  # type: ignore[attr-defined]
+    # Only a single statement counts: a longer body still gets a closure.
+    assert several not in info.infallible_tries
+    # Every handler assigns `d` too: `let d = match .. { .. };`.
+    assert info.declared_at["d"] is call
+
+
+def test_walrus_declares_where_it_always_runs() -> None:
+    info, fn = locals_of(
+        """
+        def f(g):
+            print(x := g(), x)
+            if (y := g()) and (z := g()):
+                print(y, z)
+            return x, y
+        """
+    )
+    walrus = fn.body[0].value.args[0]  # type: ignore[attr-defined]
+    assert info.declared_at["x"] is walrus
+    assert isinstance(info.declared_at["y"], ast.NamedExpr)
+    # Only assigned when `y` is true.
+    assert "z" not in info.declared_at

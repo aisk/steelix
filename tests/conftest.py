@@ -106,8 +106,11 @@ def make_workspace(
     return Workspace(root, cases)
 
 
-def compiler_warnings(cargo_json_output: str, workspace: Workspace) -> list[str]:
-    """Rendered warnings that rustc reported for the workspace's own crates."""
+def compiler_warnings(
+    cargo_json_output: str, workspace: Workspace, levels: tuple[str, ...] = ("warning",)
+) -> list[str]:
+    """Rendered diagnostics (warnings, or the given `levels`) that rustc or
+    clippy reported for the workspace's own crates."""
     warnings = []
     for line in cargo_json_output.splitlines():
         if not line.startswith("{"):
@@ -119,6 +122,6 @@ def compiler_warnings(cargo_json_output: str, workspace: Workspace) -> list[str]
         if not manifest.startswith(str(workspace.root)):
             continue
         diagnostic = message["message"]
-        if diagnostic["level"] == "warning":
+        if diagnostic["level"] in levels and diagnostic["spans"]:
             warnings.append(diagnostic["rendered"])
     return warnings

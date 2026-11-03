@@ -24,7 +24,7 @@ from steelix.frontend.scope import (
 from steelix.lower.context import Context, FunctionInfo, ModuleContext
 from steelix.lower.docstrings import docstring
 from steelix.lower.names import FUNCTION_RESERVED, Renamer, context_name, rust_ident
-from steelix.lower.rustflow import fallible, statement_line
+from steelix.lower.rustflow import fallible, returns_as_tail, statement_line
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
 from steelix.rustast.rewrite import count_path, replace_path
@@ -175,6 +175,9 @@ def _first_line(fn: FunctionNode) -> int:
 def in_frame(context: str, qualname: str, line: int, body: rs.Block) -> rs.Block:
     """`body` run in a traceback frame: `rt::frame!(m, "name", line, |frame| ..)`
     (design §9). A body that can not raise needs none."""
+    if body.tail is None:
+        stmts, tail_expr = returns_as_tail(body.stmts)
+        body = rs.Block(tuple(stmts), tail_expr)
     tail = [] if body.tail is None else [rs.Return(body.tail)]
     if not fallible([*body.stmts, *tail]):
         return body

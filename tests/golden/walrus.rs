@@ -26,9 +26,8 @@ pub fn in_condition<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "in_condition", 10, |frame| {
-        let n: Bound<'py, PyAny>;
         frame.line(11);
-        n = rt::int(py, values.len()?);
+        let n = rt::int(py, values.len()?);
         if n.gt(2)? {
             frame.line(12);
             return rt::fstring(py, ("long (", rt::format(&n, "")?, ")"));
@@ -71,9 +70,11 @@ pub fn order<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         // The read of `y` before the assignment sees the old value.
         let mut y = rt::int(py, 1);
         frame.line(27);
-        let y2 = y.clone();
-        y = rt::int(py, 10);
-        let total = y2.add(&y)?.add(&y)?;
+        let total = {
+            let y2 = y.clone();
+            y = rt::int(py, 10);
+            y2.add(&y)?.add(&y)?
+        };
         frame.line(28);
         Ok(PyTuple::new(py, [&total, &y])?.into_any())
     })
@@ -188,14 +189,14 @@ pub fn maybe_unbound<'py>(
         }
         frame.line(56);
         match (|| -> PyResult<Bound<'py, PyAny>> { Ok(rt::local(&result, "result")?.clone()) })() {
-            Ok(value) => return Ok(value),
+            Ok(value) => Ok(value),
             Err(err) if err.is_instance_of::<PyUnboundLocalError>(py) => {
                 let exc = frame.catch(err);
                 let _handling = rt::Handling::new(&exc);
                 frame.line(58);
-                return exc.get_type().getattr("__name__");
+                exc.get_type().getattr("__name__")
             }
-            Err(err) => return Err(err),
+            Err(err) => Err(err),
         }
     })
 }
@@ -227,12 +228,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("counter", 0)?;
         rt::def!(m, global_walrus())?;
         frame.line(69);
-        let list = PyList::empty(py);
-        for v in PyTuple::new(py, [3, 7])?.try_iter()? {
-            let v = v?;
-            m.set_global("min", &v)?;
-            list.append(&v)?;
-            py.check_signals()?;
+        {
+            let list = PyList::empty(py);
+            for v in PyTuple::new(py, [3, 7])?.try_iter()? {
+                let v = v?;
+                m.set_global("min", &v)?;
+                list.append(&v)?;
+                py.check_signals()?;
+            }
         }
         frame.line(70);
         rt::builtins::print(
@@ -264,10 +267,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ),
         )?;
         frame.line(73);
-        let min = m.global("min")?;
-        let z = trace(m, &rt::str(py, "z"), &rt::int(py, 3))?;
-        m.set_global("z", &z)?;
-        rt::builtins::print(py, (&min, z.add(m.global("z")?)?, m.global("z")?))?;
+        {
+            let min = m.global("min")?;
+            let z = trace(m, &rt::str(py, "z"), &rt::int(py, 3))?;
+            m.set_global("z", &z)?;
+            rt::builtins::print(py, (min, z.add(m.global("z")?)?, m.global("z")?))?;
+        }
         frame.line(74);
         m.del_global("min")?;
         Ok(())

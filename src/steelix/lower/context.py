@@ -37,9 +37,9 @@ class ModuleContext:
     """The comments before each statement kept as Python (those inside it
     stay in its source)."""
     frozen: dict[FunctionScope, set[str]] = field(default_factory=dict)
+    """Cells of each function that nested functions receive by value."""
     names: dict[FunctionScope, Renamer] = field(default_factory=dict)
     """Rust names of each lowered function's parameters and locals."""
-    """Cells of each function that nested functions receive by value."""
     uses: set[str] = field(default_factory=set)
     """`use` paths the generated module needs besides the fixed ones."""
     class_mods: list[rs.Mod] = field(default_factory=list)
@@ -130,6 +130,9 @@ class Context:
     class_body: ClassBody | None = None
     """Set while lowering the body of a class."""
     _temps: set[str] = field(default_factory=set)
+    pinned: set[str] = field(default_factory=set)
+    """Temporaries holding objects that something else keeps alive anyway
+    (a module, a builtin): `lower.temps` leaves them alone."""
     _labels: set[str] = field(default_factory=set)
 
     @property
@@ -161,6 +164,8 @@ class Context:
             taken.update(self.function.names.mapping.values())
         if not base.isidentifier() or not base.isascii():
             base = "value"
+        if not base.strip("_0123456789"):
+            base = "underscore"  # not `__`, which clippy finds undescriptive
         if base in RUST_KEYWORDS or base in ("_", "self", "Self", "crate", "super"):
             base += "_"
         name = base
@@ -179,6 +184,7 @@ class Context:
     def release(self, name: str) -> None:
         """Let temporaries take `name` again, once it is out of scope."""
         self._temps.discard(name)
+        self.pinned.discard(name)
 
     def taken_temps(self) -> set[str]:
         return self._temps

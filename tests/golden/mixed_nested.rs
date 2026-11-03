@@ -1,11 +1,11 @@
 //! Parts of `mixed_nested.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 12, `assign` statement: unpacking in a display
-//! - line 28, `assign` statement: unpacking in a display
+//! - line 12, `assign` statement: generator expression with several for clauses
+//! - line 28, `assign` statement: generator expression with several for clauses
 //! - line 33, `while` statement: match statement
 //! - line 42, `for` statement: match statement
-//! - line 63, `assign` statement: unpacking in a display
+//! - line 63, `assign` statement: generator expression with several for clauses
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -80,12 +80,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         if m.global("sys")?.getattr("argv")?.len()? > 5 {
             frame.line(11);
             m.set_global("mode", "many")?;
-            // mixed_nested.py:12, kept as Python: unpacking in a display at 12:15
+            // mixed_nested.py:12, kept as Python: generator expression with several for clauses at 12:18
             rt::exec_python!(
                 m,
                 line = 12,
                 r#"
-    labels = [*"many"]  # kept as Python, the `if` is native
+    labels = list(c for c in "many" for _ in "1")  # kept as Python, the `if` is native
 "#
             )?;
             // mixed_nested.py:14
@@ -144,12 +144,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 (m.global("describe")?
                     .call1((double(m, &m.global("i")?)?,))?,),
             )?;
-            // mixed_nested.py:28, kept as Python: unpacking in a display at 28:16
+            // mixed_nested.py:28, kept as Python: generator expression with several for clauses at 28:19
             rt::exec_python!(
                 m,
                 line = 28,
                 r#"
-    squares = [*range(i)]  # kept as Python
+    squares = list(j for j in range(i) for _ in "1")  # kept as Python
 "#
             )?;
             frame.line(29);
@@ -214,12 +214,12 @@ while True:
                         .getattr("x")?,
                 ),
             )?;
-            // mixed_nested.py:63, kept as Python: unpacking in a display at 63:18
+            // mixed_nested.py:63, kept as Python: generator expression with several for clauses at 63:16
             rt::exec_python!(
                 m,
                 line = 63,
                 r#"
-    total = sum([*range(5)])
+    total = sum(j for j in range(5) for _ in "1")
 "#
             )?;
             frame.line(64);

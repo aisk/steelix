@@ -92,9 +92,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         frame.line(13);
         m.set_global("x", rt::int(py, 1).add(2)?)?;
         frame.line(14);
-        let value = m.global("x")?.mul(2)?;
-        m.set_global("y", &value)?;
-        m.set_global("z", &value)?;
+        {
+            let value = m.global("x")?.mul(2)?;
+            m.set_global("y", &value)?;
+            m.set_global("z", &value)?;
+        }
         frame.line(15);
         rt::builtins::print(py, (m.global("x")?, m.global("y")?, m.global("z")?))?;
         frame.line(16);

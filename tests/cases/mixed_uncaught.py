@@ -6,7 +6,7 @@ def native(values):
 
 
 def python_kept(values):
-    return [*values, 10 // values[-1]]
+    return list(v for v in [*values, 10 // values[-1]] for _ in "1")
 
 
 print(native([1, 2]))
