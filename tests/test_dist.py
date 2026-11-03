@@ -328,8 +328,12 @@ def build_venv() -> Path:
     keeps the dependencies built for it between test runs."""
     venv = E2E_DIR / "dist-venv"
     python = venv / "bin" / "python"
-    if not python.exists():
-        subprocess.run([str(PYTHON), "-m", "venv", "--without-pip", str(venv)], check=True)
+    if not (venv / "pyvenv.cfg").is_file() or not python.exists():
+        # Also when a cache (CI's rust-cache of `target/`) restored only part
+        # of it: without `pyvenv.cfg` the interpreter is the base installation.
+        subprocess.run(
+            [str(PYTHON), "-m", "venv", "--clear", "--without-pip", str(venv)], check=True
+        )
     site = venv / "lib" / "python3.14" / "site-packages"
     package = site / "greeting"
     package.mkdir(exist_ok=True)
