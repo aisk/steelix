@@ -355,7 +355,19 @@ pub mod point_encoder {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Drives the `json` package next to it, a copy of the standard library's.\n\nThe copy shadows the standard library's `json` (it is in `sys.path[0]`), so\nthe transpiled program runs the package's transpiled modules. The package\npicks the C accelerator `_json` at import time where it can; the pure-Python\nscanner, string functions and encoder are exercised explicitly as well.\n\n    python app.py            exercises the package\n    python app.py tool ARGS  runs `json.tool.main()` with ARGS\n    python app.py crash      ends with an uncaught `JSONDecodeError`\n")?;
+        m.set_global(
+            "__doc__",
+            "Drives the `json` package next to it, a copy of the standard library's.\n\
+                \n\
+                The copy shadows the standard library's `json` (it is in `sys.path[0]`), so\n\
+                the transpiled program runs the package's transpiled modules. The package\n\
+                picks the C accelerator `_json` at import time where it can; the pure-Python\n\
+                scanner, string functions and encoder are exercised explicitly as well.\n\
+                \n\
+                \x20   python app.py            exercises the package\n\
+                \x20   python app.py tool ARGS  runs `json.tool.main()` with ARGS\n\
+                \x20   python app.py crash      ends with an uncaught `JSONDecodeError`\n",
+        )?;
         m.set_global("sys", rt::import(m, "sys")?)?;
         let collections = rt::import_names(m, "collections", &["OrderedDict"])?;
         m.set_global("OrderedDict", rt::import_from(&collections, "OrderedDict")?)?;

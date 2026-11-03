@@ -555,7 +555,15 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Summarize a web server access log.\n\nEach line of the log is in the common log format, followed by the time it\ntook to serve the request:\n\n    203.0.113.9 - - [12/Mar/2024:10:15:32 +0000] \"GET /api/users HTTP/1.1\" 200 512 41ms\n")?;
+        m.set_global(
+            "__doc__",
+            "Summarize a web server access log.\n\
+                \n\
+                Each line of the log is in the common log format, followed by the time it\n\
+                took to serve the request:\n\
+                \n\
+                \x20   203.0.113.9 - - [12/Mar/2024:10:15:32 +0000] \"GET /api/users HTTP/1.1\" 200 512 41ms\n",
+        )?;
         m.set_global("argparse", rt::import(m, "argparse")?)?;
         m.set_global("sys", rt::import(m, "sys")?)?;
         let pathlib = rt::import_names(m, "pathlib", &["Path"])?;

@@ -118,7 +118,13 @@ pub fn lookup<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bou
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Methods on displays and `*args`/`**kwargs` behave like on any object.\n\nThe concrete PyO3 types have their own `get_item`, `len`, .. with other\nsemantics; a missing dict key must raise `KeyError`, not give `None`.\n")?;
+        m.set_global(
+            "__doc__",
+            "Methods on displays and `*args`/`**kwargs` behave like on any object.\n\
+                \n\
+                The concrete PyO3 types have their own `get_item`, `len`, .. with other\n\
+                semantics; a missing dict key must raise `KeyError`, not give `None`.\n",
+        )?;
         rt::def!(m, sizes(*args, **kwargs))?;
         rt::def!(m, containers())?;
         rt::def!(m, lookup(key))?;

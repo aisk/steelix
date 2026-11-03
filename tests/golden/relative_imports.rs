@@ -17,7 +17,12 @@ pub fn in_function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Relative imports and failing `from` imports in a script (design §7).\n\nA script run as `__main__` has no package, so its relative imports fail.\n")?;
+        m.set_global(
+            "__doc__",
+            "Relative imports and failing `from` imports in a script (design §7).\n\
+                \n\
+                A script run as `__main__` has no package, so its relative imports fail.\n",
+        )?;
         match (|| -> PyResult<()> {
             let package = rt::import_names(m, ".", &["sibling"])?;
             m.set_global("sibling", rt::import_from(&package, "sibling")?)?;

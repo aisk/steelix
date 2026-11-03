@@ -257,7 +257,11 @@ pub mod tree {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Instances of transpiled classes behave like Python ones: pickling,\ncopying, `__slots__`, comparisons and `isinstance`.")?;
+        m.set_global(
+            "__doc__",
+            "Instances of transpiled classes behave like Python ones: pickling,\n\
+                copying, `__slots__`, comparisons and `isinstance`.",
+        )?;
         m.set_global("copy", rt::import(m, "copy")?)?;
         m.set_global("pickle", rt::import(m, "pickle")?)?;
         m.set_global(

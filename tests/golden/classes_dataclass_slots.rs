@@ -79,7 +79,13 @@ pub mod p {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "`@dataclass(slots=True)` creates a new class and updates the `__class__`\ncell its methods share. It only looks at Python functions and properties, so\nwhen no property uses `super()`, the transpiled methods still refer to the\nold class (design §12).")?;
+        m.set_global(
+            "__doc__",
+            "`@dataclass(slots=True)` creates a new class and updates the `__class__`\n\
+                cell its methods share. It only looks at Python functions and properties, so\n\
+                when no property uses `super()`, the transpiled methods still refer to the\n\
+                old class (design §12).",
+        )?;
         // steelix-test: expect-error TypeError: super(type, obj): obj (instance of P) is not an instance or subtype of type (P).
         let dataclasses = rt::import_names(m, "dataclasses", &["dataclass"])?;
         m.set_global("dataclass", rt::import_from(&dataclasses, "dataclass")?)?;

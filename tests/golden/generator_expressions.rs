@@ -875,7 +875,12 @@ pub mod table {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Generator expressions are lazy: only the first iterable is evaluated\nwhen the generator is created, the rest runs as items are requested, in\na `<genexpr>` frame of its own.")?;
+        m.set_global(
+            "__doc__",
+            "Generator expressions are lazy: only the first iterable is evaluated\n\
+                when the generator is created, the rest runs as items are requested, in\n\
+                a `<genexpr>` frame of its own.",
+        )?;
         m.set_global("gc", rt::import(m, "gc")?)?;
         m.set_global("itertools", rt::import(m, "itertools")?)?;
         m.set_global("traceback", rt::import(m, "traceback")?)?;

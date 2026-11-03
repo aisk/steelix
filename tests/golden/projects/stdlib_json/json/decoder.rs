@@ -422,7 +422,17 @@ pub mod json_decode_error {
     /// The body of `class JSONDecodeError`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "JSONDecodeError", 23, |_| {
-            ns.set("__doc__", "Subclass of ValueError with the following additional properties:\n\nmsg: The unformatted error message\ndoc: The JSON document being parsed\npos: The start index of doc where parsing failed\nlineno: The line corresponding to pos\ncolno: The column corresponding to pos\n\n")?;
+            ns.set(
+                "__doc__",
+                "Subclass of ValueError with the following additional properties:\n\
+                    \n\
+                    msg: The unformatted error message\n\
+                    doc: The JSON document being parsed\n\
+                    pos: The start index of doc where parsing failed\n\
+                    lineno: The line corresponding to pos\n\
+                    colno: The column corresponding to pos\n\
+                    \n",
+            )?;
             ns.set(
                 "__init__",
                 rt::function!(
@@ -526,25 +536,98 @@ pub mod json_decoder {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
         rt::frame!(ns, "JSONDecoder", 265, |_| {
-            ns.set("__doc__", "Simple JSON <https://json.org> decoder\n\nPerforms the following translations in decoding by default:\n\n+---------------+-------------------+\n| JSON          | Python            |\n+===============+===================+\n| object        | dict              |\n+---------------+-------------------+\n| array         | list              |\n+---------------+-------------------+\n| string        | str               |\n+---------------+-------------------+\n| number (int)  | int               |\n+---------------+-------------------+\n| number (real) | float             |\n+---------------+-------------------+\n| true          | True              |\n+---------------+-------------------+\n| false         | False             |\n+---------------+-------------------+\n| null          | None              |\n+---------------+-------------------+\n\nIt also understands ``NaN``, ``Infinity``, and ``-Infinity`` as\ntheir corresponding ``float`` values, which is outside the JSON spec.\n\n")?;
+            ns.set(
+                "__doc__",
+                "Simple JSON <https://json.org> decoder\n\
+                    \n\
+                    Performs the following translations in decoding by default:\n\
+                    \n\
+                    +---------------+-------------------+\n\
+                    | JSON          | Python            |\n\
+                    +===============+===================+\n\
+                    | object        | dict              |\n\
+                    +---------------+-------------------+\n\
+                    | array         | list              |\n\
+                    +---------------+-------------------+\n\
+                    | string        | str               |\n\
+                    +---------------+-------------------+\n\
+                    | number (int)  | int               |\n\
+                    +---------------+-------------------+\n\
+                    | number (real) | float             |\n\
+                    +---------------+-------------------+\n\
+                    | true          | True              |\n\
+                    +---------------+-------------------+\n\
+                    | false         | False             |\n\
+                    +---------------+-------------------+\n\
+                    | null          | None              |\n\
+                    +---------------+-------------------+\n\
+                    \n\
+                    It also understands ``NaN``, ``Infinity``, and ``-Infinity`` as\n\
+                    their corresponding ``float`` values, which is outside the JSON spec.\n\
+                    \n",
+            )?;
             ns.set("__init__", rt::function!(
-    ns,
-    __init__(slf as "self", *, object_hook = py.None(), parse_float = py.None(), parse_int = py.None(), parse_constant = py.None(), strict = true, object_pairs_hook = py.None()),
-    qualname = "JSONDecoder.__init__",
-    doc = "``object_hook``, if specified, will be called with the result\nof every JSON object decoded and its return value will be used in\nplace of the given ``dict``.  This can be used to provide custom\ndeserializations (e.g. to support JSON-RPC class hinting).\n\n``object_pairs_hook``, if specified will be called with the result\nof every JSON object decoded with an ordered list of pairs.  The\nreturn value of ``object_pairs_hook`` will be used instead of the\n``dict``.  This feature can be used to implement custom decoders.\nIf ``object_hook`` is also defined, the ``object_pairs_hook`` takes\npriority.\n\n``parse_float``, if specified, will be called with the string\nof every JSON float to be decoded. By default this is equivalent to\nfloat(num_str). This can be used to use another datatype or parser\nfor JSON floats (e.g. decimal.Decimal).\n\n``parse_int``, if specified, will be called with the string\nof every JSON int to be decoded. By default this is equivalent to\nint(num_str). This can be used to use another datatype or parser\nfor JSON integers (e.g. float).\n\n``parse_constant``, if specified, will be called with one of the\nfollowing strings: -Infinity, Infinity, NaN.\nThis can be used to raise an exception if invalid JSON numbers\nare encountered.\n\nIf ``strict`` is false (true is the default), then control\ncharacters will be allowed inside strings.  Control characters in\nthis context are those with character codes in the 0-31 range,\nincluding ``'\\t'`` (tab), ``'\\n'``, ``'\\r'`` and ``'\\0'``.\n"
-)?)?;
-            ns.set("decode", rt::function!(
-    ns,
-    decode(slf as "self", s, _w = ns.get("WHITESPACE")?.attr("match")?),
-    qualname = "JSONDecoder.decode",
-    doc = "Return the Python representation of ``s`` (a ``str`` instance\ncontaining a JSON document).\n\n"
-)?)?;
-            ns.set("raw_decode", rt::function!(
-    ns,
-    raw_decode(slf as "self", s, idx = 0),
-    qualname = "JSONDecoder.raw_decode",
-    doc = "Decode a JSON document from ``s`` (a ``str`` beginning with\na JSON document) and return a 2-tuple of the Python\nrepresentation and the index in ``s`` where the document ended.\n\nThis can be used to decode a JSON document from a string that may\nhave extraneous data at the end.\n\n"
-)?)?;
+                ns,
+                __init__(slf as "self", *, object_hook = py.None(), parse_float = py.None(), parse_int = py.None(), parse_constant = py.None(), strict = true, object_pairs_hook = py.None()),
+                qualname = "JSONDecoder.__init__",
+                doc = "``object_hook``, if specified, will be called with the result\n\
+                    of every JSON object decoded and its return value will be used in\n\
+                    place of the given ``dict``.  This can be used to provide custom\n\
+                    deserializations (e.g. to support JSON-RPC class hinting).\n\
+                    \n\
+                    ``object_pairs_hook``, if specified will be called with the result\n\
+                    of every JSON object decoded with an ordered list of pairs.  The\n\
+                    return value of ``object_pairs_hook`` will be used instead of the\n\
+                    ``dict``.  This feature can be used to implement custom decoders.\n\
+                    If ``object_hook`` is also defined, the ``object_pairs_hook`` takes\n\
+                    priority.\n\
+                    \n\
+                    ``parse_float``, if specified, will be called with the string\n\
+                    of every JSON float to be decoded. By default this is equivalent to\n\
+                    float(num_str). This can be used to use another datatype or parser\n\
+                    for JSON floats (e.g. decimal.Decimal).\n\
+                    \n\
+                    ``parse_int``, if specified, will be called with the string\n\
+                    of every JSON int to be decoded. By default this is equivalent to\n\
+                    int(num_str). This can be used to use another datatype or parser\n\
+                    for JSON integers (e.g. float).\n\
+                    \n\
+                    ``parse_constant``, if specified, will be called with one of the\n\
+                    following strings: -Infinity, Infinity, NaN.\n\
+                    This can be used to raise an exception if invalid JSON numbers\n\
+                    are encountered.\n\
+                    \n\
+                    If ``strict`` is false (true is the default), then control\n\
+                    characters will be allowed inside strings.  Control characters in\n\
+                    this context are those with character codes in the 0-31 range,\n\
+                    including ``'\\t'`` (tab), ``'\\n'``, ``'\\r'`` and ``'\\0'``.\n"
+            )?)?;
+            ns.set(
+                "decode",
+                rt::function!(
+                    ns,
+                    decode(slf as "self", s, _w = ns.get("WHITESPACE")?.attr("match")?),
+                    qualname = "JSONDecoder.decode",
+                    doc = "Return the Python representation of ``s`` (a ``str`` instance\n\
+                        containing a JSON document).\n\
+                        \n"
+                )?,
+            )?;
+            ns.set(
+                "raw_decode",
+                rt::function!(
+                    ns,
+                    raw_decode(slf as "self", s, idx = 0),
+                    qualname = "JSONDecoder.raw_decode",
+                    doc = "Decode a JSON document from ``s`` (a ``str`` beginning with\n\
+                        a JSON document) and return a 2-tuple of the Python\n\
+                        representation and the index in ``s`` where the document ended.\n\
+                        \n\
+                        This can be used to decode a JSON document from a string that may\n\
+                        have extraneous data at the end.\n\
+                        \n"
+                )?,
+            )?;
             Ok(())
         })
     }
@@ -799,7 +882,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 _b = m.global("BACKSLASH")?,
                 _m = m.global("STRINGCHUNK")?.attr("match")?
             ),
-            doc = "Scan the string s for a JSON string. End is the index of the\ncharacter in s after the quote that started the JSON string.\nUnescapes all valid JSON string escape sequences and raises ValueError\non attempt to decode an invalid string. If strict is False then literal\ncontrol characters are allowed in the string.\n\nReturns a tuple of the decoded string and the index of the character in s\nafter the end quote."
+            doc = "Scan the string s for a JSON string. End is the index of the\n\
+                character in s after the quote that started the JSON string.\n\
+                Unescapes all valid JSON string escape sequences and raises ValueError\n\
+                on attempt to decode an invalid string. If strict is False then literal\n\
+                control characters are allowed in the string.\n\
+                \n\
+                Returns a tuple of the decoded string and the index of the character in s\n\
+                after the end quote."
         )?;
         // Use speedup if available
         {

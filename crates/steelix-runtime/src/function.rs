@@ -128,7 +128,8 @@ impl<'py> Definer<'py> for crate::Namespace<'py> {
 }
 
 /// The writable attributes, behind a lock because the class is frozen. The
-/// lock is never held while running Python code.
+/// lock is never held while running Python code, which includes dropping a
+/// value: a `__del__` may read the metadata again (see `Function::replace`).
 struct Meta {
     name: Py<PyString>,
     qualname: Py<PyString>,
@@ -232,6 +233,14 @@ impl Function {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Stores `value` in a field of the metadata and drops the old value
+    /// after releasing the lock: dropping it may run a `__del__`, which may
+    /// read this function's metadata (from this thread or another one).
+    fn replace<T>(&self, field: impl FnOnce(&mut Meta) -> &mut T, value: T) {
+        let old = std::mem::replace(field(&mut self.meta()), value);
+        drop(old);
+    }
+
     /// Whether this is the function that `def name` created in `globals`.
     pub(crate) fn is_def(&self, name: &str, globals: &Bound<'_, PyDict>) -> bool {
         self.def_name == name && self.globals.bind(globals.py()).is(globals)
@@ -245,7 +254,9 @@ impl Function {
     }
 
     fn qualname(&self, py: Python<'_>) -> String {
-        self.meta().qualname.bind(py).to_string()
+        // `str()` of a `str` subclass may run Python code: not under the lock.
+        let qualname = self.meta().qualname.clone_ref(py);
+        qualname.bind(py).to_string()
     }
 
     /// The value a call that omits `param` uses, read from `__defaults__` or
@@ -568,7 +579,8 @@ impl Function {
     fn set_name(&self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         // Deleting these attributes raises `AttributeError` before getting here.
         let value = Some(value);
-        self.meta().name = string_attribute(value, "__name__")?;
+        let name = string_attribute(value, "__name__")?;
+        self.replace(|meta| &mut meta.name, name);
         Ok(())
     }
 
@@ -581,7 +593,8 @@ impl Function {
     fn set_qualname(&self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         // Deleting these attributes raises `AttributeError` before getting here.
         let value = Some(value);
-        self.meta().qualname = string_attribute(value, "__qualname__")?;
+        let qualname = string_attribute(value, "__qualname__")?;
+        self.replace(|meta| &mut meta.qualname, qualname);
         Ok(())
     }
 
@@ -594,7 +607,8 @@ impl Function {
     fn set_doc(&self, py: Python<'_>, value: &Bound<'_, PyAny>) {
         // Deleting these attributes raises `AttributeError` before getting here.
         let value = Some(value);
-        self.meta().doc = value.map_or_else(|| py.None(), |v| v.clone().unbind());
+        let doc = value.map_or_else(|| py.None(), |v| v.clone().unbind());
+        self.replace(|meta| &mut meta.doc, doc);
     }
 
     #[getter]
@@ -606,7 +620,8 @@ impl Function {
     fn set_module(&self, py: Python<'_>, value: &Bound<'_, PyAny>) {
         // Deleting these attributes raises `AttributeError` before getting here.
         let value = Some(value);
-        self.meta().module = value.map_or_else(|| py.None(), |v| v.clone().unbind());
+        let module = value.map_or_else(|| py.None(), |v| v.clone().unbind());
+        self.replace(|meta| &mut meta.module, module);
     }
 
     #[getter]
@@ -629,7 +644,7 @@ impl Function {
             },
             _ => None,
         };
-        self.meta().defaults = value;
+        self.replace(|meta| &mut meta.defaults, value);
         Ok(())
     }
 
@@ -653,7 +668,7 @@ impl Function {
             },
             _ => None,
         };
-        self.meta().kwdefaults = value;
+        self.replace(|meta| &mut meta.kwdefaults, value);
         Ok(())
     }
 
@@ -682,7 +697,10 @@ impl Function {
             }
             None => PyDict::new(py),
         };
-        self.meta().annotations = Some(annotations.clone().unbind());
+        self.replace(
+            |meta| &mut meta.annotations,
+            Some(annotations.clone().unbind()),
+        );
         Ok(annotations)
     }
 
@@ -701,9 +719,14 @@ impl Function {
             },
             _ => None,
         };
-        let mut meta = self.meta();
-        meta.annotations = value;
-        meta.annotate = None;
+        let old = {
+            let mut meta = self.meta();
+            (
+                std::mem::replace(&mut meta.annotations, value),
+                meta.annotate.take(),
+            )
+        };
+        drop(old);
         Ok(())
     }
 
@@ -718,13 +741,17 @@ impl Function {
     #[setter(__annotate__)]
     fn set_annotate(&self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         // Deleting these attributes raises `AttributeError` before getting here.
-
-        let mut meta = self.meta();
         if value.is_none() {
-            meta.annotate = None;
+            self.replace(|meta| &mut meta.annotate, None);
         } else if value.is_callable() {
-            meta.annotate = Some(value.clone().unbind());
-            meta.annotations = None;
+            let old = {
+                let mut meta = self.meta();
+                (
+                    meta.annotate.replace(value.clone().unbind()),
+                    meta.annotations.take(),
+                )
+            };
+            drop(old);
         } else {
             return Err(PyTypeError::new_err(
                 "__annotate__ must be callable or None",
@@ -744,7 +771,7 @@ impl Function {
         let value = Some(value);
         match value.map(|v| v.cast::<PyTuple>()) {
             Some(Ok(tuple)) => {
-                self.meta().type_params = tuple.clone().unbind();
+                self.replace(|meta| &mut meta.type_params, tuple.clone().unbind());
                 Ok(())
             }
             _ => Err(PyTypeError::new_err(
@@ -902,11 +929,16 @@ impl Function {
     }
 
     fn __clear__(&self) {
-        let mut meta = self.meta();
-        meta.defaults = None;
-        meta.kwdefaults = None;
-        meta.annotate = None;
-        meta.annotations = None;
+        let old = {
+            let mut meta = self.meta();
+            (
+                meta.defaults.take(),
+                meta.kwdefaults.take(),
+                meta.annotate.take(),
+                meta.annotations.take(),
+            )
+        };
+        drop(old);
     }
 }
 

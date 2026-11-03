@@ -199,7 +199,9 @@ def lower_class_mod(module: ModuleContext, scope: ClassScope, name: str) -> rs.M
         body.append(rs.ExprStmt(rs.Try(setup)))
     doc = docstring(node, module.filename)  # type: ignore[arg-type]
     if doc is not None:
-        set_doc = rs.MethodCall(rs.Path(NAMESPACE), "set", (rs.StrLit("__doc__"), rs.StrLit(doc)))
+        set_doc = rs.MethodCall(
+            rs.Path(NAMESPACE), "set", (rs.StrLit("__doc__"), rs.StrLit(doc, lines=True))
+        )
         body += lowering.at_line(node.body[0].lineno)
         body.append(rs.ExprStmt(rs.Try(set_doc)))
     body += lowering.block(node.body).stmts

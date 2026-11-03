@@ -89,7 +89,11 @@ pub mod account {
 /// Executes the body of `classes_uncaught.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "An uncaught exception raised in a method: the traceback has the frames of\nthe methods and the module.")?;
+        m.set_global(
+            "__doc__",
+            "An uncaught exception raised in a method: the traceback has the frames of\n\
+                the methods and the module.",
+        )?;
         m.set_global(
             "Account",
             rt::class!(

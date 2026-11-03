@@ -197,7 +197,12 @@ pub mod t {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Locals are released when the function returns in reverse order of\n`co_varnames` (parameters first, then the other locals by first use), and\nthe generated Rust declares them in that order (design §5).")?;
+        m.set_global(
+            "__doc__",
+            "Locals are released when the function returns in reverse order of\n\
+                `co_varnames` (parameters first, then the other locals by first use), and\n\
+                the generated Rust declares them in that order (design §5).",
+        )?;
         m.set_global(
             "T",
             rt::class!(m, "T"(), t::body, line = 6, attributes = ["name"])?,

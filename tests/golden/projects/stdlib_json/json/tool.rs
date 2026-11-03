@@ -252,7 +252,13 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Command-line tool to validate and pretty-print JSON\n\nSee `json.__main__` for a usage example (invocation as\n`python -m json.tool` is supported for backwards compatibility).\n")?;
+        m.set_global(
+            "__doc__",
+            "Command-line tool to validate and pretty-print JSON\n\
+                \n\
+                See `json.__main__` for a usage example (invocation as\n\
+                `python -m json.tool` is supported for backwards compatibility).\n",
+        )?;
         // Copied unmodified (below this header) from Lib/json/tool.py of CPython 3.14.9,
         // licensed under the PSF License Agreement. A steelix test project:
         // tests/test_projects.py runs it transpiled and with CPython and compares.

@@ -221,7 +221,12 @@ pub mod tracked {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Locals returned (or yielded) from where they are declared are moved, not\ncloned, and display assignments do not build a tuple. Neither changes when\nan object goes away (design §8).")?;
+        m.set_global(
+            "__doc__",
+            "Locals returned (or yielded) from where they are declared are moved, not\n\
+                cloned, and display assignments do not build a tuple. Neither changes when\n\
+                an object goes away (design §8).",
+        )?;
         m.set_global("weakref", rt::import(m, "weakref")?)?;
         m.set_global(
             "Tracked",

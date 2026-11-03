@@ -288,7 +288,12 @@ pub mod noisy {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Calls of transpiled functions through every CPython call path (vectorcall,\n`tp_call`, bound methods, `functools.partial`), with and without the fast\npaths for plain positional calls.")?;
+        m.set_global(
+            "__doc__",
+            "Calls of transpiled functions through every CPython call path (vectorcall,\n\
+                `tp_call`, bound methods, `functools.partial`), with and without the fast\n\
+                paths for plain positional calls.",
+        )?;
         m.set_global("functools", rt::import(m, "functools")?)?;
         m.set_global("threading", rt::import(m, "threading")?)?;
         rt::def!(m, show(function, /, *args, **kwargs))?;

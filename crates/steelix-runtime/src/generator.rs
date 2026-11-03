@@ -250,7 +250,9 @@ impl Generator {
     }
 
     fn __repr__(slf: &Bound<'_, Self>) -> String {
-        let qualname = slf.get().names().qualname.to_string();
+        // `str()` of a `str` subclass may run Python code: not under the lock.
+        let qualname = slf.get().names().qualname.clone_ref(slf.py());
+        let qualname = qualname.bind(slf.py());
         format!(
             "<generator object {qualname} at {:#x}>",
             slf.as_ptr() as usize
@@ -267,7 +269,10 @@ impl Generator {
         let value = value
             .cast::<PyString>()
             .map_err(|_| PyTypeError::new_err("__name__ must be set to a string object"))?;
-        self.names().name = value.clone().unbind();
+        // The old name is dropped after the lock is released: a `__del__`
+        // may read the names again.
+        let old = std::mem::replace(&mut self.names().name, value.clone().unbind());
+        drop(old);
         Ok(())
     }
 
@@ -281,7 +286,8 @@ impl Generator {
         let value = value
             .cast::<PyString>()
             .map_err(|_| PyTypeError::new_err("__qualname__ must be set to a string object"))?;
-        self.names().qualname = value.clone().unbind();
+        let old = std::mem::replace(&mut self.names().qualname, value.clone().unbind());
+        drop(old);
         Ok(())
     }
 

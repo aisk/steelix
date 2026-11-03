@@ -145,10 +145,10 @@ pub fn py_make_scanner<'py>(
             })
         }
         _scan_once.set(rt::function!(
-    m,
-    _scan_once_[parse_string, strict, parse_object, &_scan_once, object_hook, object_pairs_hook, memo, parse_array, match_number, parse_float, parse_int, parse_constant](string, idx),
-    qualname = "py_make_scanner.<locals>._scan_once"
-)?)?;
+            m,
+            _scan_once_[parse_string, strict, parse_object, &_scan_once, object_hook, object_pairs_hook, memo, parse_array, match_number, parse_float, parse_int, parse_constant](string, idx),
+            qualname = "py_make_scanner.<locals>._scan_once"
+        )?)?;
         // json/scanner.py:68
         fn scan_once<'py>(
             m: &rt::Module<'py>,

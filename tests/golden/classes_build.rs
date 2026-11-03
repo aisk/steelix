@@ -1035,7 +1035,11 @@ pub mod original {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "How a class statement runs: order of evaluation, metaclasses,\n`__prepare__`, `__mro_entries__`, `__init_subclass__`, `__set_name__`.")?;
+        m.set_global(
+            "__doc__",
+            "How a class statement runs: order of evaluation, metaclasses,\n\
+                `__prepare__`, `__mro_entries__`, `__init_subclass__`, `__set_name__`.",
+        )?;
         rt::def!(m, trace(label, value = py.None()))?;
         rt::def!(m, deco(label))?;
         m.set_global("Base", rt::class!(m, "Base"(), base::body, line = 21)?)?;

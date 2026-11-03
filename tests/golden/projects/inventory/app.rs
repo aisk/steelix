@@ -334,7 +334,15 @@ pub mod discounted {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "A multi-module test application (tests/test_projects.py).\n\npython app.py          runs everything and exits normally\npython app.py crash    ends with an exception raised by code kept as\n                       Python in a submodule, through native frames of\n                       other modules\n")?;
+        m.set_global(
+            "__doc__",
+            "A multi-module test application (tests/test_projects.py).\n\
+                \n\
+                python app.py          runs everything and exits normally\n\
+                python app.py crash    ends with an exception raised by code kept as\n\
+                \x20                      Python in a submodule, through native frames of\n\
+                \x20                      other modules\n",
+        )?;
         m.set_global("importlib", rt::import(m, "importlib")?)?;
         m.set_global("sys", rt::import(m, "sys")?)?;
         rt::builtins::print(py, ("app: start", m.global("__name__")?))?;

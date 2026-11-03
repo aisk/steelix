@@ -649,7 +649,12 @@ pub mod derived {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "List, set and dict comprehensions run inline (PEP 709): their variables\ndo not leak, the first iterable is evaluated outside, and errors are\nreported in the enclosing frame on the line of the failing part.")?;
+        m.set_global(
+            "__doc__",
+            "List, set and dict comprehensions run inline (PEP 709): their variables\n\
+                do not leak, the first iterable is evaluated outside, and errors are\n\
+                reported in the enclosing frame on the line of the failing part.",
+        )?;
         m.set_global("traceback", rt::import(m, "traceback")?)?;
         m.set_global("types", rt::import(m, "types")?)?;
         rt::def!(m, show(exc))?;

@@ -37,7 +37,12 @@ pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "An uncaught exception raised inside a generator expression that a list\ncomprehension consumes: the traceback has the comprehension's line in the\nfunction and the `<genexpr>` frame.")?;
+        m.set_global(
+            "__doc__",
+            "An uncaught exception raised inside a generator expression that a list\n\
+                comprehension consumes: the traceback has the comprehension's line in the\n\
+                function and the `<genexpr>` frame.",
+        )?;
         rt::def!(m, totals(rows))?;
         rt::builtins::print(
             py,

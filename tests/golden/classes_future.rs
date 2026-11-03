@@ -149,7 +149,11 @@ pub mod private {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Class annotations with `from __future__ import annotations` are strings in\n`__annotations__`, created at the start of the body.")?;
+        m.set_global(
+            "__doc__",
+            "Class annotations with `from __future__ import annotations` are strings in\n\
+                `__annotations__`, created at the start of the body.",
+        )?;
         let __future__ = rt::import_names(m, "__future__", &["annotations"])?;
         m.set_global("annotations", rt::import_from(&__future__, "annotations")?)?;
         m.set_global("dataclasses", rt::import(m, "dataclasses")?)?;

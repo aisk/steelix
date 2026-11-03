@@ -100,7 +100,62 @@ pub struct Frame<'py> {
     /// An exception that already has its entry for this frame: raised here
     /// with [`Frame::raise`], or re-raised. It gets no second entry when it
     /// reaches a handler or leaves the function.
-    entered: RefCell<Option<Bound<'py, PyAny>>>,
+    ///
+    /// Only addresses, see [`Entered`]: the generated code drops an
+    /// exception whose handler does not need it without telling the frame,
+    /// and holding it here would keep it (with its arguments and traceback)
+    /// alive until the function returns, while CPython frees it when the
+    /// handler ends.
+    entered: Cell<Entered>,
+}
+
+/// Identifies the exception in [`Frame::entered`] without keeping it alive:
+/// its address, and the address of the frame at the head of its traceback
+/// then (this frame, or for a bare `raise` the frame whose handler is
+/// running, which is still running too).
+///
+/// Once the exception is freed, a new one may get its address. That one
+/// can only have reached this frame from a callee, so the head of its
+/// traceback is another frame: whenever an exception gets an entry for this
+/// frame, `entered` is updated.
+#[derive(Clone, Copy)]
+struct Entered {
+    exception: *mut ffi::PyObject,
+    head: *mut ffi::PyObject,
+}
+
+impl Entered {
+    const NONE: Self = Self {
+        exception: std::ptr::null_mut(),
+        head: std::ptr::null_mut(),
+    };
+
+    fn of(exception: &Bound<'_, PyAny>) -> Self {
+        Self {
+            exception: exception.as_ptr(),
+            head: head_frame(exception),
+        }
+    }
+
+    fn is(self, exception: &Bound<'_, PyAny>) -> bool {
+        self.exception == exception.as_ptr()
+            && !self.head.is_null()
+            && self.head == head_frame(exception)
+    }
+}
+
+/// The frame of the first traceback entry of `exception`, or null. Only
+/// compared: the traceback keeps it alive while the exception has it.
+fn head_frame(exception: &Bound<'_, PyAny>) -> *mut ffi::PyObject {
+    let py = exception.py();
+    let head = || -> PyResult<*mut ffi::PyObject> {
+        let traceback = exception.getattr(crate::interned(py, "__traceback__"))?;
+        if traceback.is_none() {
+            return Ok(std::ptr::null_mut());
+        }
+        Ok(traceback.getattr(crate::interned(py, "tb_frame"))?.as_ptr())
+    };
+    head().unwrap_or(std::ptr::null_mut())
 }
 
 /// What code runs in: a module (for the module body and functions) or the
@@ -141,7 +196,7 @@ pub fn run<'py, T>(
         code,
         line: Cell::new(code.first_line),
         object: RefCell::new(None),
-        entered: RefCell::new(None),
+        entered: Cell::new(Entered::NONE),
     };
     body(&frame).map_err(|err| PyErr::from_value(frame.catch(err)))
 }
@@ -164,23 +219,22 @@ impl<'py> Frame<'py> {
         let py = self.py();
         let exception = err.into_value(py).into_bound(py).into_any();
         self.enter(&exception);
-        self.entered.borrow_mut().take();
+        self.entered.set(Entered::NONE);
         exception
     }
 
     /// Gives `exception` this frame's traceback entry at the current line,
     /// unless it already has it, and remembers that it has it.
     fn enter(&self, exception: &Bound<'py, PyAny>) {
-        let entered = self.entered.borrow_mut().take();
-        let here = entered.is_some_and(|entered| entered.is(exception))
-            || self.raised_by_kept_code(exception);
-        if !here {
-            // Adding the entry can only fail when Python itself is in
-            // trouble (no memory, no stack left); the traceback then just
-            // lacks this frame.
-            let _ = self.add_entry(exception);
+        if self.entered.get().is(exception) {
+            return;
         }
-        *self.entered.borrow_mut() = Some(exception.clone());
+        let entered = if self.raised_by_kept_code(exception) {
+            Entered::of(exception)
+        } else {
+            self.add_entry(exception)
+        };
+        self.entered.set(entered);
     }
 
     /// `except handler:` on `line`, where `handler` is not a builtin
@@ -251,8 +305,7 @@ impl<'py> Frame<'py> {
             ffi::PyErr_SetObject(ffi::Py_TYPE(exception.as_ptr()).cast(), exception.as_ptr());
             Bound::from_owned_ptr(py, ffi::PyErr_GetRaisedException())
         };
-        let _ = self.add_entry(&exception);
-        *self.entered.borrow_mut() = Some(exception.clone());
+        self.entered.set(self.add_entry(&exception));
         PyErr::from_value(exception)
     }
 
@@ -271,7 +324,7 @@ impl<'py> Frame<'py> {
     /// Re-raises an exception that already went through this frame, without
     /// another traceback entry.
     pub(crate) fn reraise_exception(&self, exception: Bound<'py, PyAny>) -> PyErr {
-        *self.entered.borrow_mut() = Some(exception.clone());
+        self.entered.set(Entered::of(&exception));
         PyErr::from_value(exception)
     }
 
@@ -347,12 +400,24 @@ impl<'py> Frame<'py> {
         }
     }
 
-    fn add_entry(&self, exception: &Bound<'py, PyAny>) -> PyResult<()> {
-        let py = self.py();
-        let frame = self.object()?;
-        let next = exception.getattr("__traceback__")?;
-        let entry = traceback_type(py)?.call1((next, frame, -1, self.line.get()))?;
-        exception.setattr("__traceback__", entry)
+    /// Adds this frame's traceback entry at the current line to `exception`.
+    ///
+    /// Adding the entry can only fail when Python itself is in trouble (no
+    /// memory, no stack left); the traceback then just lacks this frame, and
+    /// the result remembers nothing.
+    fn add_entry(&self, exception: &Bound<'py, PyAny>) -> Entered {
+        let add = || -> PyResult<Entered> {
+            let py = self.py();
+            let frame = self.object()?;
+            let next = exception.getattr("__traceback__")?;
+            let entry = traceback_type(py)?.call1((next, &frame, -1, self.line.get()))?;
+            exception.setattr("__traceback__", entry)?;
+            Ok(Entered {
+                exception: exception.as_ptr(),
+                head: frame.as_ptr(),
+            })
+        };
+        add().unwrap_or(Entered::NONE)
     }
 
     fn object(&self) -> PyResult<Bound<'py, PyAny>> {

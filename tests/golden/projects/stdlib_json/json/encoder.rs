@@ -135,33 +135,138 @@ pub mod json_encoder {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         let py = m.py();
         rt::frame!(ns, "JSONEncoder", 77, |_| {
-            ns.set("__doc__", "Extensible JSON <https://json.org> encoder for Python data structures.\n\nSupports the following objects and types by default:\n\n+-------------------+---------------+\n| Python            | JSON          |\n+===================+===============+\n| dict              | object        |\n+-------------------+---------------+\n| list, tuple       | array         |\n+-------------------+---------------+\n| str               | string        |\n+-------------------+---------------+\n| int, float        | number        |\n+-------------------+---------------+\n| True              | true          |\n+-------------------+---------------+\n| False             | false         |\n+-------------------+---------------+\n| None              | null          |\n+-------------------+---------------+\n\nTo extend this to recognize other objects, subclass and implement a\n``.default()`` method with another method that returns a serializable\nobject for ``o`` if possible, otherwise it should call the superclass\nimplementation (to raise ``TypeError``).\n\n")?;
+            ns.set(
+                "__doc__",
+                "Extensible JSON <https://json.org> encoder for Python data structures.\n\
+                    \n\
+                    Supports the following objects and types by default:\n\
+                    \n\
+                    +-------------------+---------------+\n\
+                    | Python            | JSON          |\n\
+                    +===================+===============+\n\
+                    | dict              | object        |\n\
+                    +-------------------+---------------+\n\
+                    | list, tuple       | array         |\n\
+                    +-------------------+---------------+\n\
+                    | str               | string        |\n\
+                    +-------------------+---------------+\n\
+                    | int, float        | number        |\n\
+                    +-------------------+---------------+\n\
+                    | True              | true          |\n\
+                    +-------------------+---------------+\n\
+                    | False             | false         |\n\
+                    +-------------------+---------------+\n\
+                    | None              | null          |\n\
+                    +-------------------+---------------+\n\
+                    \n\
+                    To extend this to recognize other objects, subclass and implement a\n\
+                    ``.default()`` method with another method that returns a serializable\n\
+                    object for ``o`` if possible, otherwise it should call the superclass\n\
+                    implementation (to raise ``TypeError``).\n\
+                    \n",
+            )?;
             ns.set("item_separator", ", ")?;
             ns.set("key_separator", ": ")?;
             ns.set("__init__", rt::function!(
-    ns,
-    __init__(slf as "self", *, skipkeys = false, ensure_ascii = true, check_circular = true, allow_nan = true, sort_keys = false, indent = py.None(), separators = py.None(), default = py.None()),
-    qualname = "JSONEncoder.__init__",
-    doc = "Constructor for JSONEncoder, with sensible defaults.\n\nIf skipkeys is false, then it is a TypeError to attempt\nencoding of keys that are not str, int, float, bool or None.\nIf skipkeys is True, such items are simply skipped.\n\nIf ensure_ascii is true, the output is guaranteed to be str objects\nwith all incoming non-ASCII and non-printable characters escaped.\nIf ensure_ascii is false, the output can contain non-ASCII and\nnon-printable characters.\n\nIf check_circular is true, then lists, dicts, and custom encoded\nobjects will be checked for circular references during encoding to\nprevent an infinite recursion (which would cause an RecursionError).\nOtherwise, no such check takes place.\n\nIf allow_nan is true, then NaN, Infinity, and -Infinity will be\nencoded as such.  This behavior is not JSON specification compliant,\nbut is consistent with most JavaScript based encoders and decoders.\nOtherwise, it will be a ValueError to encode such floats.\n\nIf sort_keys is true, then the output of dictionaries will be\nsorted by key; this is useful for regression tests to ensure\nthat JSON serializations can be compared on a day-to-day basis.\n\nIf indent is a non-negative integer, then JSON array\nelements and object members will be pretty-printed with that\nindent level.  An indent level of 0 will only insert newlines.\nNone is the most compact representation.\n\nIf specified, separators should be an (item_separator,\nkey_separator) tuple.  The default is (', ', ': ') if *indent* is\n``None`` and (',', ': ') otherwise.  To get the most compact JSON\nrepresentation, you should specify (',', ':') to eliminate\nwhitespace.\n\nIf specified, default is a function that gets called for objects\nthat can't otherwise be serialized.  It should return a JSON\nencodable version of the object or raise a ``TypeError``.\n\n"
-)?)?;
-            ns.set("default", rt::function!(
-    ns,
-    default(slf as "self", o),
-    qualname = "JSONEncoder.default",
-    doc = "Implement this method in a subclass such that it returns\na serializable object for ``o``, or calls the base implementation\n(to raise a ``TypeError``).\n\nFor example, to support arbitrary iterators, you could\nimplement default like this::\n\n    def default(self, o):\n        try:\n            iterable = iter(o)\n        except TypeError:\n            pass\n        else:\n            return list(iterable)\n        # Let the base class default method raise the TypeError\n        return super().default(o)\n\n"
-)?)?;
-            ns.set("encode", rt::function!(
-    ns,
-    encode(slf as "self", o),
-    qualname = "JSONEncoder.encode",
-    doc = "Return a JSON string representation of a Python data structure.\n\n>>> from json.encoder import JSONEncoder\n>>> JSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\n'{\"foo\": [\"bar\", \"baz\"]}'\n\n"
-)?)?;
-            ns.set("iterencode", rt::function!(
-    ns,
-    iterencode(slf as "self", o, _one_shot = false),
-    qualname = "JSONEncoder.iterencode",
-    doc = "Encode the given object and yield each string\nrepresentation as available.\n\nFor example::\n\n    for chunk in JSONEncoder().iterencode(bigobject):\n        mysocket.write(chunk)\n\n"
-)?)?;
+                ns,
+                __init__(slf as "self", *, skipkeys = false, ensure_ascii = true, check_circular = true, allow_nan = true, sort_keys = false, indent = py.None(), separators = py.None(), default = py.None()),
+                qualname = "JSONEncoder.__init__",
+                doc = "Constructor for JSONEncoder, with sensible defaults.\n\
+                    \n\
+                    If skipkeys is false, then it is a TypeError to attempt\n\
+                    encoding of keys that are not str, int, float, bool or None.\n\
+                    If skipkeys is True, such items are simply skipped.\n\
+                    \n\
+                    If ensure_ascii is true, the output is guaranteed to be str objects\n\
+                    with all incoming non-ASCII and non-printable characters escaped.\n\
+                    If ensure_ascii is false, the output can contain non-ASCII and\n\
+                    non-printable characters.\n\
+                    \n\
+                    If check_circular is true, then lists, dicts, and custom encoded\n\
+                    objects will be checked for circular references during encoding to\n\
+                    prevent an infinite recursion (which would cause an RecursionError).\n\
+                    Otherwise, no such check takes place.\n\
+                    \n\
+                    If allow_nan is true, then NaN, Infinity, and -Infinity will be\n\
+                    encoded as such.  This behavior is not JSON specification compliant,\n\
+                    but is consistent with most JavaScript based encoders and decoders.\n\
+                    Otherwise, it will be a ValueError to encode such floats.\n\
+                    \n\
+                    If sort_keys is true, then the output of dictionaries will be\n\
+                    sorted by key; this is useful for regression tests to ensure\n\
+                    that JSON serializations can be compared on a day-to-day basis.\n\
+                    \n\
+                    If indent is a non-negative integer, then JSON array\n\
+                    elements and object members will be pretty-printed with that\n\
+                    indent level.  An indent level of 0 will only insert newlines.\n\
+                    None is the most compact representation.\n\
+                    \n\
+                    If specified, separators should be an (item_separator,\n\
+                    key_separator) tuple.  The default is (', ', ': ') if *indent* is\n\
+                    ``None`` and (',', ': ') otherwise.  To get the most compact JSON\n\
+                    representation, you should specify (',', ':') to eliminate\n\
+                    whitespace.\n\
+                    \n\
+                    If specified, default is a function that gets called for objects\n\
+                    that can't otherwise be serialized.  It should return a JSON\n\
+                    encodable version of the object or raise a ``TypeError``.\n\
+                    \n"
+            )?)?;
+            ns.set(
+                "default",
+                rt::function!(
+                    ns,
+                    default(slf as "self", o),
+                    qualname = "JSONEncoder.default",
+                    doc = "Implement this method in a subclass such that it returns\n\
+                        a serializable object for ``o``, or calls the base implementation\n\
+                        (to raise a ``TypeError``).\n\
+                        \n\
+                        For example, to support arbitrary iterators, you could\n\
+                        implement default like this::\n\
+                        \n\
+                        \x20   def default(self, o):\n\
+                        \x20       try:\n\
+                        \x20           iterable = iter(o)\n\
+                        \x20       except TypeError:\n\
+                        \x20           pass\n\
+                        \x20       else:\n\
+                        \x20           return list(iterable)\n\
+                        \x20       # Let the base class default method raise the TypeError\n\
+                        \x20       return super().default(o)\n\
+                        \n"
+                )?,
+            )?;
+            ns.set(
+                "encode",
+                rt::function!(
+                    ns,
+                    encode(slf as "self", o),
+                    qualname = "JSONEncoder.encode",
+                    doc = "Return a JSON string representation of a Python data structure.\n\
+                        \n\
+                        >>> from json.encoder import JSONEncoder\n\
+                        >>> JSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\n\
+                        '{\"foo\": [\"bar\", \"baz\"]}'\n\
+                        \n"
+                )?,
+            )?;
+            ns.set(
+                "iterencode",
+                rt::function!(
+                    ns,
+                    iterencode(slf as "self", o, _one_shot = false),
+                    qualname = "JSONEncoder.iterencode",
+                    doc = "Encode the given object and yield each string\n\
+                        representation as available.\n\
+                        \n\
+                        For example::\n\
+                        \n\
+                        \x20   for chunk in JSONEncoder().iterencode(bigobject):\n\
+                        \x20       mysocket.write(chunk)\n\
+                        \n"
+                )?,
+            )?;
             Ok(())
         })
     }
@@ -521,7 +626,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(
             m,
             py_encode_basestring(s),
-            doc = "Return a JSON representation of a Python string\n\n    "
+            doc = "Return a JSON representation of a Python string\n\
+                \n\
+                \x20   "
         )?;
         {
             let c_encode_basestring = m.global("c_encode_basestring")?;
@@ -537,7 +644,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(
             m,
             py_encode_basestring_ascii(s),
-            doc = "Return an ASCII-only JSON representation of a Python string\n\n    "
+            doc = "Return an ASCII-only JSON representation of a Python string\n\
+                \n\
+                \x20   "
         )?;
         {
             let c_encode_basestring_ascii = m.global("c_encode_basestring_ascii")?;

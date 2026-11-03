@@ -177,7 +177,14 @@ pub mod holder {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Values computed for a statement go away when the statement is done.\n\nOnly the statement is the unit: CPython may drop a value earlier, in the\nmiddle of the statement, so each value here is the last thing a statement\nuses.")?;
+        m.set_global(
+            "__doc__",
+            "Values computed for a statement go away when the statement is done.\n\
+                \n\
+                Only the statement is the unit: CPython may drop a value earlier, in the\n\
+                middle of the statement, so each value here is the last thing a statement\n\
+                uses.",
+        )?;
         m.set_global("weakref", rt::import(m, "weakref")?)?;
         m.set_global(
             "Tracked",

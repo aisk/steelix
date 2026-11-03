@@ -337,7 +337,12 @@ pub mod decorated {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Method level mixed mode: methods and class body statements that can not\nbe lowered stay Python, in the class namespace, and still see `super()`,\n`__class__` and the class's private names.")?;
+        m.set_global(
+            "__doc__",
+            "Method level mixed mode: methods and class body statements that can not\n\
+                be lowered stay Python, in the class namespace, and still see `super()`,\n\
+                `__class__` and the class's private names.",
+        )?;
         m.set_global("Base", rt::class!(m, "Base"(), base::body, line = 6)?)?;
         m.set_global(
             "Mixed",

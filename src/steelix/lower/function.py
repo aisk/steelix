@@ -468,20 +468,20 @@ def _as(rust: str, python: str) -> str:
     return "" if rust.removeprefix("r#") == python else f" as {string_literal(python)}"
 
 
-def function_options(ctx: Context, scope: FunctionScope, rust_name: str) -> list[str]:
+def function_options(ctx: Context, scope: FunctionScope, rust_name: str) -> list[rs.Tokens]:
     """`qualname = ".."`, `name = ".."` and `doc = ".."` for `rt::function!`."""
     node = scope.node
     assert node is not None
     options = []
     if scope.qualname != scope.name:
-        options.append(f"qualname = {string_literal(scope.qualname)}")
+        options.append(rs.Tokens((f"qualname = {string_literal(scope.qualname)}",)))
     elif rust_name.removeprefix("r#") != scope.name:
         key = "name" if isinstance(node, ast.FunctionDef) else "qualname"
-        options.append(f"{key} = {string_literal(scope.name)}")
+        options.append(rs.Tokens((f"{key} = {string_literal(scope.name)}",)))
     if isinstance(node, ast.FunctionDef):
         doc = docstring(node, ctx.module.filename)
         if doc is not None:
-            options.append(f"doc = {string_literal(doc)}")
+            options.append(rs.Tokens(("doc = ", rs.StrLit(doc, lines=True))))
     return options
 
 

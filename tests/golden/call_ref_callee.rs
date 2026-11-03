@@ -25,7 +25,11 @@ pub fn run<'py>(
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "A call with `*`/`**` of a local that may be unbound: the callee is a\nreference returned by the unbound-local check.")?;
+        m.set_global(
+            "__doc__",
+            "A call with `*`/`**` of a local that may be unbound: the callee is a\n\
+                reference returned by the unbound-local check.",
+        )?;
         rt::def!(m, run(flag, f, args, kwargs))?;
         run(
             m,

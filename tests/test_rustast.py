@@ -70,6 +70,47 @@ def test_print_expr(expr: rs.Expr, expected: str) -> None:
     assert print_expr(expr) == expected
 
 
+def test_long_macro_call_is_indented_for_its_line() -> None:
+    # rustfmt leaves the whole statement alone when it can not lay out the
+    # macro (`slf as "self"`), so the printed indentation is the final one.
+    call = rs.MacroCall("rt::function", (p("ns"), rs.Tokens((f'f(slf as "self", {"x" * 60})',))))
+    stmt = rs.ExprStmt(rs.Try(rs.MethodCall(p("ns"), "set", (rs.StrLit("f"), rs.Try(call)))))
+    block = rs.Block((stmt,))
+    assert print_expr(rs.BlockExpr(block), 1) == (
+        "{\n"
+        '        ns.set("f", rt::function!(\n'
+        "            ns,\n"
+        f'            f(slf as "self", {"x" * 60})\n'
+        "        )?)?;\n"
+        "    }"
+    )
+
+
+def test_docstring_of_several_lines_keeps_its_value() -> None:
+    doc = 'Summary "q".\n\n  indented\n\ttab \\ end\n'
+    option = rs.Tokens(("doc = ", rs.StrLit(doc, lines=True)))
+    text = print_expr(rs.MacroCall("rt::def", (p("m"), rs.Tokens(("f()",)), option)), 1)
+    assert text == (
+        "rt::def!(\n"
+        "        m,\n"
+        "        f(),\n"
+        '        doc = "Summary \\"q\\".\\n\\\n'
+        "            \\n\\\n"
+        "            \\x20 indented\\n\\\n"
+        '            \\ttab \\\\ end\\n"\n'
+        "    )"
+    )
+    # What Rust makes of the literal: a `\` at the end of a line drops the
+    # line break and the whitespace after it.
+    literal = text[text.index("doc = ") + 6 : text.rindex('"') + 1]
+    unescaped = re.sub(r"\\\n\s*", "", literal)[1:-1]
+    escapes = {"\\n": "\n", "\\t": "\t", "\\x20": " ", '\\"': '"', "\\\\": "\\"}
+    value = re.sub(r'\\(n|t|x20|"|\\)', lambda m: escapes[m.group(0)], unescaped)
+    assert value == doc
+    # One line stays one literal.
+    assert print_expr(rs.StrLit("one line\n", lines=True)) == '"one line\\n"'
+
+
 def test_string_literal_escapes_controls_but_keeps_unicode() -> None:
     assert string_literal("é中​\x7f") == '"é中\\u{200b}\\u{7f}"'
     assert byte_string_literal(b'"\t') == 'b"\\"\\t"'
@@ -193,7 +234,7 @@ def test_parameters_and_captured_locals_keep_their_clone() -> None:
     param = rs.Param("n", "&Bound<'py, PyAny>")
     body = rs.Block((outer, call, rs.Return(_ok(_clone("n")))), _ok(_clone("x")))
     out = _cleaned(body, (param,))
-    assert "    Ok(x.clone())\n})();" in out
+    assert "        Ok(x.clone())\n    })();" in out
     assert "return Ok(n.clone());" in out
     # Shadowed by an owned local, the parameter is moved too.
     shadow = rs.Let("n", True, init=_clone("n"))
@@ -368,7 +409,7 @@ def test_declarations_move_down_to_their_first_use() -> None:
     # Nested fns have their own locals.
     inner = rs.Fn("inner", (), "()", rs.Block((late, rs.ExprStmt(_call("g")), no_else)))
     out = _merged(rs.Block((rs.ItemStmt(inner),)))
-    assert f"let x: {BOUND};\n    g()?;" in out
+    assert f"let x: {BOUND};\n        g()?;" in out
 
 
 _LATE_LET = re.compile(r"^( *)let (?:mut )?((?:r#)?\w+): [^=]+;$")

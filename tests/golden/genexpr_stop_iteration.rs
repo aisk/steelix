@@ -40,7 +40,11 @@ pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 /// Executes the body of `genexpr_stop_iteration.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "A `StopIteration` raised in a generator expression becomes a\n`RuntimeError` (PEP 479); the traceback chains both.")?;
+        m.set_global(
+            "__doc__",
+            "A `StopIteration` raised in a generator expression becomes a\n\
+                `RuntimeError` (PEP 479); the traceback chains both.",
+        )?;
         rt::def!(m, boom(v))?;
         rt::def!(m, run())?;
         run(m)?;

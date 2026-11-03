@@ -203,7 +203,7 @@ def _lower_exec_module(
     doc = docstring(tree, parsed.filename)
     if doc is not None:
         setter = rs.MethodCall(
-            rs.Path(ctx.context()), "set_global", (rs.StrLit("__doc__"), rs.StrLit(doc))
+            rs.Path(ctx.context()), "set_global", (rs.StrLit("__doc__"), rs.StrLit(doc, lines=True))
         )
         body.append(rs.ExprStmt(rs.Try(setter)))
     body += _module_annotations(ctx, tree, parsed)

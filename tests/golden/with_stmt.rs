@@ -325,10 +325,10 @@ pub mod manager {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Manager", 7, |_| {
             ns.set("__init__", rt::function!(
-    ns,
-    __init__(slf as "self", name, suppress = false, fail_enter = false, fail_exit = false),
-    qualname = "Manager.__init__"
-)?)?;
+                ns,
+                __init__(slf as "self", name, suppress = false, fail_enter = false, fail_exit = false),
+                qualname = "Manager.__init__"
+            )?)?;
             ns.set(
                 "__enter__",
                 rt::function!(

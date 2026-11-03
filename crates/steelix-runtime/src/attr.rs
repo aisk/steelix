@@ -34,25 +34,29 @@ pub trait Attributes<'py> {
     ) -> PyResult<Bound<'py, PyAny>>;
 }
 
-impl<'py> Attributes<'py> for Bound<'py, PyAny> {
+/// For every Python type, so typed values (`Bound<PyDict>`, `Bound<PyTuple>`,
+/// a `#[pyclass]`) need no `.as_any()`. `Borrowed` values get them through
+/// `Deref`.
+impl<'py, T> Attributes<'py> for Bound<'py, T> {
     #[inline]
     fn attr(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
-        self.getattr(crate::interned(self.py(), name))
+        self.as_any().getattr(crate::interned(self.py(), name))
     }
 
     #[inline]
     fn set_attr(&self, name: &'static str, value: impl IntoPyObject<'py>) -> PyResult<()> {
-        self.setattr(crate::interned(self.py(), name), value)
+        self.as_any()
+            .setattr(crate::interned(self.py(), name), value)
     }
 
     #[inline]
     fn del_attr(&self, name: &'static str) -> PyResult<()> {
-        self.delattr(crate::interned(self.py(), name))
+        self.as_any().delattr(crate::interned(self.py(), name))
     }
 
     #[inline]
     fn method0(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
-        self.call_method0(crate::interned(self.py(), name))
+        self.as_any().call_method0(crate::interned(self.py(), name))
     }
 
     #[inline]
@@ -61,6 +65,7 @@ impl<'py> Attributes<'py> for Bound<'py, PyAny> {
         name: &'static str,
         args: impl pyo3::call::PyCallArgs<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        self.call_method1(crate::interned(self.py(), name), args)
+        self.as_any()
+            .call_method1(crate::interned(self.py(), name), args)
     }
 }

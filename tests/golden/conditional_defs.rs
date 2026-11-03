@@ -24,7 +24,11 @@ pub fn g<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Functions defined in module level compound statements: nested fn items of\n`exec_module`, bound in the globals when the `def` runs.")?;
+        m.set_global(
+            "__doc__",
+            "Functions defined in module level compound statements: nested fn items of\n\
+                `exec_module`, bound in the globals when the `def` runs.",
+        )?;
         m.set_global("sys", rt::import(m, "sys")?)?;
         m.set_global("counter", 10)?;
         if !rt::builtin(py, "hasattr")?

@@ -8,5 +8,8 @@ license.workspace = true
 [dependencies]
 pyo3.workspace = true
 
+[build-dependencies]
+pyo3-build-config = "0.30"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

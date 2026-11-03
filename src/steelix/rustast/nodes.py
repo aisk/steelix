@@ -36,6 +36,9 @@ class FloatLit(Expr):
 @dataclass(frozen=True)
 class StrLit(Expr):
     value: str
+    lines: bool = False
+    """Print a value of several lines (a docstring) one line per source
+    line, joined by `\\` continuations."""
 
 
 @dataclass(frozen=True)

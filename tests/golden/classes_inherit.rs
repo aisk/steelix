@@ -485,10 +485,10 @@ pub mod upper {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Upper", 156, |_| {
             ns.set("__call__", rt::function!(
-    ns,
-    __call__(slf as "self", parser, namespace, values, option_string = m.py().None()),
-    qualname = "Upper.__call__"
-)?)?;
+                ns,
+                __call__(slf as "self", parser, namespace, values, option_string = m.py().None()),
+                qualname = "Upper.__call__"
+            )?)?;
             Ok(())
         })
     }

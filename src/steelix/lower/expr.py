@@ -1150,7 +1150,7 @@ class ExprLowering(ComprehensionLowering):
         ):
             # A method: its annotations see the class namespace (`__classdict__`).
             definer = rs.Path(NAMESPACE)
-        macro_args = (definer, signature, *(rs.Tokens((o,)) for o in options))
+        macro_args = (definer, signature, *options)
         macro = rs.MacroCall("rt::def" if bind else "rt::function", macro_args)
         value = Value(_try(macro), Kind.OWNED)
         if not decorator_values:

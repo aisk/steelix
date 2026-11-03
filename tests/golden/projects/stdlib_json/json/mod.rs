@@ -438,7 +438,105 @@ pub fn loads<'py>(
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "JSON (JavaScript Object Notation) <https://json.org> is a subset of\nJavaScript syntax (ECMA-262 3rd edition) used as a lightweight data\ninterchange format.\n\n:mod:`json` exposes an API familiar to users of the standard library\n:mod:`marshal` and :mod:`pickle` modules.  It is derived from a\nversion of the externally maintained simplejson library.\n\nEncoding basic Python object hierarchies::\n\n    >>> import json\n    >>> json.dumps(['foo', {'bar': ('baz', None, 1.0, 2)}])\n    '[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]'\n    >>> print(json.dumps(\"\\\"foo\\bar\"))\n    \"\\\"foo\\bar\"\n    >>> print(json.dumps('\\u1234'))\n    \"\\u1234\"\n    >>> print(json.dumps('\\\\'))\n    \"\\\\\"\n    >>> print(json.dumps({\"c\": 0, \"b\": 0, \"a\": 0}, sort_keys=True))\n    {\"a\": 0, \"b\": 0, \"c\": 0}\n    >>> from io import StringIO\n    >>> io = StringIO()\n    >>> json.dump(['streaming API'], io)\n    >>> io.getvalue()\n    '[\"streaming API\"]'\n\nCompact encoding::\n\n    >>> import json\n    >>> mydict = {'4': 5, '6': 7}\n    >>> json.dumps([1,2,3,mydict], separators=(',', ':'))\n    '[1,2,3,{\"4\":5,\"6\":7}]'\n\nPretty printing::\n\n    >>> import json\n    >>> print(json.dumps({'4': 5, '6': 7}, sort_keys=True, indent=4))\n    {\n        \"4\": 5,\n        \"6\": 7\n    }\n\nDecoding JSON::\n\n    >>> import json\n    >>> obj = ['foo', {'bar': ['baz', None, 1.0, 2]}]\n    >>> json.loads('[\"foo\", {\"bar\":[\"baz\", null, 1.0, 2]}]') == obj\n    True\n    >>> json.loads('\"\\\\\"foo\\\\bar\"') == '\"foo\\x08ar'\n    True\n    >>> from io import StringIO\n    >>> io = StringIO('[\"streaming API\"]')\n    >>> json.load(io)[0] == 'streaming API'\n    True\n\nSpecializing JSON object decoding::\n\n    >>> import json\n    >>> def as_complex(dct):\n    ...     if '__complex__' in dct:\n    ...         return complex(dct['real'], dct['imag'])\n    ...     return dct\n    ...\n    >>> json.loads('{\"__complex__\": true, \"real\": 1, \"imag\": 2}',\n    ...     object_hook=as_complex)\n    (1+2j)\n    >>> from decimal import Decimal\n    >>> json.loads('1.1', parse_float=Decimal) == Decimal('1.1')\n    True\n\nSpecializing JSON object encoding::\n\n    >>> import json\n    >>> def encode_complex(obj):\n    ...     if isinstance(obj, complex):\n    ...         return [obj.real, obj.imag]\n    ...     raise TypeError(f'Object of type {obj.__class__.__name__} '\n    ...                     f'is not JSON serializable')\n    ...\n    >>> json.dumps(2 + 1j, default=encode_complex)\n    '[2.0, 1.0]'\n    >>> json.JSONEncoder(default=encode_complex).encode(2 + 1j)\n    '[2.0, 1.0]'\n    >>> ''.join(json.JSONEncoder(default=encode_complex).iterencode(2 + 1j))\n    '[2.0, 1.0]'\n\n\nUsing json from the shell to validate and pretty-print::\n\n    $ echo '{\"json\":\"obj\"}' | python -m json\n    {\n        \"json\": \"obj\"\n    }\n    $ echo '{ 1.2:3.4}' | python -m json\n    Expecting property name enclosed in double quotes: line 1 column 3 (char 2)\n")?;
+        m.set_global(
+            "__doc__",
+            "JSON (JavaScript Object Notation) <https://json.org> is a subset of\n\
+                JavaScript syntax (ECMA-262 3rd edition) used as a lightweight data\n\
+                interchange format.\n\
+                \n\
+                :mod:`json` exposes an API familiar to users of the standard library\n\
+                :mod:`marshal` and :mod:`pickle` modules.  It is derived from a\n\
+                version of the externally maintained simplejson library.\n\
+                \n\
+                Encoding basic Python object hierarchies::\n\
+                \n\
+                \x20   >>> import json\n\
+                \x20   >>> json.dumps(['foo', {'bar': ('baz', None, 1.0, 2)}])\n\
+                \x20   '[\"foo\", {\"bar\": [\"baz\", null, 1.0, 2]}]'\n\
+                \x20   >>> print(json.dumps(\"\\\"foo\\bar\"))\n\
+                \x20   \"\\\"foo\\bar\"\n\
+                \x20   >>> print(json.dumps('\\u1234'))\n\
+                \x20   \"\\u1234\"\n\
+                \x20   >>> print(json.dumps('\\\\'))\n\
+                \x20   \"\\\\\"\n\
+                \x20   >>> print(json.dumps({\"c\": 0, \"b\": 0, \"a\": 0}, sort_keys=True))\n\
+                \x20   {\"a\": 0, \"b\": 0, \"c\": 0}\n\
+                \x20   >>> from io import StringIO\n\
+                \x20   >>> io = StringIO()\n\
+                \x20   >>> json.dump(['streaming API'], io)\n\
+                \x20   >>> io.getvalue()\n\
+                \x20   '[\"streaming API\"]'\n\
+                \n\
+                Compact encoding::\n\
+                \n\
+                \x20   >>> import json\n\
+                \x20   >>> mydict = {'4': 5, '6': 7}\n\
+                \x20   >>> json.dumps([1,2,3,mydict], separators=(',', ':'))\n\
+                \x20   '[1,2,3,{\"4\":5,\"6\":7}]'\n\
+                \n\
+                Pretty printing::\n\
+                \n\
+                \x20   >>> import json\n\
+                \x20   >>> print(json.dumps({'4': 5, '6': 7}, sort_keys=True, indent=4))\n\
+                \x20   {\n\
+                \x20       \"4\": 5,\n\
+                \x20       \"6\": 7\n\
+                \x20   }\n\
+                \n\
+                Decoding JSON::\n\
+                \n\
+                \x20   >>> import json\n\
+                \x20   >>> obj = ['foo', {'bar': ['baz', None, 1.0, 2]}]\n\
+                \x20   >>> json.loads('[\"foo\", {\"bar\":[\"baz\", null, 1.0, 2]}]') == obj\n\
+                \x20   True\n\
+                \x20   >>> json.loads('\"\\\\\"foo\\\\bar\"') == '\"foo\\x08ar'\n\
+                \x20   True\n\
+                \x20   >>> from io import StringIO\n\
+                \x20   >>> io = StringIO('[\"streaming API\"]')\n\
+                \x20   >>> json.load(io)[0] == 'streaming API'\n\
+                \x20   True\n\
+                \n\
+                Specializing JSON object decoding::\n\
+                \n\
+                \x20   >>> import json\n\
+                \x20   >>> def as_complex(dct):\n\
+                \x20   ...     if '__complex__' in dct:\n\
+                \x20   ...         return complex(dct['real'], dct['imag'])\n\
+                \x20   ...     return dct\n\
+                \x20   ...\n\
+                \x20   >>> json.loads('{\"__complex__\": true, \"real\": 1, \"imag\": 2}',\n\
+                \x20   ...     object_hook=as_complex)\n\
+                \x20   (1+2j)\n\
+                \x20   >>> from decimal import Decimal\n\
+                \x20   >>> json.loads('1.1', parse_float=Decimal) == Decimal('1.1')\n\
+                \x20   True\n\
+                \n\
+                Specializing JSON object encoding::\n\
+                \n\
+                \x20   >>> import json\n\
+                \x20   >>> def encode_complex(obj):\n\
+                \x20   ...     if isinstance(obj, complex):\n\
+                \x20   ...         return [obj.real, obj.imag]\n\
+                \x20   ...     raise TypeError(f'Object of type {obj.__class__.__name__} '\n\
+                \x20   ...                     f'is not JSON serializable')\n\
+                \x20   ...\n\
+                \x20   >>> json.dumps(2 + 1j, default=encode_complex)\n\
+                \x20   '[2.0, 1.0]'\n\
+                \x20   >>> json.JSONEncoder(default=encode_complex).encode(2 + 1j)\n\
+                \x20   '[2.0, 1.0]'\n\
+                \x20   >>> ''.join(json.JSONEncoder(default=encode_complex).iterencode(2 + 1j))\n\
+                \x20   '[2.0, 1.0]'\n\
+                \n\
+                \n\
+                Using json from the shell to validate and pretty-print::\n\
+                \n\
+                \x20   $ echo '{\"json\":\"obj\"}' | python -m json\n\
+                \x20   {\n\
+                \x20       \"json\": \"obj\"\n\
+                \x20   }\n\
+                \x20   $ echo '{ 1.2:3.4}' | python -m json\n\
+                \x20   Expecting property name enclosed in double quotes: line 1 column 3 (char 2)\n",
+        )?;
         // Copied unmodified (below this header) from Lib/json/__init__.py of CPython 3.14.9,
         // licensed under the PSF License Agreement. A steelix test project:
         // tests/test_projects.py runs it transpiled and with CPython and compares.
@@ -484,12 +582,93 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(
             m,
             dump(obj, fp, *, skipkeys = false, ensure_ascii = true, check_circular = true, allow_nan = true, cls = py.None(), indent = py.None(), separators = py.None(), default = py.None(), sort_keys = false, **kw),
-            doc = "Serialize ``obj`` as a JSON formatted stream to ``fp`` (a\n``.write()``-supporting file-like object).\n\nIf ``skipkeys`` is true then ``dict`` keys that are not basic types\n(``str``, ``int``, ``float``, ``bool``, ``None``) will be skipped\ninstead of raising a ``TypeError``.\n\nIf ``ensure_ascii`` is false, then the strings written to ``fp`` can\ncontain non-ASCII and non-printable characters if they appear in strings\ncontained in ``obj``. Otherwise, all such characters are escaped in JSON\nstrings.\n\nIf ``check_circular`` is false, then the circular reference check\nfor container types will be skipped and a circular reference will\nresult in an ``RecursionError`` (or worse).\n\nIf ``allow_nan`` is false, then it will be a ``ValueError`` to\nserialize out of range ``float`` values (``nan``, ``inf``, ``-inf``)\nin strict compliance of the JSON specification, instead of using the\nJavaScript equivalents (``NaN``, ``Infinity``, ``-Infinity``).\n\nIf ``indent`` is a non-negative integer, then JSON array elements and\nobject members will be pretty-printed with that indent level. An indent\nlevel of 0 will only insert newlines. ``None`` is the default and gives\na representation with no newlines inserted.\n\nIf specified, ``separators`` should be an ``(item_separator,\nkey_separator)`` tuple.  The default is ``(', ', ': ')`` if *indent* is\n``None`` and ``(',', ': ')`` otherwise.  To get the most compact JSON\nrepresentation, you should specify ``(',', ':')`` to eliminate\nwhitespace.\n\n``default(obj)`` is a function that should return a serializable version\nof obj or raise TypeError. The default simply raises TypeError.\n\nIf *sort_keys* is true (default: ``False``), then the output of\ndictionaries will be sorted by key.\n\nTo use a custom ``JSONEncoder`` subclass (e.g. one that overrides the\n``.default()`` method to serialize additional types), specify it with\nthe ``cls`` kwarg; otherwise ``JSONEncoder`` is used.\n\n"
+            doc = "Serialize ``obj`` as a JSON formatted stream to ``fp`` (a\n\
+                ``.write()``-supporting file-like object).\n\
+                \n\
+                If ``skipkeys`` is true then ``dict`` keys that are not basic types\n\
+                (``str``, ``int``, ``float``, ``bool``, ``None``) will be skipped\n\
+                instead of raising a ``TypeError``.\n\
+                \n\
+                If ``ensure_ascii`` is false, then the strings written to ``fp`` can\n\
+                contain non-ASCII and non-printable characters if they appear in strings\n\
+                contained in ``obj``. Otherwise, all such characters are escaped in JSON\n\
+                strings.\n\
+                \n\
+                If ``check_circular`` is false, then the circular reference check\n\
+                for container types will be skipped and a circular reference will\n\
+                result in an ``RecursionError`` (or worse).\n\
+                \n\
+                If ``allow_nan`` is false, then it will be a ``ValueError`` to\n\
+                serialize out of range ``float`` values (``nan``, ``inf``, ``-inf``)\n\
+                in strict compliance of the JSON specification, instead of using the\n\
+                JavaScript equivalents (``NaN``, ``Infinity``, ``-Infinity``).\n\
+                \n\
+                If ``indent`` is a non-negative integer, then JSON array elements and\n\
+                object members will be pretty-printed with that indent level. An indent\n\
+                level of 0 will only insert newlines. ``None`` is the default and gives\n\
+                a representation with no newlines inserted.\n\
+                \n\
+                If specified, ``separators`` should be an ``(item_separator,\n\
+                key_separator)`` tuple.  The default is ``(', ', ': ')`` if *indent* is\n\
+                ``None`` and ``(',', ': ')`` otherwise.  To get the most compact JSON\n\
+                representation, you should specify ``(',', ':')`` to eliminate\n\
+                whitespace.\n\
+                \n\
+                ``default(obj)`` is a function that should return a serializable version\n\
+                of obj or raise TypeError. The default simply raises TypeError.\n\
+                \n\
+                If *sort_keys* is true (default: ``False``), then the output of\n\
+                dictionaries will be sorted by key.\n\
+                \n\
+                To use a custom ``JSONEncoder`` subclass (e.g. one that overrides the\n\
+                ``.default()`` method to serialize additional types), specify it with\n\
+                the ``cls`` kwarg; otherwise ``JSONEncoder`` is used.\n\
+                \n"
         )?;
         rt::def!(
             m,
             dumps(obj, *, skipkeys = false, ensure_ascii = true, check_circular = true, allow_nan = true, cls = py.None(), indent = py.None(), separators = py.None(), default = py.None(), sort_keys = false, **kw),
-            doc = "Serialize ``obj`` to a JSON formatted ``str``.\n\nIf ``skipkeys`` is true then ``dict`` keys that are not basic types\n(``str``, ``int``, ``float``, ``bool``, ``None``) will be skipped\ninstead of raising a ``TypeError``.\n\nIf ``ensure_ascii`` is false, then the return value can contain\nnon-ASCII and non-printable characters if they appear in strings\ncontained in ``obj``.  Otherwise, all such characters are escaped in\nJSON strings.\n\nIf ``check_circular`` is false, then the circular reference check\nfor container types will be skipped and a circular reference will\nresult in an ``RecursionError`` (or worse).\n\nIf ``allow_nan`` is false, then it will be a ``ValueError`` to\nserialize out of range ``float`` values (``nan``, ``inf``, ``-inf``) in\nstrict compliance of the JSON specification, instead of using the\nJavaScript equivalents (``NaN``, ``Infinity``, ``-Infinity``).\n\nIf ``indent`` is a non-negative integer, then JSON array elements and\nobject members will be pretty-printed with that indent level. An indent\nlevel of 0 will only insert newlines. ``None`` is the default and gives\na representation with no newlines inserted.\n\nIf specified, ``separators`` should be an ``(item_separator,\nkey_separator)`` tuple.  The default is ``(', ', ': ')`` if *indent* is\n``None`` and ``(',', ': ')`` otherwise.  To get the most compact JSON\nrepresentation, you should specify ``(',', ':')`` to eliminate\nwhitespace.\n\n``default(obj)`` is a function that should return a serializable version\nof obj or raise TypeError. The default simply raises TypeError.\n\nIf *sort_keys* is true (default: ``False``), then the output of\ndictionaries will be sorted by key.\n\nTo use a custom ``JSONEncoder`` subclass (e.g. one that overrides the\n``.default()`` method to serialize additional types), specify it with\nthe ``cls`` kwarg; otherwise ``JSONEncoder`` is used.\n\n"
+            doc = "Serialize ``obj`` to a JSON formatted ``str``.\n\
+                \n\
+                If ``skipkeys`` is true then ``dict`` keys that are not basic types\n\
+                (``str``, ``int``, ``float``, ``bool``, ``None``) will be skipped\n\
+                instead of raising a ``TypeError``.\n\
+                \n\
+                If ``ensure_ascii`` is false, then the return value can contain\n\
+                non-ASCII and non-printable characters if they appear in strings\n\
+                contained in ``obj``.  Otherwise, all such characters are escaped in\n\
+                JSON strings.\n\
+                \n\
+                If ``check_circular`` is false, then the circular reference check\n\
+                for container types will be skipped and a circular reference will\n\
+                result in an ``RecursionError`` (or worse).\n\
+                \n\
+                If ``allow_nan`` is false, then it will be a ``ValueError`` to\n\
+                serialize out of range ``float`` values (``nan``, ``inf``, ``-inf``) in\n\
+                strict compliance of the JSON specification, instead of using the\n\
+                JavaScript equivalents (``NaN``, ``Infinity``, ``-Infinity``).\n\
+                \n\
+                If ``indent`` is a non-negative integer, then JSON array elements and\n\
+                object members will be pretty-printed with that indent level. An indent\n\
+                level of 0 will only insert newlines. ``None`` is the default and gives\n\
+                a representation with no newlines inserted.\n\
+                \n\
+                If specified, ``separators`` should be an ``(item_separator,\n\
+                key_separator)`` tuple.  The default is ``(', ', ': ')`` if *indent* is\n\
+                ``None`` and ``(',', ': ')`` otherwise.  To get the most compact JSON\n\
+                representation, you should specify ``(',', ':')`` to eliminate\n\
+                whitespace.\n\
+                \n\
+                ``default(obj)`` is a function that should return a serializable version\n\
+                of obj or raise TypeError. The default simply raises TypeError.\n\
+                \n\
+                If *sort_keys* is true (default: ``False``), then the output of\n\
+                dictionaries will be sorted by key.\n\
+                \n\
+                To use a custom ``JSONEncoder`` subclass (e.g. one that overrides the\n\
+                ``.default()`` method to serialize additional types), specify it with\n\
+                the ``cls`` kwarg; otherwise ``JSONEncoder`` is used.\n\
+                \n"
         )?;
         m.set_global(
             "_default_decoder",
@@ -503,12 +682,59 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(
             m,
             load(fp, *, cls = py.None(), object_hook = py.None(), parse_float = py.None(), parse_int = py.None(), parse_constant = py.None(), object_pairs_hook = py.None(), **kw),
-            doc = "Deserialize ``fp`` (a ``.read()``-supporting file-like object containing\na JSON document) to a Python object.\n\n``object_hook`` is an optional function that will be called with the\nresult of any object literal decode (a ``dict``). The return value of\n``object_hook`` will be used instead of the ``dict``. This feature\ncan be used to implement custom decoders (e.g. JSON-RPC class hinting).\n\n``object_pairs_hook`` is an optional function that will be called with\nthe result of any object literal decoded with an ordered list of pairs.\nThe return value of ``object_pairs_hook`` will be used instead of the\n``dict``.  This feature can be used to implement custom decoders.  If\n``object_hook`` is also defined, the ``object_pairs_hook`` takes\npriority.\n\nTo use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\nkwarg; otherwise ``JSONDecoder`` is used.\n"
+            doc = "Deserialize ``fp`` (a ``.read()``-supporting file-like object containing\n\
+                a JSON document) to a Python object.\n\
+                \n\
+                ``object_hook`` is an optional function that will be called with the\n\
+                result of any object literal decode (a ``dict``). The return value of\n\
+                ``object_hook`` will be used instead of the ``dict``. This feature\n\
+                can be used to implement custom decoders (e.g. JSON-RPC class hinting).\n\
+                \n\
+                ``object_pairs_hook`` is an optional function that will be called with\n\
+                the result of any object literal decoded with an ordered list of pairs.\n\
+                The return value of ``object_pairs_hook`` will be used instead of the\n\
+                ``dict``.  This feature can be used to implement custom decoders.  If\n\
+                ``object_hook`` is also defined, the ``object_pairs_hook`` takes\n\
+                priority.\n\
+                \n\
+                To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\n\
+                kwarg; otherwise ``JSONDecoder`` is used.\n"
         )?;
         rt::def!(
             m,
             loads(s, *, cls = py.None(), object_hook = py.None(), parse_float = py.None(), parse_int = py.None(), parse_constant = py.None(), object_pairs_hook = py.None(), **kw),
-            doc = "Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance\ncontaining a JSON document) to a Python object.\n\n``object_hook`` is an optional function that will be called with the\nresult of any object literal decode (a ``dict``). The return value of\n``object_hook`` will be used instead of the ``dict``. This feature\ncan be used to implement custom decoders (e.g. JSON-RPC class hinting).\n\n``object_pairs_hook`` is an optional function that will be called with\nthe result of any object literal decoded with an ordered list of pairs.\nThe return value of ``object_pairs_hook`` will be used instead of the\n``dict``.  This feature can be used to implement custom decoders.  If\n``object_hook`` is also defined, the ``object_pairs_hook`` takes\npriority.\n\n``parse_float``, if specified, will be called with the string\nof every JSON float to be decoded. By default this is equivalent to\nfloat(num_str). This can be used to use another datatype or parser\nfor JSON floats (e.g. decimal.Decimal).\n\n``parse_int``, if specified, will be called with the string\nof every JSON int to be decoded. By default this is equivalent to\nint(num_str). This can be used to use another datatype or parser\nfor JSON integers (e.g. float).\n\n``parse_constant``, if specified, will be called with one of the\nfollowing strings: -Infinity, Infinity, NaN.\nThis can be used to raise an exception if invalid JSON numbers\nare encountered.\n\nTo use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\nkwarg; otherwise ``JSONDecoder`` is used.\n"
+            doc = "Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance\n\
+                containing a JSON document) to a Python object.\n\
+                \n\
+                ``object_hook`` is an optional function that will be called with the\n\
+                result of any object literal decode (a ``dict``). The return value of\n\
+                ``object_hook`` will be used instead of the ``dict``. This feature\n\
+                can be used to implement custom decoders (e.g. JSON-RPC class hinting).\n\
+                \n\
+                ``object_pairs_hook`` is an optional function that will be called with\n\
+                the result of any object literal decoded with an ordered list of pairs.\n\
+                The return value of ``object_pairs_hook`` will be used instead of the\n\
+                ``dict``.  This feature can be used to implement custom decoders.  If\n\
+                ``object_hook`` is also defined, the ``object_pairs_hook`` takes\n\
+                priority.\n\
+                \n\
+                ``parse_float``, if specified, will be called with the string\n\
+                of every JSON float to be decoded. By default this is equivalent to\n\
+                float(num_str). This can be used to use another datatype or parser\n\
+                for JSON floats (e.g. decimal.Decimal).\n\
+                \n\
+                ``parse_int``, if specified, will be called with the string\n\
+                of every JSON int to be decoded. By default this is equivalent to\n\
+                int(num_str). This can be used to use another datatype or parser\n\
+                for JSON integers (e.g. float).\n\
+                \n\
+                ``parse_constant``, if specified, will be called with one of the\n\
+                following strings: -Infinity, Infinity, NaN.\n\
+                This can be used to raise an exception if invalid JSON numbers\n\
+                are encountered.\n\
+                \n\
+                To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\n\
+                kwarg; otherwise ``JSONDecoder`` is used.\n"
         )?;
         Ok(())
     })

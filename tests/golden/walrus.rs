@@ -190,7 +190,11 @@ pub fn global_walrus<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |_| {
-        m.set_global("__doc__", "Assignment expressions (`:=`), in comprehensions too, where they bind\nin the enclosing function or module (PEP 572).")?;
+        m.set_global(
+            "__doc__",
+            "Assignment expressions (`:=`), in comprehensions too, where they bind\n\
+                in the enclosing function or module (PEP 572).",
+        )?;
         rt::def!(m, trace(label, value))?;
         rt::def!(m, in_condition(values))?;
         rt::def!(m, in_while(values))?;

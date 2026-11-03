@@ -15,10 +15,19 @@ use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::type_object::PyTypeInfo;
 use pyo3::types::{PyBool, PyBytes, PyComplex, PyFloat, PyInt, PySlice, PyString, PyTuple};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+
+// The runtime relies on the GIL: attached threads take turns, which the
+// lock-free name table of `interned` and the metadata of `Function` count
+// on (design §6). Free-threaded builds are not supported.
+#[cfg(Py_GIL_DISABLED)]
+compile_error!(
+    "steelix-runtime needs a Python with the GIL; free-threaded builds (3.14t) are not \
+     supported, see docs/design.md §6 \"调用的开销\""
+);
 
 mod attr;
 pub mod call;
@@ -147,8 +156,10 @@ pub fn builtin<'py>(py: Python<'py>, name: &'static str) -> PyResult<Bound<'py, 
 /// `'static`, so their address and length identify them.
 ///
 /// Like the strings of `pyo3::intern!`, they are never freed. Most names are
-/// found in a table indexed by their address, read without a lock; a name
-/// whose entries are all taken by other names goes to a per thread map.
+/// found in a table indexed by their address, read without a lock, which is
+/// only correct with the GIL (see the check for free-threaded builds above).
+/// A name whose entries are all taken by other names goes to a map behind a
+/// lock.
 pub(crate) fn interned<'py>(
     py: Python<'py>,
     name: &'static str,
@@ -204,19 +215,26 @@ fn name_slot(name: &'static str) -> usize {
 
 fn interned_slow<'py>(py: Python<'py>, name: &'static str) -> Borrowed<'static, 'py, PyString> {
     type Names = HashMap<(usize, usize), &'static Py<PyString>, BuildHasherDefault<AddressHasher>>;
-    thread_local! {
-        static NAMES: RefCell<Names> = RefCell::default();
-    }
+    static NAMES: Mutex<Names> = Mutex::new(HashMap::with_hasher(BuildHasherDefault::new()));
+    let names = || {
+        NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    };
     let key = (name.as_ptr() as usize, name.len());
-    if let Some(string) = NAMES.with_borrow(|names| names.get(&key).copied()) {
+    if let Some(string) = names().get(&key).copied() {
         return string.bind_borrowed(py);
     }
-    // Created outside the borrow: it may run Python code that looks up
-    // names too.
-    let string: &'static Py<PyString> = Box::leak(Box::new(PyString::intern(py, name).unbind()));
-    NAMES
-        .with_borrow_mut(|names| *names.entry(key).or_insert(string))
-        .bind_borrowed(py)
+    // Created outside the lock: it may run Python code that looks up names
+    // too. Another thread may have added the name meanwhile; then this
+    // string is just dropped, it is the same interned string anyway.
+    let string = PyString::intern(py, name).unbind();
+    let mut names = names();
+    let string = match names.get(&key) {
+        Some(&existing) => existing,
+        None => *names.entry(key).or_insert(Box::leak(Box::new(string))),
+    };
+    string.bind_borrowed(py)
 }
 
 #[derive(Default)]

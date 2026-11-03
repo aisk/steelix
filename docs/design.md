@@ -135,7 +135,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 要点
 
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`get_item`、`call` 等方法
-- 名字写在源码里的属性和方法（`o.x`、`o.x = v`、`o.m(a)`）用 runtime 的扩展 trait `rt::Attributes`（M11）：`o.attr("x")?`、`o.set_attr("x", v)?`、`o.del_attr("x")?`、`o.method0("m")?`、`o.method1("m", (a,))?`。它们就是 PyO3 的 `getattr`、`setattr`、`delattr`、`call_method0`、`call_method1`，区别只在名字必须是 `'static` 的字面量，runtime 为每个名字只创建一次驻留（interned）的 Python 字符串（第 6 节"调用的开销"）。用到它们的模块多一行 `use steelix_runtime::Attributes;`。名字在运行时才知道的（手写的代码里）照常用 PyO3 的方法
+- 名字写在源码里的属性和方法（`o.x`、`o.x = v`、`o.m(a)`）用 runtime 的扩展 trait `rt::Attributes`（M11）：`o.attr("x")?`、`o.set_attr("x", v)?`、`o.del_attr("x")?`、`o.method0("m")?`、`o.method1("m", (a,))?`。它们就是 PyO3 的 `getattr`、`setattr`、`delattr`、`call_method0`、`call_method1`，区别只在名字必须是 `'static` 的字面量，runtime 为每个名字只创建一次驻留（interned）的 Python 字符串（第 6 节"调用的开销"）。用到它们的模块多一行 `use steelix_runtime::Attributes;`。trait 对所有的 `Bound<'py, T>` 实现（M11a），手写代码里的 `Bound<PyDict>`、`Bound<PyTuple>`、`#[pyclass]` 的值不用先 `.as_any()`，`Borrowed` 通过 `Deref` 也能用。名字在运行时才知道的（手写的代码里）照常用 PyO3 的方法
 - 函数体和模块体包在 `rt::frame!` 里，异常的 traceback 因此有原生函数的帧，函数名和 Python 一样，行号是 `def` 所在的行。闭包参数 `frame` 只在用到时出现（`raise`、`except` 等），否则写 `|_|`。`--traceback-lines` 在可能出错的语句前加 `frame.line(N);`，行号精确到语句（见第 9 节）
 - 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
 - 模块体生成 `exec_module(m)`，只依赖传入的模块上下文，与输出模式无关
@@ -143,7 +143,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 - 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
 - 函数末尾的 `return` 写成尾表达式，返回值本身是 `PyResult` 时不再包一层 `Ok(..?)`
 - 带 `else` 且有 `break` 的循环包在带标签的 block 里，`break` 写成 `break 'for_else`，正常结束时执行 `else`。`else` 里的 `break`/`continue` 属于外层循环，要跨出这个 block，rustc 不允许不带标签的跳转跨出带标签的 block（E0695），所以只在这时给外层循环加标签 `'outer: for ..`，写成 `continue 'outer`。其余循环都不带标签
-- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(m, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
+- 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(m, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`。多行的 docstring（还有类和模块的 `__doc__`）在 Rust 字面量里也是一行对一行，行尾用 `\` 续行（M11a），续行的缩进和行首的空白不属于字符串，所以值的行首空格写成 `\x20`
+
+  ```rust
+  rt::def!(
+      m,
+      dumps(obj),
+      doc = "Serialize ``obj`` to a JSON formatted ``str``.\n\
+          \n\
+          If ``skipkeys`` is true then ``dict`` keys that are not basic types\n\
+          \x20   (indented in the docstring)\n"
+  )?;
+  ```
 - 模块级函数若只绑定一次，并且能在转换时绑定参数，调用时直接调用 Rust 函数（见第 6、7 节）
 - 嵌套函数和 lambda 是写在外层函数体里的 Rust fn，被捕获并会改变的变量是 `rt::Cell`（见第 6 节）
 - 会递归的函数（直接调用构成的调用图里有环）开头加 `let _guard = rt::RecursionGuard::enter(py)?;`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用由 `Function` 的入口检查（第 6 节），不需要 guard
@@ -209,6 +220,8 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 - 实现 `__call__`（按存储的签名描述绑定参数）和 `__get__`（像 Python 函数一样绑定方法，返回 `types.MethodType`），`repr` 是 `<function qualname at 0x..>`。M11 起还支持 vectorcall，并且和 Python 函数一样带 `Py_TPFLAGS_METHOD_DESCRIPTOR`（下面的"调用的开销"）
 - 持有指向生成的 Rust fn 的指针（统一签名的小闭包，由 `rt::function!` 生成，把绑定好的参数逐个传给 Rust fn）、所属模块的 globals、闭包的 cell。通过 `__traverse__` 让 GC 看到它们，模块 dict 和函数之间的循环引用可以回收
 - 元信息（`__name__`、`__qualname__`、`__doc__`、`__module__`、`__defaults__`、`__kwdefaults__`、`__annotations__`、`__annotate__`、`__type_params__`）放在 `Mutex` 里，都是可写的真实属性，赋值时做和 CPython 一样的类型检查（`__defaults__` 只接受 tuple 或 None 等）。M1 把它们放在实例 `__dict__` 里，但那样 `__defaults__` 无法做类型检查，调用时也要查 dict。`__dict__` 照常可写
+  - 持有锁的时候不运行 Python 代码，也不释放 Python 对象：赋值时先在锁里换出旧值，释放锁之后再 drop 它（M11a，`Function::replace`），`__clear__` 也一样。旧值的 `__del__` 可能再读这个函数的元信息，`Mutex` 不可重入，在锁里 drop 会永远卡住；`__del__` 里释放 GIL 时，另一个线程读元信息也会拿着 GIL 等锁，同样死锁（`tests/cases/metadata_del.py`）。`str` 子类的 `__str__` 也是 Python 代码，`repr` 先取出 qualname 再转换。生成器表达式对象（§8）的名字同样处理
+- 函数类型声明在 `steelix_runtime` 模块里（`#[pyclass(module = ..)]`，类型的 repr 是 `<class 'steelix_runtime.function'>`），但并没有可以 import 的 `steelix_runtime` 模块，按模块路径找不到这个类型。函数对象本身按 qualname pickle，不受影响
 - `__module__` 取自 globals 的 `__name__`，与 CPython 一致；只读的 `__globals__`、`__closure__`（与 CPython 一样是 cell 的 tuple，没有闭包时是 None）
 - 生态工具需要的内省（M3）
   - `__signature__` 由存储的签名、当前的默认值和注解构造 `inspect.Signature`，`inspect.signature`、`help()` 都能用。`__dict__` 里有 `__wrapped__`（`functools.wraps` 的结果）时不提供，让 `inspect` 去追踪被包装的函数
@@ -263,7 +276,8 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 - PyO3 的 `#[pyclass]` 不能声明这两项，所以在创建第一个函数时补到类型对象上：`tp_vectorcall_offset` 指向 `Function` 里存放入口指针的字段，`tp_flags` 加上两个标志，再 `PyType_Modified`。`Function` 不能被继承，所有实例布局相同
 - vectorcall 的入口经过 PyO3 自己包装 fastcall 函数用的 trampoline（`pyo3::impl_`，随 PyO3 的版本固定）。它把错误和 panic 变成异常，并且告诉 PyO3 当前线程已经 attach。只用 `Python::assume_attached` 不够：在 Python 自己创建的线程里调用原生函数时 PyO3 不知道已经 attach，函数里释放的 `Py<T>`（例如处理完的异常）会推迟到以后才 decref，`__del__` 的时机就和 CPython 不同（`tests/cases/call_protocols.py` 最后一段检查这一点）
 - CPython 在 `tp_call` 之前检查递归深度，vectorcall 之前不检查，所以入口自己调用 `Py_EnterRecursiveCall`，消息和以前一样
-- **驻留的名字。** `rt::Attributes`（第 4 节）、`m.global`、`rt::builtin` 和 `rt::call!` 的关键字参数都只接受 `'static` 的名字，按字符串字面量的地址和长度找到驻留的 Python 字符串。PyO3 从 `&str` 每次新建字符串，CPython 再算哈希，而且属性缓存只认驻留的名字，这一项在 skime 上就快了一倍。查找用一张 4096 项、按地址索引的表，读取不加锁（attach 的线程轮流运行，写入只在第一次），几个位置都被别的名字占了时退回每个线程一张的 `HashMap`。和 `pyo3::intern!` 一样，这些字符串不释放
+- **驻留的名字。** `rt::Attributes`（第 4 节）、`m.global`、`rt::builtin` 和 `rt::call!` 的关键字参数都只接受 `'static` 的名字，按字符串字面量的地址和长度找到驻留的 Python 字符串。PyO3 从 `&str` 每次新建字符串，CPython 再算哈希，而且属性缓存只认驻留的名字，这一项在 skime 上就快了一倍。查找用一张 4096 项、按地址索引的表，读取不加锁（attach 的线程轮流运行，写入只在第一次），几个位置都被别的名字占了时退回一张加锁的 `HashMap`（M11a 之前是每个线程一张，每个线程都要为同一个名字泄漏一份）。和 `pyo3::intern!` 一样，这些字符串不释放
+  - 不加锁的读取只在有 GIL 时正确：写入一个位置的几个字段之间不会有别的线程运行。free-threaded 的 Python（3.14t）没有这个保证，`Function` 的元信息和 `Generator` 的状态也是按有 GIL 设计的，所以 runtime 在 free-threaded 的构建上直接编译失败（`build.rs` 用 `pyo3-build-config` 得到 `Py_GIL_DISABLED`，`lib.rs` 里 `compile_error!` 指向这一节），而不是生成运行时才出错的代码
 
 在 skime 上（release，fib 22）从 2.93 s 降到 1.10 s，CPython 是 0.48 s。只换 runtime、生成代码不变时是 2.11 s。各项的数字见 `m10-skime.md` 第 7 节。
 
@@ -528,7 +542,7 @@ h.call0()?.contains(&item)?
 
 具体写法
 
-- 方法调用：参数都是纯的时写 `o.method1("m", (x, 1))?`（没有参数时 `o.method0("m")?`），否则写 `o.attr("m")?.call1((f()?,))?`，保证先查找方法
+- 方法调用：参数都是纯的时写 `o.method1("m", (x, 1))?`（没有参数时 `o.method0("m")?`），否则写 `o.attr("m")?.call1((f()?,))?`，保证先查找方法。不把参数先放进临时变量再写成 `method1`（M11 的 review 建议过，可以省掉 bound method）：那样参数在查找方法之前求值，`o` 的 property、`__getattr__` 或者找不到方法时的 `AttributeError` 都能看出顺序不同，`o.missing(f())` 会先调用 `f`。省掉 bound method 要在 runtime 里按 `_PyObject_GetMethod` 先查找再调用，见第 6 节"调用的开销"
 - `in`/`not in` 用 `contains`，`is` 用 `Bound::is`，与 `None` 比较用 `is_none()`。它们的结果是 Rust `bool`，需要对象时才 `rt::bool(py, ..)`
 - `and`/`or` 在条件里是 `&&`/`||`，右侧有 prelude 时写成 block。需要值时生成 `if` 表达式，左操作数先放进临时变量，决定结果时直接 move 出来；左操作数是 Rust `bool` 时不需要临时变量。左操作数是常量时在转换时就决定。作为语句的 `a or f()` 生成 `if !a.is_truthy()? { f()?; }`
 - 链式比较：`a < b < c` 在条件里是 `a.lt(&b)? && b.lt(c)?`；中间操作数需要临时变量时，它和之后所有用到它的比较放在同一个 block 里：`a.lt(b)? && { let rhs = f(py)?; b.lt(&rhs)? && rhs.lt(d)? }`。需要值时第一个比较结果放进临时变量，`if result.is_truthy()? { b.rich_compare(c, ..)? } else { result }`
@@ -790,6 +804,7 @@ match (|| -> PyResult<()> {
 - 函数和闭包最后的 `return x;` 写成尾表达式 `x`，最后的 `if`/`match` 每个分支都 `return` 时整体变成表达式（clippy 的 `needless_return`，`lower/rustflow.py` 的 `returns_as_tail`）
 - 闭包的返回类型按块里的跳转决定：没有跳转是 `PyResult<()>`；只有 `return` 并且结尾不可达时直接返回值，写 `return Ok(..)`；其余是 `PyResult<rt::Flow<'py>>`，`Flow` 有 `Next`、`Break`、`Continue`、`Return(value)`。外面按 `Flow` 分派，只有一种跳转时写成 `if let rt::Flow::Return(value) = ..? { return Ok(value); }`，否则写 `match`
 - handler 的 `let e = frame.catch(err);` 把这一帧补进 traceback，得到异常对象。不用 `as` 也要设置正在处理的异常时写 `let _handling = rt::Handling::new(&frame.catch(err));`。handler 只有 `pass`、赋值字面量这类不会调用 Python 代码的语句时省略这两行
+- 异常对象由 `match` 的 `err` 持有，离开 handler（包括 `continue`、`break`）时释放，和 CPython 一样，`__del__` 和参数的 weakref 在下一条语句之前生效。`Frame` 为了不重复添加 traceback 条目，要记住哪个异常已经有这一帧的条目（在这里 `raise` 的、重新抛出的），M11a 之前它持有这个异常，不经过 `frame.catch` 的 handler（`pass`、只有 `continue`）接住之后异常要等函数返回才释放。现在只记地址：异常的地址，和当时它的 traceback 第一项的帧（这一帧，或者裸 `raise` 时正在处理它的那一帧，都还在运行）。异常释放之后新的异常可能用同一个地址，但它是从被调用的函数来的，traceback 的第一项是别的帧，不会被当成已经有条目（`tests/cases/handler_release.py`）
 - `rt::Handling` 是 RAII guard：创建时用 `PyErr_GetHandledException`/`PyErr_SetHandledException` 保存并设置正在处理的异常，`Drop` 时恢复。所以 handler 里 `sys.exception()`、`logging.exception()`、`traceback.print_exc()`、新异常的 `__context__`、辅助函数里的裸 `raise` 都和 CPython 一样，从 `?`、`return`、`break`、panic 离开时也会恢复
 - `as e` 的名字只在 handler 内使用时就是 handler 里的 `let`，离开 handler 自然消失，这就是 CPython 结尾的隐式 `del e`。模块级的名字写入 globals，handler 结束时 `m.unbind_global("e")?`。函数里 handler 之外也用到这个名字的，所在的函数保留为 Python（`except-as name used outside its handler`，标准库里只有 1 处）
 - `except*` 保留为 Python（§13），异常组的拆分和重新组合不值得用 Rust 再实现一遍
@@ -1050,7 +1065,13 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 
 已知且有意保留的语义差异
 
-- 局部变量释放的时机（§5、§8）。函数返回时的释放顺序和 CPython 一样，但有三处不同。`for` 的目标变量只在循环里用到时在每次迭代开头声明（§5），所以最后一个元素在循环结束时释放，CPython 要等到函数返回或者变量被重新赋值。只在 `try` 体里用到的变量声明在 `try` 生成的闭包里（§9），`try` 语句结束时就释放。被重新赋值的参数（`let mut n = n.clone();`）不会让实参提前释放，调用方一直持有实参到调用返回，CPython 的帧拥有实参，`f(T())` 里的 `T()` 在 `n` 被重新赋值时就释放
+- 局部变量释放的时机（§5、§8）。函数返回时的释放顺序和 CPython 一样，但有几处不同（`__del__`、weakref 回调能看出来，M11a 的 review 逐一和 CPython 比较过）
+  - `for` 的目标变量只在循环里用到时在每次迭代开头声明（§5），所以最后一个元素在循环结束时释放，CPython 要等到函数返回或者变量被重新赋值
+  - 只在 `try` 体里用到的变量声明在 `try` 生成的闭包里（§9），`try` 语句结束时就释放。同样，只在 `with` 里用到的 `as` 目标是 `frame.with` 闭包的参数（§9），`with` 结束时释放，CPython 要等到函数返回
+  - 被重新赋值的参数（`let mut n = n.clone();`）不会让实参提前释放，调用方一直持有实参到调用返回，CPython 的帧拥有实参，`f(T())` 里的 `T()` 在 `n` 被重新赋值时就释放
+  - 经过函数对象的调用（`f.call1((a, b))?`，例如嵌套函数和不能直接调用的模块函数）的参数在调用返回后按书写顺序释放，先 `a` 后 `b`，因为 Rust 的元组按字段顺序 drop。CPython 先释放 `b`。直接调用的参数是语句里的临时变量，按相反的顺序释放，和 CPython 一样
+  - 一条语句里的临时值活到语句结束（§8 的"粒度是语句"）：`print("made", D(tag).tag)` 里的 `D` 在 `print` 之后才释放，CPython 取完 `.tag` 就释放
+  - 异常离开原生函数时，函数的局部变量随着 Rust 的返回立即释放。CPython 的 traceback 引用帧，帧持有局部变量，它们要等 traceback 释放（通常是调用方的 `except` 结束）才释放。原生帧没有 `f_locals`，traceback 里也看不到它们
 
 - 直接调用的模块函数不受其他模块 monkeypatch 影响（可用 `--dynamic-globals` 关闭）
 - 原生函数的 traceback 帧是异常离开时合成的（第 9 节）。和 CPython 的区别：默认行号是 `def` 所在的行（`<module>` 是 1），显示的源码行也是这一行；`--traceback-lines` 时是语句所在的行。原生帧没有 `^^^` 定位（`tb_lasti` 是 -1），`f_locals` 为空。保留为 Python 的代码（§13）的帧和 CPython 完全一样
@@ -1074,6 +1095,7 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 - 对自身模块的修改（第 7 节）只识别常见写法。识别不到的有：`importlib.import_module(__name__)`、`__import__(__name__)`、`getattr(sys, "modules")` 等其他取得模块对象的方式，经过参数、容器、属性传递的模块对象，单个模块的 ext 模式下按模块的真实名字 `import` 自己，`exec`/`eval` 的命名空间是别处得到的模块 dict，项目以外的模块里的修改（没有一起转换的测试里的 `mock.patch("app.f")`），以及项目内用别的写法做的修改（模块名是算出来的字符串等）。这些情况下直接调用看不到替换
 - 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，`__code__` 只描述签名，没有字节码，`co_firstlineno` 是 1（`dis`、`inspect.getsource` 等依赖字节码或源位置的工具无法使用）。`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）。函数类型本身的 `type(f).__module__` 是实例属性 `__module__` 的 getset descriptor 而不是字符串（PyO3 的类是 heap type，类型的 `__module__` 从类型的 `__dict__` 里读，被实例的 getter 占了），`type(f).__name__` 是 `function`（M10 检查 skime 的函数是否原生时发现）
 - `del f.__defaults__` 等删除元信息属性的操作抛 `AttributeError`，CPython 是把它设为 None。赋值为 None 的行为一致
+- 函数类型是每个扩展模块自己的：一个进程里 import 了两个 steelix 生成的扩展模块（ext 模式）时，各自带一份 runtime，`type(a.f) is type(b.f)` 为 False，`isinstance(a.f, type(b.f))` 也是 False。生成器表达式的类型、`NativeLoader` 等 runtime 的类同样如此。bin 模式和一个项目的所有模块共用一个 runtime，没有这个问题
 - 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；函数注解在 FORWARDREF 格式下创建的 `ForwardRef` 没有 `owner`（类注解的有）。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
 - 直接调用时省略的参数，不可变字面量的默认值直接写在调用处，所以别的模块给这个函数的 `__defaults__`/`__kwdefaults__` 赋值时直接调用看不到，这和直接调用看不到 monkeypatch 是同一类差异。本模块里的赋值会被识别，这时改为读函数对象（第 6 节）。字面量每次调用都创建新对象，见上面关于常量 identity 的一条
 - 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch，或者 `sys.modules[__name__].f = g`），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError: f() was replaced by <function g at 0x..>, but transpiled code calls the original directly and can not take the default of its parameter 'b' from the replacement`。CPython 会调用替换后的函数，要做到一样，直接调用就得在每次调用前检查 globals，失去了直接调用的意义，所以只保证报错清楚。M3c 之前这里会 panic默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值

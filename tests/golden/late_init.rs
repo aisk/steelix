@@ -217,7 +217,12 @@ pub mod tracked {
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
-        m.set_global("__doc__", "Locals that every branch of an `if` chain or a `try` assigns last are\ndeclared with the value of the chain: `let x = if .. { a } else { b };`\n(design §8).")?;
+        m.set_global(
+            "__doc__",
+            "Locals that every branch of an `if` chain or a `try` assigns last are\n\
+                declared with the value of the chain: `let x = if .. { a } else { b };`\n\
+                (design §8).",
+        )?;
         m.set_global(
             "Tracked",
             rt::class!(

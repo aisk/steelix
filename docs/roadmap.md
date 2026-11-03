@@ -256,6 +256,18 @@ M10 发现解释器这类小函数密集的程序比 CPython 慢 6 倍。只做�
 
 golden 里属性和方法调用的写法都变了（`slf.getattr("x")?` 变成 `slf.attr("x")?`），rustfmt 合并了一些行，已有用例的 golden 少了约 100 行。
 
+## M11a M9 到 M11 之后的修复 ✅
+
+来自 M9 到 M11 之后的 review，都有复现。
+
+- [x] 死锁：`Function` 的元信息 setter 在持有 `Mutex` 时 drop 旧值，旧值的 `__del__` 读同一个函数的元信息就永远卡住，`__del__` 释放 GIL 时另一个线程读元信息也一样。现在先换出旧值，释放锁之后再 drop（`Function::replace`，`__clear__` 也一样），`str` 子类的 `__str__` 也不在锁里调用。检查了 runtime 里其余的锁和 `RefCell`，生成器表达式的名字 setter 和 `repr` 有同样的问题，一起改了（§6，用例 `metadata_del`，包括另一个线程在 `__del__` 期间读元信息）
+- [x] 接住的异常释放得太晚：`frame.raise` 把异常存在 `Frame` 里，只有 `frame.catch` 取走它，handler 是 `pass`、只有 `continue`/`break`、内层 `raise` 被外层的空 handler 接住、`finally` 之后被外层的空 handler 接住时，异常（参数、traceback）要等函数返回才释放。现在 `Frame` 只记异常的地址和它 traceback 第一项的帧，不持有异常，生成的代码不变（§9，用例 `handler_release`，包括异常释放后新异常用了同一个地址的情况）
+- [x] §12 记录几处释放时机的差异（M11a 之前就有，都和 CPython 比较过）：经过函数对象调用的参数按书写顺序释放，只在 `with` 里用到的 `as` 目标在 `with` 结束时释放，语句里的临时值活到语句结束，异常离开原生函数时局部变量立即释放（CPython 由 traceback 的帧持有）。都要改生成代码的结构才能修，没有做。另外记录两个 steelix 扩展模块各有自己的 `function` 类型，§6 说明类型的模块名 `steelix_runtime` 不能 import
+- [x] free-threaded：驻留名字的表读取不加锁，只在有 GIL 时正确。runtime 加了 `build.rs`（`pyo3-build-config`），在 free-threaded 的构建上 `compile_error!` 并指向 §6。查找表满了之后的 `HashMap` 从每个线程一张改成全进程一张，同一个名字只泄漏一次
+- [x] `rt::Attributes` 对所有的 `Bound<'py, T>` 实现，手写代码里的 `Bound<PyDict>` 等不用 `.as_any()`
+- [x] `rt::function!` 的排版：签名里有 `slf as "self"` 并且一行放不下时 rustfmt 不处理整条语句，以前打印出来的缩进是从第 0 列算的。现在打印 Rust AST 时一直带着当前的缩进层级（包括 `mod` 和函数里的 fn），宏的参数按所在的层级缩进。多行的 docstring（函数的 `doc = ..`、类和模块的 `__doc__`）一行对一行打印，行尾用 `\` 续行，值不变（§4，用例 `docstrings`）
+- 没有做：review 建议把不纯的参数先求值再写成 `o.method1("m", (args,))`，这会让参数在查找方法之前求值，property、`__getattr__` 能看出来（§8）
+
 ## 以后再说
 
 基于类型注解的 typed lowering（`int` → `i64` 等）和符合条件的类自动升级为 `#[pyclass]`（M9 原来的计划，不做的原因是注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就要同时生成两套代码路径，见 §1、§10）、generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）
