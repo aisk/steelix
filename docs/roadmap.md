@@ -282,7 +282,7 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 ## 发布
 
 - [x] PyPI 发布 steelix 0.1.0，git tag `v0.1.0`
-- [ ] `steelix-runtime` 发布到 crates.io（`cargo publish -p steelix-runtime`，dry-run 已通过）。没发布之前，从 PyPI 安装的 steelix 生成的 crate 无法构建，要用 `--runtime-path`（README 有说明）
+- [x] `steelix-runtime` 0.1.0 发布到 crates.io，从 PyPI 安装的 steelix 生成的 crate 可以直接构建（已验证）
 - [ ] 以后每次发版：PyPI 和 crates.io 同步，`RUNTIME_VERSION` 与 runtime 的版本一致（design §14）
 
 ## 以后再说

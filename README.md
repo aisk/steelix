@@ -107,7 +107,7 @@ pip install steelix
 uv tool install steelix
 ```
 
-The generated crates depend on the `steelix-runtime` crate from crates.io. Until it is published there, clone this repository and pass `--runtime-path path/to/steelix/crates/steelix-runtime` to `steelix transpile` and `steelix build`.
+The generated crates depend on the [`steelix-runtime`](https://crates.io/crates/steelix-runtime) crate from crates.io.
 
 ## Usage
 
