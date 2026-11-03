@@ -9,6 +9,7 @@
 
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod box_ {
     use super::*;
@@ -63,7 +64,7 @@ B: list[
 ] = []
 "#
         )?;
-        if m.global("sys")?.getattr("argv")?.len()? > 5 {
+        if m.global("sys")?.attr("argv")?.len()? > 5 {
             // module_annotations.py:20, kept as Python: annotated assignment at module level at 20:5
             rt::exec_python!(
                 m,
@@ -86,23 +87,20 @@ D: "Box" = Box()
         rt::builtins::print(
             py,
             (m.global("annotationlib")?
-                .getattr("get_annotations")?
+                .attr("get_annotations")?
                 .call1((m
                     .global("sys")?
-                    .getattr("modules")?
+                    .attr("modules")?
                     .get_item(m.global("__name__")?)?,))?,),
         )?;
         rt::builtins::print(
             py,
             (rt::call!(
-                m.global("annotationlib")?.getattr("get_annotations")?,
+                m.global("annotationlib")?.attr("get_annotations")?,
                 m.global("sys")?
-                    .getattr("modules")?
+                    .attr("modules")?
                     .get_item(m.global("__name__")?)?,
-                format = m
-                    .global("annotationlib")?
-                    .getattr("Format")?
-                    .getattr("STRING")?
+                format = m.global("annotationlib")?.attr("Format")?.attr("STRING")?
             )?,),
         )?;
         // module_annotations.py:24, kept as Python: annotated assignment at module level at 24:1

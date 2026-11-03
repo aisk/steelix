@@ -10,6 +10,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // mixed_nested.py:6
 pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -42,7 +43,7 @@ pub mod point {
         x: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Point.__init__", 52, |_| {
-            slf.setattr("x", x)?;
+            slf.set_attr("x", x)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -69,7 +70,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // statements in their bodies are kept as Python (design §13).
         m.set_global("sys", rt::import(m, "sys")?)?;
         rt::def!(m, double(x))?;
-        if m.global("sys")?.getattr("argv")?.len()? > 5 {
+        if m.global("sys")?.attr("argv")?.len()? > 5 {
             m.set_global("mode", "many")?;
             // mixed_nested.py:12, kept as Python: generator expression with several for clauses at 12:18
             rt::exec_python!(
@@ -180,10 +181,10 @@ while True:
             rt::builtins::print(
                 py,
                 (
-                    m.global("Local")?.getattr("label")?,
+                    m.global("Local")?.attr("label")?,
                     m.global("Point")?
                         .call1((double(m, &rt::int(py, 3))?,))?
-                        .getattr("x")?,
+                        .attr("x")?,
                 ),
             )?;
             // mixed_nested.py:63, kept as Python: generator expression with several for clauses at 63:16

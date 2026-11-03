@@ -16,16 +16,17 @@ use pyo3::types::PyList;
 use pyo3::types::PySet;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // generator_expressions.py:11
 pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "show", 11, |_| {
-        rt::builtins::print(py, (exc.get_type().getattr("__name__")?, exc))?;
+        rt::builtins::print(py, (exc.get_type().attr("__name__")?, exc))?;
         for frame_ in m
             .global("traceback")?
-            .getattr("extract_tb")?
-            .call1((exc.getattr("__traceback__")?,))?
+            .attr("extract_tb")?
+            .call1((exc.attr("__traceback__")?,))?
             .try_iter()?
         {
             let frame_ = frame_?;
@@ -33,9 +34,9 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
                 py,
                 (
                     " ",
-                    frame_.getattr("name")?,
-                    frame_.getattr("lineno")?,
-                    frame_.getattr("line")?,
+                    frame_.attr("name")?,
+                    frame_.attr("lineno")?,
+                    frame_.attr("line")?,
                 ),
             )?;
             py.check_signals()?;
@@ -96,12 +97,12 @@ pub fn infinite<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         let r#gen = rt::genexpr!(
             m,
-            genexpr(m.global("itertools")?.call_method0("count")?.try_iter()?),
+            genexpr(m.global("itertools")?.method0("count")?.try_iter()?),
             qualname = "infinite.<locals>.<genexpr>"
         )?;
         let first = rt::builtin(py, "next")?.call1((&r#gen,))?;
         let rest = rt::builtin(py, "list")?
-            .call1((m.global("itertools")?.call_method1("islice", (&r#gen, 3))?,))?;
+            .call1((m.global("itertools")?.method1("islice", (&r#gen, 3))?,))?;
         Ok(PyTuple::new(py, [&first, &rest])?.into_any())
     })
 }
@@ -195,7 +196,7 @@ pub fn failing<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<Bou
         let out = PyList::empty(py).into_any();
         for value in r#gen.try_iter()? {
             let value = value?;
-            out.call_method1("append", (&value,))?;
+            out.method1("append", (&value,))?;
             py.check_signals()?;
         }
         Ok(out)
@@ -306,10 +307,10 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 rt::builtins::print(
                     py,
                     (
-                        exc.get_type().getattr("__name__")?,
+                        exc.get_type().attr("__name__")?,
                         &exc,
-                        exc.getattr("__cause__")?.repr()?,
-                        exc.getattr("__suppress_context__")?,
+                        exc.attr("__cause__")?.repr()?,
+                        exc.attr("__suppress_context__")?,
                     ),
                 )?;
             }
@@ -343,8 +344,8 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(
             py,
             (
-                g.get_type().getattr("__name__")?,
-                g.repr()?.call_method1(
+                g.get_type().attr("__name__")?,
+                g.repr()?.method1(
                     "startswith",
                     ("<generator object protocol.<locals>.<genexpr> at ",),
                 )?,
@@ -353,13 +354,13 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(
             py,
             (
-                g.getattr("__name__")?,
-                g.getattr("__qualname__")?,
+                g.attr("__name__")?,
+                g.attr("__qualname__")?,
                 g.try_iter()?.is(&g),
-                g.getattr("gi_running")?,
+                g.attr("gi_running")?,
             ),
         )?;
-        match g.call_method1("send", (1,)) {
+        match g.method1("send", (1,)) {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let exc = frame.catch(err);
@@ -371,12 +372,12 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(
             py,
             (
-                g.call_method1("send", (py.None(),))?,
+                g.method1("send", (py.None(),))?,
                 rt::builtin(py, "next")?.call1((&g,))?,
             ),
         )?;
         match (|| {
-            g.getattr("throw")?
+            g.attr("throw")?
                 .call1((rt::builtin(py, "ValueError")?.call1(("thrown",))?,))
         })() {
             Ok(_) => {}
@@ -394,8 +395,8 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 rt::builtin(py, "next")?.call1((&g, "exhausted"))?,
             ),
         )?;
-        g.setattr("__name__", "renamed")?;
-        rt::builtins::print(py, (g.getattr("__name__")?,))?;
+        g.set_attr("__name__", "renamed")?;
+        rt::builtins::print(py, (g.attr("__name__")?,))?;
         Ok(rt::none(py))
     })
 }
@@ -426,7 +427,7 @@ pub fn consumers<'py>(
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "consumers.<locals>.<genexpr>", 131, |_| {
                 if let Some(w) = rt::next(words)? {
-                    return Ok(Some(w.call_method0("upper")?));
+                    return Ok(Some(w.method0("upper")?));
                 }
                 Ok(None)
             })
@@ -439,7 +440,7 @@ pub fn consumers<'py>(
                     genexpr(words.try_iter()?),
                     qualname = "consumers.<locals>.<genexpr>"
                 )?,))?,
-                rt::str(py, "-").getattr("join")?.call1((rt::genexpr!(
+                rt::str(py, "-").attr("join")?.call1((rt::genexpr!(
                     m,
                     genexpr2(words.try_iter()?),
                     qualname = "consumers.<locals>.<genexpr>"
@@ -712,9 +713,9 @@ pub fn collected<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             genexpr[&g](rt::builtin(py, "range")?.call1((3,))?.try_iter()?),
             qualname = "collected.<locals>.<genexpr>"
         )?)?;
-        let r#ref = m.global("weakref")?.getattr("ref")?.call1((g.get()?,))?;
+        let r#ref = m.global("weakref")?.attr("ref")?.call1((g.get()?,))?;
         g.delete()?;
-        m.global("gc")?.call_method0("collect")?;
+        m.global("gc")?.method0("collect")?;
         Ok(rt::bool(py, r#ref.call0()?.is_none()))
     })
 }
@@ -975,7 +976,7 @@ def closed_early():
             (
                 captures(m)?,
                 comprehension_variable(m)?,
-                m.global("Table")?.getattr("rows")?,
+                m.global("Table")?.attr("rows")?,
                 collected(m)?,
                 reentrant(m)?,
             ),
@@ -1001,7 +1002,7 @@ def closed_early():
             (
                 rt::builtin(py, "next")?.call1((m.global("module_gen")?,))?,
                 rt::builtin(py, "list")?.call1((m.global("module_gen")?,))?,
-                m.global("module_gen")?.get_type().getattr("__qualname__")?,
+                m.global("module_gen")?.get_type().attr("__qualname__")?,
             ),
         )?;
         Ok(())

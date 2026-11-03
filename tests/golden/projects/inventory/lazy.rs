@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 /// Executes the body of `lazy.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
@@ -18,16 +19,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     &rt::bool(
                         py,
                         m.global("app")?
-                            .is(m.global("sys")?.getattr("modules")?.get_item("__main__")?),
+                            .is(m.global("sys")?.attr("modules")?.get_item("__main__")?),
                     ),
-                    &m.global("app")?.getattr("__name__")?,
+                    &m.global("app")?.attr("__name__")?,
                     &rt::bool(
                         py,
-                        m.global("app")?.getattr("Discounted")?.is(m
+                        m.global("app")?.attr("Discounted")?.is(m
                             .global("sys")?
-                            .getattr("modules")?
+                            .attr("modules")?
                             .get_item("__main__")?
-                            .getattr("Discounted")?),
+                            .attr("Discounted")?),
                     ),
                 ],
             )?,

@@ -2,6 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // classes_exceptions.py:20
 pub fn load<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -12,7 +13,7 @@ pub fn load<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound
         if key.eq("busy")? {
             return Err(frame.raise(m.global("Retry")?.call1((1, 2))?));
         }
-        key.call_method0("upper")
+        key.method0("upper")
     })
 }
 
@@ -61,13 +62,13 @@ pub mod config_error {
         let py = m.py();
         rt::frame!(m, "ConfigError.__init__", 9, |_| {
             rt::super_(__class__, slf)?
-                .getattr("__init__")?
+                .attr("__init__")?
                 .call1((rt::fstring(
                     py,
                     (rt::format(key, "")?, ": ", rt::format(problem, "")?),
                 )?,))?;
-            slf.setattr("key", key)?;
-            slf.setattr("problem", problem)?;
+            slf.set_attr("key", key)?;
+            slf.set_attr("problem", problem)?;
             Ok(rt::none(py))
         })
     }
@@ -95,8 +96,8 @@ pub mod retry {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Retry.__str__", 16, |_| {
-            rt::str(py, "retry ").add(rt::str(py, ", ").getattr("join")?.call1((
-                rt::builtin(py, "map")?.call1((rt::builtin(py, "str")?, slf.getattr("args")?))?,
+            rt::str(py, "retry ").add(rt::str(py, ", ").attr("join")?.call1((
+                rt::builtin(py, "map")?.call1((rt::builtin(py, "str")?, slf.attr("args")?))?,
             ))?)
         })
     }
@@ -125,7 +126,7 @@ pub mod kept {
         let py = m.py();
         rt::frame!(m, "Kept.describe", 43, |_| {
             let list = PyList::empty(py);
-            for a in PyList::new(py, [&slf.getattr("args")?])?.try_iter()? {
+            for a in PyList::new(py, [&slf.attr("args")?])?.try_iter()? {
                 let a = a?;
                 list.append(a.len()?)?;
                 py.check_signals()?;
@@ -164,7 +165,7 @@ pub mod broken {
             if value.lt(0)? {
                 return Err(frame.raise(PyValueError::new_err("negative")));
             }
-            slf.setattr("value", value)?;
+            slf.set_attr("value", value)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -196,7 +197,7 @@ pub mod grouped {
         excs: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Grouped.derive", 68, |_| {
-            m.global("Grouped")?.call1((slf.getattr("message")?, excs))
+            m.global("Grouped")?.call1((slf.attr("message")?, excs))
         })
     }
 }
@@ -246,9 +247,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                         (
                             "config:",
                             m.global("err")?,
-                            m.global("err")?.getattr("key")?,
-                            m.global("err")?.getattr("problem")?,
-                            m.global("err")?.getattr("args")?,
+                            m.global("err")?.attr("key")?,
+                            m.global("err")?.attr("problem")?,
+                            m.global("err")?.attr("args")?,
                             m.global("err")?.is_instance(&m.global("AppError")?)?,
                         ),
                     )?;
@@ -266,9 +267,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                             m.global("err")?.repr()?,
                             m.global("err")?
                                 .get_type()
-                                .getattr("__mro__")?
+                                .attr("__mro__")?
                                 .get_item(1)?
-                                .getattr("__name__")?,
+                                .attr("__name__")?,
                         ),
                     )?;
                     m.unbind_global("err")?;
@@ -291,8 +292,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtins::print(
                     py,
                     (
-                        m.global("err")?.getattr("__cause__")?.repr()?,
-                        m.global("err")?.getattr("__suppress_context__")?,
+                        m.global("err")?.attr("__cause__")?.repr()?,
+                        m.global("err")?.attr("__suppress_context__")?,
                     ),
                 )?;
                 m.unbind_global("err")?;
@@ -317,8 +318,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtins::print(
                     py,
                     (
-                        m.global("err")?.call_method0("describe")?,
-                        m.global("err")?.getattr("args")?,
+                        m.global("err")?.method0("describe")?,
+                        m.global("err")?.attr("args")?,
                     ),
                 )?;
                 m.unbind_global("err")?;
@@ -346,7 +347,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        rt::builtins::print(py, (m.global("Broken")?.call1((2,))?.getattr("value")?,))?;
+        rt::builtins::print(py, (m.global("Broken")?.call1((2,))?.attr("value")?,))?;
         m.set_global(
             "Grouped",
             rt::class!(
@@ -371,7 +372,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         let [match_, rest] = rt::unpack(
             &m.global("g")?
-                .getattr("split")?
+                .attr("split")?
                 .call1((rt::builtin(py, "ValueError")?,))?,
         )?;
         m.set_global("match_", match_)?;
@@ -379,9 +380,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("match_")?.get_type().getattr("__name__")?,
-                m.global("match_")?.getattr("exceptions")?,
-                m.global("rest")?.getattr("exceptions")?,
+                m.global("match_")?.get_type().attr("__name__")?,
+                m.global("match_")?.attr("exceptions")?,
+                m.global("rest")?.attr("exceptions")?,
             ),
         )?;
         Ok(())

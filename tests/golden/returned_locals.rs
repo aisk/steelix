@@ -10,6 +10,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // returned_locals.py:19
 pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -27,7 +28,7 @@ pub fn from_try<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<
         match (|| -> PyResult<Bound<'py, PyAny>> {
             let local = m.global("Tracked")?.call1((name,))?;
             let other = m.global("Tracked")?.call1((name.add(" other")?,))?;
-            rt::builtins::print(py, ("in try", other.getattr("name")?))?;
+            rt::builtins::print(py, ("in try", other.attr("name")?))?;
             Ok(local)
         })() {
             Ok(value) => Ok(value),
@@ -106,7 +107,7 @@ pub fn outer_local<'py>(
             Ok(result.clone())
         })();
         let finally = frame.finally(result2);
-        rt::builtins::print(py, ("result still bound:", result.getattr("name")?))?;
+        rt::builtins::print(py, ("result still bound:", result.attr("name")?))?;
         finally.resume()
     })
 }
@@ -133,8 +134,8 @@ pub fn swap<'py>(
             py,
             (
                 "unpacked",
-                rt::local(&first, "first")?.getattr("name")?,
-                second.getattr("name")?,
+                rt::local(&first, "first")?.attr("name")?,
+                second.attr("name")?,
             ),
         )?;
         first = None;
@@ -185,7 +186,7 @@ pub mod tracked {
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Tracked.__init__", 9, |_| {
-            slf.setattr("name", name)?;
+            slf.set_attr("name", name)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -197,7 +198,7 @@ pub mod tracked {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Tracked.__del__", 12, |_| {
-            rt::builtins::print(py, ("del", slf.getattr("name")?))?;
+            rt::builtins::print(py, ("del", slf.attr("name")?))?;
             Ok(rt::none(py))
         })
     }
@@ -210,7 +211,7 @@ pub mod tracked {
         rt::frame!(m, "Tracked.__repr__", 15, |_| {
             rt::fstring(
                 m.py(),
-                ("Tracked(", rt::format(&slf.getattr("name")?, "")?, ")"),
+                ("Tracked(", rt::format(&slf.attr("name")?, "")?, ")"),
             )
         })
     }
@@ -267,7 +268,7 @@ def from_with(name):
         m.set_global(
             "w",
             m.global("weakref")?
-                .getattr("ref")?
+                .attr("ref")?
                 .call1((m.global("r")?, m.global("gone")?))?,
         )?;
         m.del_global("r")?;
@@ -294,7 +295,7 @@ def from_with(name):
             rt::frame!(m, "<genexpr>", 110, |_| {
                 for x in iter {
                     let x = x?;
-                    if x.getattr("name")?.is_truthy()? {
+                    if x.attr("name")?.is_truthy()? {
                         return Ok(Some(x));
                     }
                     m.py().check_signals()?;

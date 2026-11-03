@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod account {
     use super::*;
@@ -42,7 +43,7 @@ pub mod account {
         balance: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.__init__", 6, |_| {
-            slf.setattr("balance", balance)?;
+            slf.set_attr("balance", balance)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -54,20 +55,20 @@ pub mod account {
         amount: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.withdraw", 9, |frame| {
-            if amount.gt(slf.getattr("balance")?)? {
+            if amount.gt(slf.attr("balance")?)? {
                 return Err(frame.raise(PyValueError::new_err((rt::fstring(
                     m.py(),
                     (
                         "insufficient funds: ",
-                        rt::format(&slf.getattr("balance")?, "")?,
+                        rt::format(&slf.attr("balance")?, "")?,
                         " < ",
                         rt::format(amount, "")?,
                     ),
                 )?
                 .unbind(),))));
             }
-            slf.setattr("balance", rt::isub(&slf.getattr("balance")?, amount)?)?;
-            slf.getattr("balance")
+            slf.set_attr("balance", rt::isub(&slf.attr("balance")?, amount)?)?;
+            slf.attr("balance")
         })
     }
 
@@ -79,7 +80,7 @@ pub mod account {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.opened", 15, |_| {
             let account = cls.call1((balance,))?;
-            account.getattr("withdraw")?.call1((balance.mul(2)?,))?;
+            account.attr("withdraw")?.call1((balance.mul(2)?,))?;
             Ok(account)
         })
     }
@@ -100,7 +101,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,
         )?;
         rt::builtins::print(m.py(), ("opening",))?;
-        m.set_global("first", m.global("Account")?.call_method1("opened", (5,))?)?;
+        m.set_global("first", m.global("Account")?.method1("opened", (5,))?)?;
         Ok(())
     })
 }

@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod base {
     use super::*;
@@ -69,7 +70,7 @@ pub mod p {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "P.hello", 27, |_| {
-            rt::str(m.py(), "p+").add(rt::super_(__class__, slf)?.call_method0("hello")?)
+            rt::str(m.py(), "p+").add(rt::super_(__class__, slf)?.method0("hello")?)
         })
     }
 }
@@ -97,11 +98,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("P")?.call1((2,))?.getattr("x")?,
-                m.global("P")?.call1((2,))?.getattr("name")?,
+                m.global("P")?.call1((2,))?.attr("x")?,
+                m.global("P")?.call1((2,))?.attr("name")?,
             ),
         )?;
-        rt::builtins::print(py, (m.global("P")?.call1((1,))?.call_method0("hello")?,))?;
+        rt::builtins::print(py, (m.global("P")?.call1((1,))?.method0("hello")?,))?;
         Ok(())
     })
 }

@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // fstrings.py:4
 pub fn describe<'py>(
@@ -81,7 +82,7 @@ pub fn describe<'py>(
         rt::fstring(
             py,
             (
-                rt::format(&name.call_method0("upper")?, "")?,
+                rt::format(&name.method0("upper")?, "")?,
                 "=",
                 rt::format(&value.mul(2)?, "08.3f")?,
             ),

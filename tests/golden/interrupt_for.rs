@@ -1,12 +1,13 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // interrupt_for.py:7
 pub fn spin<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "spin", 7, |_| {
         let mut total = rt::int(py, 0);
-        for i in m.global("itertools")?.call_method0("count")?.try_iter()? {
+        for i in m.global("itertools")?.method0("count")?.try_iter()? {
             let i = i?;
             total = rt::iadd(&total, &i)?;
             py.check_signals()?;

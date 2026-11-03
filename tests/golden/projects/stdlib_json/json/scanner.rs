@@ -5,6 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // json/scanner.py:18
 pub fn py_make_scanner<'py>(
@@ -13,17 +14,17 @@ pub fn py_make_scanner<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "py_make_scanner", 18, |_| {
         let _scan_once = rt::Cell::empty(m.py(), "_scan_once")?;
-        let parse_object = context.getattr("parse_object")?;
-        let parse_array = context.getattr("parse_array")?;
-        let parse_string = context.getattr("parse_string")?;
-        let match_number = m.global("NUMBER_RE")?.getattr("match")?;
-        let strict = context.getattr("strict")?;
-        let parse_float = context.getattr("parse_float")?;
-        let parse_int = context.getattr("parse_int")?;
-        let parse_constant = context.getattr("parse_constant")?;
-        let object_hook = context.getattr("object_hook")?;
-        let object_pairs_hook = context.getattr("object_pairs_hook")?;
-        let memo = context.getattr("memo")?;
+        let parse_object = context.attr("parse_object")?;
+        let parse_array = context.attr("parse_array")?;
+        let parse_string = context.attr("parse_string")?;
+        let match_number = m.global("NUMBER_RE")?.attr("match")?;
+        let strict = context.attr("strict")?;
+        let parse_float = context.attr("parse_float")?;
+        let parse_int = context.attr("parse_int")?;
+        let parse_constant = context.attr("parse_constant")?;
+        let object_hook = context.attr("object_hook")?;
+        let object_pairs_hook = context.attr("object_pairs_hook")?;
+        let memo = context.attr("memo")?;
         // json/scanner.py:31
         fn _scan_once_<'py>(
             module: &rt::Module<'py>,
@@ -94,7 +95,7 @@ pub fn py_make_scanner<'py>(
                 let exp: Bound<'py, PyAny>;
                 let res: Bound<'py, PyAny>;
                 if !m.is_none() {
-                    [integer, frac, exp] = rt::unpack(&m.call_method0("groups")?)?;
+                    [integer, frac, exp] = rt::unpack(&m.method0("groups")?)?;
                     if frac.is_truthy()? || exp.is_truthy()? {
                         res = parse_float.call1((integer
                             .add(if frac.is_truthy()? {
@@ -110,7 +111,7 @@ pub fn py_make_scanner<'py>(
                     } else {
                         res = parse_int.call1((&integer,))?;
                     }
-                    Ok(PyTuple::new(py, [&res, &m.call_method0("end")?])?.into_any())
+                    Ok(PyTuple::new(py, [&res, &m.method0("end")?])?.into_any())
                 } else if nextchar.eq("N")?
                     && string
                         .get_item(rt::slice(py, idx, idx.add(3)?)?)?
@@ -161,7 +162,7 @@ pub fn py_make_scanner<'py>(
                     (|| -> PyResult<Bound<'py, PyAny>> { _scan_once.get()?.call1((string, idx)) })(
                     );
                 let finally = frame.finally(result);
-                memo.call_method0("clear")?;
+                memo.method0("clear")?;
                 finally.resume()
             })
         }
@@ -198,12 +199,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("__all__", PyList::new(py, ["make_scanner"])?)?;
         m.set_global(
             "NUMBER_RE",
-            m.global("re")?.getattr("compile")?.call1((
+            m.global("re")?.attr("compile")?.call1((
                 "(-?(?:0|[1-9][0-9]*))(\\.[0-9]+)?([eE][-+]?[0-9]+)?",
                 m.global("re")?
-                    .getattr("VERBOSE")?
-                    .bitor(m.global("re")?.getattr("MULTILINE")?)?
-                    .bitor(m.global("re")?.getattr("DOTALL")?)?,
+                    .attr("VERBOSE")?
+                    .bitor(m.global("re")?.attr("MULTILINE")?)?
+                    .bitor(m.global("re")?.attr("DOTALL")?)?,
             ))?,
         )?;
         rt::def!(m, py_make_scanner(context))?;

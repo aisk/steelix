@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod inventory_ {
     use super::*;
@@ -44,7 +45,7 @@ pub mod inventory_ {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Inventory.__init__", 8, |_| {
-            slf.setattr("items", PyDict::new(py))?;
+            slf.set_attr("items", PyDict::new(py))?;
             Ok(rt::none(py))
         })
     }
@@ -56,9 +57,8 @@ pub mod inventory_ {
         item: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Inventory.add", 11, |_| {
-            slf.getattr("items")?
-                .set_item(item.getattr("name")?, item)?;
-            m.global("audit")?.call_method1("record", ("add", item))?;
+            slf.attr("items")?.set_item(item.attr("name")?, item)?;
+            m.global("audit")?.method1("record", ("add", item))?;
             Ok(rt::none(m.py()))
         })
     }
@@ -72,18 +72,18 @@ pub mod inventory_ {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Inventory.take", 15, |frame| {
-            if !slf.getattr("items")?.contains(name)? {
+            if !slf.attr("items")?.contains(name)? {
                 return Err(frame.raise(
                     m.global("StoreError")?
                         .call1((rt::fstring(py, ("unknown item ", rt::format(name, "")?))?,))?,
                 ));
             }
-            let item = slf.getattr("items")?.get_item(name)?;
-            if item.getattr("quantity")?.lt(quantity)? {
+            let item = slf.attr("items")?.get_item(name)?;
+            if item.attr("quantity")?.lt(quantity)? {
                 return Err(frame.raise(m.global("OutOfStock")?.call1((name, quantity))?));
             }
-            item.setattr("quantity", rt::isub(&item.getattr("quantity")?, quantity)?)?;
-            m.global("audit")?.call_method1("record", ("take", &item))?;
+            item.set_attr("quantity", rt::isub(&item.attr("quantity")?, quantity)?)?;
+            m.global("audit")?.method1("record", ("take", &item))?;
             Ok(rt::none(py))
         })
     }

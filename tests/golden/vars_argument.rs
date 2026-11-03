@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // vars_argument.py:6
 pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -16,7 +17,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, double(x))?;
         m.set_global(
             "point",
-            rt::call!(m.global("types")?.getattr("SimpleNamespace")?, x = 1, y = 2)?,
+            rt::call!(m.global("types")?.attr("SimpleNamespace")?, x = 1, y = 2)?,
         )?;
         rt::builtins::print(
             py,

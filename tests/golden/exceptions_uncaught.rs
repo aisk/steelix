@@ -9,6 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // exceptions_uncaught.py:13
 pub fn load<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -70,7 +71,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) if err.is_instance_of::<PyLookupError>(py) => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 cleanup = rt::none(py);
-                cleanup.call_method0("close")?;
+                cleanup.method0("close")?;
             }
             Err(err) => return Err(err),
         }

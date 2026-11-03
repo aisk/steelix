@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // replaced_direct_call.py:9
 pub fn f<'py>(
@@ -34,9 +35,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, g(x))?;
         rt::builtins::print(py, (f(m, &rt::int(py, 1), &m.default("f", "b")?)?,))?;
         m.global("mock")?
-            .getattr("patch")?
+            .attr("patch")?
             .call1(("__main__.f", m.global("g")?))?
-            .call_method0("start")?;
+            .method0("start")?;
         rt::builtins::print(py, (f(m, &rt::int(py, 1), &m.default("f", "b")?)?,))?;
         Ok(())
     })

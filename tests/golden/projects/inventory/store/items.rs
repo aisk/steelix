@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // store/items.py:6
 pub fn fmt_price<'py>(
@@ -13,9 +14,7 @@ pub fn fmt_price<'py>(
                 rt::format(price, "")?,
                 " ",
                 rt::format(
-                    &m.global("config")?
-                        .getattr("settings")?
-                        .get_item("currency")?,
+                    &m.global("config")?.attr("settings")?.get_item("currency")?,
                     "",
                 )?,
             ),
@@ -29,11 +28,11 @@ pub fn label<'py>(m: &rt::Module<'py>, item: &Bound<'py, PyAny>) -> PyResult<Bou
         rt::fstring(
             m.py(),
             (
-                rt::format(&item.getattr("name")?, "")?,
+                rt::format(&item.attr("name")?, "")?,
                 ": ",
                 rt::format(
                     &m.global("fmt_price")?
-                        .call1((item.call_method0("unit_price")?,))?,
+                        .call1((item.method0("unit_price")?,))?,
                     "",
                 )?,
             ),
@@ -85,9 +84,9 @@ pub mod item {
         quantity: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Item.__init__", 15, |_| {
-            slf.setattr("name", name)?;
-            slf.setattr("price", price)?;
-            slf.setattr("quantity", quantity)?;
+            slf.set_attr("name", name)?;
+            slf.set_attr("price", price)?;
+            slf.set_attr("quantity", quantity)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -97,14 +96,13 @@ pub mod item {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.unit_price", 20, |_| { slf.getattr("price") })
+        rt::frame!(m, "Item.unit_price", 20, |_| { slf.attr("price") })
     }
 
     // store/items.py:23
     pub fn value<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Item.value", 23, |_| {
-            slf.call_method0("unit_price")?
-                .mul(slf.getattr("quantity")?)
+            slf.method0("unit_price")?.mul(slf.attr("quantity")?)
         })
     }
 
@@ -117,11 +115,11 @@ pub mod item {
             rt::fstring(
                 m.py(),
                 (
-                    rt::format(&slf.get_type().getattr("__name__")?, "")?,
+                    rt::format(&slf.get_type().attr("__name__")?, "")?,
                     "(",
-                    slf.getattr("name")?.repr()?,
+                    slf.attr("name")?.repr()?,
                     ", ",
-                    rt::format(&slf.getattr("quantity")?, "")?,
+                    rt::format(&slf.attr("quantity")?, "")?,
                     ")",
                 ),
             )
@@ -160,8 +158,8 @@ pub mod perishable {
         days: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Perishable.__init__", 31, |_| {
-            rt::super_(__class__, slf)?.call_method1("__init__", (name, price, quantity))?;
-            slf.setattr("days", days)?;
+            rt::super_(__class__, slf)?.method1("__init__", (name, price, quantity))?;
+            slf.set_attr("days", days)?;
             Ok(rt::none(m.py()))
         })
     }

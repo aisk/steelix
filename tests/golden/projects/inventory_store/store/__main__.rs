@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 /// Executes the body of `store/__main__.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
@@ -19,25 +20,25 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 "store.__main__:",
                 m.global("__name__")?,
                 m.global("__package__")?,
-                m.global("__spec__")?.getattr("name")?,
+                m.global("__spec__")?.attr("name")?,
                 m.global("sys")?
-                    .getattr("argv")?
+                    .attr("argv")?
                     .get_item(0)?
-                    .call_method1("rsplit", ("/", 2))?
+                    .method1("rsplit", ("/", 2))?
                     .get_item(rt::slice(py, -2, py.None())?)?,
             ),
         )?;
         m.set_global("inventory", m.global("Inventory")?.call0()?)?;
         m.global("inventory")?
-            .getattr("add")?
+            .attr("add")?
             .call1((m.global("Item")?.call1(("kiwi", 2, 3))?,))?;
         rt::builtins::print(py, (m.global("render")?.call1((m.global("inventory")?,))?,))?;
         if m.global("sys")?
-            .getattr("argv")?
+            .attr("argv")?
             .get_item(rt::slice(py, 1, py.None())?)?
             .eq(PyList::new(py, ["crash"])?)?
         {
-            m.global("inventory")?.call_method1("take", ("kiwi", 5))?;
+            m.global("inventory")?.method1("take", ("kiwi", 5))?;
         }
         Ok(())
     })

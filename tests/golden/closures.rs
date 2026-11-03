@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // closures.py:4
 pub fn make_counter<'py>(
@@ -51,7 +52,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 rt::frame!(m, "late_binding.<locals>.show", 23, |_| { i.get() })
             }
             show = rt::function!(m, show_[&i](), qualname = "late_binding.<locals>.show")?;
-            funcs.call_method1("append", (&show,))?;
+            funcs.method1("append", (&show,))?;
             py.check_signals()?;
         }
         Ok(PyList::new(
@@ -81,7 +82,7 @@ pub fn early_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             ) -> PyResult<Bound<'py, PyAny>> {
                 rt::frame!(m, "early_binding.<locals>.<lambda>", 34, |_| { i.mul(10) })
             }
-            funcs.getattr("append")?.call1((rt::function!(
+            funcs.attr("append")?.call1((rt::function!(
                 m,
                 lambda(i = &i),
                 qualname = "early_binding.<locals>.<lambda>"
@@ -234,23 +235,23 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("increment")?.getattr("__qualname__")?,
-                m.global("increment")?.getattr("__name__")?,
-                !m.global("peek")?.getattr("__closure__")?.is_none(),
+                m.global("increment")?.attr("__qualname__")?,
+                m.global("increment")?.attr("__name__")?,
+                !m.global("peek")?.attr("__closure__")?.is_none(),
             ),
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("increment")?
-                    .getattr("__closure__")?
+                    .attr("__closure__")?
                     .get_item(0)?
                     .get_type()
-                    .getattr("__name__")?,
+                    .attr("__name__")?,
                 m.global("increment")?
-                    .getattr("__closure__")?
+                    .attr("__closure__")?
                     .get_item(0)?
-                    .getattr("cell_contents")?,
+                    .attr("cell_contents")?,
             ),
         )?;
         too_early(m)?;

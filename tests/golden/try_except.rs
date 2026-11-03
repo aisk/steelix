@@ -9,6 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // try_except.py:13
 pub fn parse<'py>(m: &rt::Module<'py>, s: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -52,14 +53,14 @@ pub fn parse_or_none<'py>(
 pub fn describe<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "describe", 28, |_| {
         m.global("print")?.call1((
-            m.global("type")?.call1((exc,))?.getattr("__name__")?,
-            exc.getattr("args")?,
+            m.global("type")?.call1((exc,))?.attr("__name__")?,
+            exc.attr("args")?,
             "cause:",
-            m.global("repr")?.call1((exc.getattr("__cause__")?,))?,
+            m.global("repr")?.call1((exc.attr("__cause__")?,))?,
             "context:",
-            m.global("repr")?.call1((exc.getattr("__context__")?,))?,
+            m.global("repr")?.call1((exc.attr("__context__")?,))?,
             "suppress:",
-            exc.getattr("__suppress_context__")?,
+            exc.attr("__suppress_context__")?,
         ))?;
         Ok(rt::none(m.py()))
     })
@@ -114,12 +115,12 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
                     let _handling = rt::Handling::new(&e);
                     m.global("print")?.call1((
                         "caught",
-                        m.global("type")?.call1((&e,))?.getattr("__name__")?,
-                        e.getattr("args")?,
+                        m.global("type")?.call1((&e,))?.attr("__name__")?,
+                        e.attr("args")?,
                     ))?;
                     m.global("print")?.call1((
                         "sys.exception() is e:",
-                        m.global("sys")?.call_method0("exception")?.is(&e),
+                        m.global("sys")?.method0("exception")?.is(&e),
                     ))?;
                     Ok(rt::str(py, "other"))
                 }
@@ -211,7 +212,7 @@ pub fn reraise<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) if frame.matches(&err, 86, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
-                e.setattr("args", PyTuple::new(py, ["changed"])?)?;
+                e.set_attr("args", PyTuple::new(py, ["changed"])?)?;
                 return Err(frame.reraise());
             }
             Err(err) => return Err(err),
@@ -318,7 +319,7 @@ pub fn bad_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "handled_state", 137, |frame| {
         m.global("print")?
-            .call1(("outside:", m.global("sys")?.call_method0("exception")?))?;
+            .call1(("outside:", m.global("sys")?.method0("exception")?))?;
         match (|| m.global("risky")?.call1(("value",)))() {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 137, || m.global("ValueError"))? => {
@@ -326,7 +327,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 m.global("print")?.call1((
                     "inside:",
                     m.global("repr")?
-                        .call1((m.global("sys")?.call_method0("exception")?,))?,
+                        .call1((m.global("sys")?.method0("exception")?,))?,
                 ))?;
                 match (|| m.global("risky")?.call1(("key",)))() {
                     Ok(_) => {}
@@ -335,7 +336,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                         m.global("print")?.call1((
                             "nested:",
                             m.global("repr")?
-                                .call1((m.global("sys")?.call_method0("exception")?,))?,
+                                .call1((m.global("sys")?.method0("exception")?,))?,
                         ))?;
                     }
                     Err(err) => return Err(err),
@@ -343,13 +344,13 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 m.global("print")?.call1((
                     "back:",
                     m.global("repr")?
-                        .call1((m.global("sys")?.call_method0("exception")?,))?,
+                        .call1((m.global("sys")?.method0("exception")?,))?,
                 ))?;
             }
             Err(err) => return Err(err),
         }
         m.global("print")?
-            .call1(("after:", m.global("sys")?.call_method0("exception")?))?;
+            .call1(("after:", m.global("sys")?.method0("exception")?))?;
         Ok(rt::none(m.py()))
     })
 }
@@ -432,7 +433,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
                     "from handler:",
                     m.global("repr")?.call1((&e,))?,
                     "context:",
-                    m.global("repr")?.call1((e.getattr("__context__")?,))?,
+                    m.global("repr")?.call1((e.attr("__context__")?,))?,
                 ))?;
             }
             Err(err) => return Err(err),
@@ -643,7 +644,7 @@ def name_after_handler():
                 m.set_global("e", &exception)?;
                 let _handling = rt::Handling::new(&exception);
                 m.global("print")?
-                    .call1(("reraised", m.global("e")?.getattr("args")?))?;
+                    .call1(("reraised", m.global("e")?.attr("args")?))?;
                 m.unbind_global("e")?;
             }
             Err(err) => return Err(err),
@@ -692,8 +693,8 @@ def name_after_handler():
                     "module level",
                     m.global("type")?
                         .call1((m.global("e")?,))?
-                        .getattr("__name__")?,
-                    m.global("e")?.getattr("args")?,
+                        .attr("__name__")?,
+                    m.global("e")?.attr("args")?,
                 ))?;
                 m.unbind_global("e")?;
             }

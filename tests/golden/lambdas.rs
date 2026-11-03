@@ -3,6 +3,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // lambdas.py:7
 pub fn make_adder<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -65,7 +66,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         // lambdas.py:13
         fn lambda3<'py>(m: &rt::Module<'py>, w: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "<lambda>", 13, |_| { w.call_method0("lower") })
+            rt::frame!(m, "<lambda>", 13, |_| { w.method0("lower") })
         }
         rt::builtins::print(
             py,
@@ -81,9 +82,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("square")?.getattr("__name__")?,
-                m.global("square")?.getattr("__qualname__")?,
-                make_adder(m, &rt::int(py, 1))?.getattr("__qualname__")?,
+                m.global("square")?.attr("__name__")?,
+                m.global("square")?.attr("__qualname__")?,
+                make_adder(m, &rt::int(py, 1))?.attr("__qualname__")?,
             ),
         )?;
         // lambdas.py:15

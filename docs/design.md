@@ -134,7 +134,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 
 要点
 
-- 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`getattr`、`call` 等方法
+- 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`get_item`、`call` 等方法
+- 名字写在源码里的属性和方法（`o.x`、`o.x = v`、`o.m(a)`）用 runtime 的扩展 trait `rt::Attributes`（M11）：`o.attr("x")?`、`o.set_attr("x", v)?`、`o.del_attr("x")?`、`o.method0("m")?`、`o.method1("m", (a,))?`。它们就是 PyO3 的 `getattr`、`setattr`、`delattr`、`call_method0`、`call_method1`，区别只在名字必须是 `'static` 的字面量，runtime 为每个名字只创建一次驻留（interned）的 Python 字符串（第 6 节"调用的开销"）。用到它们的模块多一行 `use steelix_runtime::Attributes;`。名字在运行时才知道的（手写的代码里）照常用 PyO3 的方法
 - 函数体和模块体包在 `rt::frame!` 里，异常的 traceback 因此有原生函数的帧，函数名和 Python 一样，行号是 `def` 所在的行。闭包参数 `frame` 只在用到时出现（`raise`、`except` 等），否则写 `|_|`。`--traceback-lines` 在可能出错的语句前加 `frame.line(N);`，行号精确到语句（见第 9 节）
 - 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
 - 模块体生成 `exec_module(m)`，只依赖传入的模块上下文，与输出模式无关
@@ -145,7 +146,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 - 对 Python 可见的函数对象由 runtime 的 `Function` 包装（见第 6 节），注册只占一行：`rt::def!(m, fib(n))?`，签名的写法和 Python 一样（`greet(name, greeting = "Hello", *, punct = "!")`）。Rust 名字与 Python 名字不同时加 `name = "..."`，有 docstring 时加 `doc = "..."`
 - 模块级函数若只绑定一次，并且能在转换时绑定参数，调用时直接调用 Rust 函数（见第 6、7 节）
 - 嵌套函数和 lambda 是写在外层函数体里的 Rust fn，被捕获并会改变的变量是 `rt::Cell`（见第 6 节）
-- 会递归的函数（直接调用构成的调用图里有环）开头加 `let _guard = rt::RecursionGuard::enter(py)?;`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用（`PyObject_Call`）CPython 自己会检查，不需要 guard
+- 会递归的函数（直接调用构成的调用图里有环）开头加 `let _guard = rt::RecursionGuard::enter(py)?;`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用由 `Function` 的入口检查（第 6 节），不需要 guard
   - 3.14 的 `Py_EnterRecursiveCall` 按 C 栈剩余空间判断，不看 `sys.getrecursionlimit()`，报错信息是 `Stack overflow (used N kB)`（见第 12 节）
   - 已验证的坑：栈快耗尽时 `PyErr::fetch` 第一次创建 PyO3 的 `PanicException` 类型会失败并在 PyO3 的懒初始化锁上死锁。`RecursionGuard::enter` 每次先确保这个类型已经创建
 - runtime 一律通过 `rt::` 路径引用，不用 glob import，避免被 Python 里叫 `int`、`print` 的局部变量遮蔽
@@ -205,7 +206,7 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 
 因此 runtime 提供 `#[pyclass(frozen, dict, weakref)] Function`
 
-- 实现 `__call__`（按存储的签名描述绑定参数）和 `__get__`（像 Python 函数一样绑定方法，返回 `types.MethodType`），`repr` 是 `<function qualname at 0x..>`
+- 实现 `__call__`（按存储的签名描述绑定参数）和 `__get__`（像 Python 函数一样绑定方法，返回 `types.MethodType`），`repr` 是 `<function qualname at 0x..>`。M11 起还支持 vectorcall，并且和 Python 函数一样带 `Py_TPFLAGS_METHOD_DESCRIPTOR`（下面的"调用的开销"）
 - 持有指向生成的 Rust fn 的指针（统一签名的小闭包，由 `rt::function!` 生成，把绑定好的参数逐个传给 Rust fn）、所属模块的 globals、闭包的 cell。通过 `__traverse__` 让 GC 看到它们，模块 dict 和函数之间的循环引用可以回收
 - 元信息（`__name__`、`__qualname__`、`__doc__`、`__module__`、`__defaults__`、`__kwdefaults__`、`__annotations__`、`__annotate__`、`__type_params__`）放在 `Mutex` 里，都是可写的真实属性，赋值时做和 CPython 一样的类型检查（`__defaults__` 只接受 tuple 或 None 等）。M1 把它们放在实例 `__dict__` 里，但那样 `__defaults__` 无法做类型检查，调用时也要查 dict。`__dict__` 照常可写
 - `__module__` 取自 globals 的 `__name__`，与 CPython 一致；只读的 `__globals__`、`__closure__`（与 CPython 一样是 cell 的 tuple，没有闭包时是 None）
@@ -251,6 +252,28 @@ greet(m, &rt::str(py, "Bob"), &rt::str(py, "Hello"), &m.default("greet", "punct"
 - 省略的参数如果默认值是不可变的字面量（`None`、bool、数字、字符串、bytes），并且模块里没有给 `__defaults__`/`__kwdefaults__` 赋值（也没有以字符串形式写出这两个名字，例如 `setattr`），直接在调用处写成字面量
 - 其余默认值用 `m.default("greet", "punct")?` 在调用时从函数对象读取，所以给 `__defaults__`/`__kwdefaults__` 赋值后直接调用也能看到新值，可变默认参数在直接调用和经过 Python 的调用之间共享
 - 多出来的位置参数和关键字参数在调用处构造成 `PyTuple`/`PyDict` 传给 `*args`/`**kwargs`
+
+### 调用的开销（M11）
+
+M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几倍（`ctx.top()` 206 ns，CPython 43 ns），原因是调用协议和属性名，与函数体无关。M11 只做了不改变语义、不影响生成代码可读性的几项
+
+- **vectorcall（PEP 590）。** 以前只有 `tp_call`，CPython 每次调用都要先建参数 tuple（有关键字参数时还有 dict），PyO3 再解析一遍。现在 `Function` 有 vectorcall 入口，直接拿到参数数组和关键字名字的 tuple，`__call__` 仍然保留（`f.__call__(..)` 走它），两条路径共用同一个绑定函数，报错文字不变
+- **不需要绑定的调用直接传参数。** 只有位置参数的函数用位置参数调用、没有关键字参数时，参数数组本身就是函数体要的参数列表，不复制。参数少于形参时，缺的那些从调用时的 `__defaults__` 末尾补上（和 CPython 一样，默认值不够时交给完整的绑定去报错）。其余情况（关键字参数、`*args`、keyword-only、`**kwargs`）走 `initialize_locals` 的完整算法
+- **`Py_TPFLAGS_METHOD_DESCRIPTOR`。** 表示 `f.__get__(obj)(*args)` 等价于 `f(obj, *args)`，CPython 的 `LOAD_ATTR` 方法优化和 `PyObject_VectorcallMethod`（`method0`/`method1` 用的）因此不再为 `obj.m()` 创建 bound method。取属性 `obj.m` 本身照样经过 `__get__` 得到 bound method，内省看到的东西不变
+- PyO3 的 `#[pyclass]` 不能声明这两项，所以在创建第一个函数时补到类型对象上：`tp_vectorcall_offset` 指向 `Function` 里存放入口指针的字段，`tp_flags` 加上两个标志，再 `PyType_Modified`。`Function` 不能被继承，所有实例布局相同
+- vectorcall 的入口经过 PyO3 自己包装 fastcall 函数用的 trampoline（`pyo3::impl_`，随 PyO3 的版本固定）。它把错误和 panic 变成异常，并且告诉 PyO3 当前线程已经 attach。只用 `Python::assume_attached` 不够：在 Python 自己创建的线程里调用原生函数时 PyO3 不知道已经 attach，函数里释放的 `Py<T>`（例如处理完的异常）会推迟到以后才 decref，`__del__` 的时机就和 CPython 不同（`tests/cases/call_protocols.py` 最后一段检查这一点）
+- CPython 在 `tp_call` 之前检查递归深度，vectorcall 之前不检查，所以入口自己调用 `Py_EnterRecursiveCall`，消息和以前一样
+- **驻留的名字。** `rt::Attributes`（第 4 节）、`m.global`、`rt::builtin` 和 `rt::call!` 的关键字参数都只接受 `'static` 的名字，按字符串字面量的地址和长度找到驻留的 Python 字符串。PyO3 从 `&str` 每次新建字符串，CPython 再算哈希，而且属性缓存只认驻留的名字，这一项在 skime 上就快了一倍。查找用一张 4096 项、按地址索引的表，读取不加锁（attach 的线程轮流运行，写入只在第一次），几个位置都被别的名字占了时退回每个线程一张的 `HashMap`。和 `pyo3::intern!` 一样，这些字符串不释放
+
+在 skime 上（release，fib 22）从 2.93 s 降到 1.10 s，CPython 是 0.48 s。只换 runtime、生成代码不变时是 2.11 s。各项的数字见 `m10-skime.md` 第 7 节。
+
+没有做的
+
+- 参数不纯时的方法调用 `o.attr("m")?.call1((f()?,))?` 仍然先创建 bound method。要避免它得在 runtime 里重新实现 `_PyObject_GetMethod`（类型的 MRO、数据描述符、实例 dict、`__getattr__`），不算低成本
+- `rt::call!` 的关键字参数仍然先建 dict，再由 CPython 拆成 vectorcall 的形式，只是 key 改成了驻留的字符串。直接构造 kwnames 的收益在 skime 上不到 1%
+- 字符串常量 `rt::str(py, "..")` 仍然每次新建。缓存它们会让 `is` 的结果和以前不同（虽然更接近 CPython），而且不在热点上
+- 循环里的 `py.check_signals()`、`rt::frame!` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动
+- 全局变量的缓存（dict watcher），理由见第 7 节
 
 ### 嵌套函数与 lambda
 
@@ -336,7 +359,7 @@ Python 注释保留为 `//` 注释，放在它所属的语句前面：单独一�
   - 主要原因是缓存在可读性上没有收益：有了模块上下文，`m.global("LIMIT")?` 已经和 Python 的写法一一对应，缓存只会让生成代码多出缓存槽。函数被改写成原生 Rust 时，常量自然变成 Rust 的 `const`（第 15 节）
   - 动态查找顺带让替换全局变量（`monkeypatch.setattr(app, "LIMIT", 1)`、`mock.patch("app.requests")`）照常生效，函数在名字绑定之前被调用时也照常抛 `NameError`。但这不是完整的 monkeypatch 支持：对模块函数的直接调用本来就看不到替换（下面和第 12 节），所以不能拿它作为不缓存的理由
   - 缓存而又保持语义的做法是用 dict watcher（`PyDict_AddWatcher`）在 globals 或 builtins 变化时让缓存失效，但每个使用点需要一个缓存槽（生成代码里多一个宏或 static），每个解释器最多只有 8 个 watcher，实现和审查的成本都高
-  - 性能上，实测一次全局读取 44 ns，CPython 特化后的 `LOAD_GLOBAL` 约 1.5 ns。其中大部分是每次从 `&str` 新建并哈希一个 Python 字符串，所以 `m.global` 和 `rt::builtin` 只接受 `'static` 的名字，按地址缓存驻留字符串，降到 18 ns，语义不变。剩下的差距等专门做性能时再考虑 dict watcher
+  - 性能上，实测一次全局读取 44 ns，CPython 特化后的 `LOAD_GLOBAL` 约 1.5 ns。其中大部分是每次从 `&str` 新建并哈希一个 Python 字符串，所以 `m.global` 和 `rt::builtin` 只接受 `'static` 的名字，按地址缓存驻留字符串，降到 18 ns，语义不变（M11 起缓存是一张按地址索引、读取不加锁的表，属性名也用它）。dict watcher 在 M11 也没有做，理由同上
 - **直接调用的条件**：名字在模块内只绑定一次（`def` 算一次），没有装饰器，模块里没有 `from x import *`、`globals()`、对自身模块的 `setattr`、不带命名空间的 `exec`/`eval`，并且调用的参数能在转换时绑定（第 6 节）。否则走 globals 字典动态查找。调用名为 `globals`、`vars`、`locals` 的函数时保守地按 `globals()` 处理，即使这个名字是模块自己定义的函数。带参数的 `vars(obj)`、`locals(..)` 读的是别的命名空间，不算
 - **对自身模块的修改**（M3d，`ModuleBindings.patches_itself`）按常见写法保守地识别，原生代码和保留为 Python 的代码都检查：
   - 模块对象是 `sys.modules[__name__]`、`sys.modules["__main__"]`（也包括 `.get(..)`、`from sys import modules` 之后的 `modules[..]`）、`import __main__` 绑定的名字，以及被赋值为这些表达式的名字（不分作用域，传递）
@@ -426,11 +449,11 @@ const MODULES: &[NativeModule] = &[
 
 ## 8. 表达式与求值顺序
 
-Rust 方法调用的形状会改变求值顺序，例如 `x in y` 写成 `y.contains(x)`、`o.m(f())` 写成 `o.call_method1("m", (f(),))`、`a[i] = f()` 写成 `a.set_item(i, f())`。规则如下
+Rust 方法调用的形状会改变求值顺序，例如 `x in y` 写成 `y.contains(x)`、`o.m(f())` 写成 `o.method1("m", (f(),))`、`a[i] = f()` 写成 `a.set_item(i, f())`。规则如下
 
 - 多个子表达式中有可能产生副作用的，按 Python 顺序先求值到临时变量。纯名字和字面量不需要临时变量，以保持可读
 - 赋值语句先求值右边，再求值目标（`a[i] = f()` 是先 `f()`，再 `a`、`i`）
-- 方法调用先 `getattr` 再求值参数（`o.missing(f())` 不应调用 `f`）
+- 方法调用先取属性再求值参数（`o.missing(f())` 不应调用 `f`）
 - 比较：在 `if`/`while` 条件里用 `lt` 等返回 bool 的方法；需要值时（`m = a < b`，numpy 之类会返回非 bool）用 `rich_compare`。链式比较中间操作数只求值一次
 - 增量赋值：PyO3 没有 in-place 运算方法，用 runtime 的 `rt::iadd` 等（基于 `PyNumber_InPlaceAdd`），`a[i] += v`、`o.x += v` 中的 `a`、`i`、`o` 只求值一次
 - `and`/`or`：值语义的 block 表达式，在条件里优化成 `&&`/`||`
@@ -475,7 +498,7 @@ h.call0()?.contains(&item)?
 // h.attr += 1
 {
     let h = m.global("h")?;
-    h.setattr("attr", rt::iadd(&h.getattr("attr")?, 1)?)?;
+    h.set_attr("attr", rt::iadd(&h.attr("attr")?, 1)?)?;
 }
 ```
 
@@ -505,7 +528,7 @@ h.call0()?.contains(&item)?
 
 具体写法
 
-- 方法调用：参数都是纯的时写 `o.call_method1("m", (x, 1))?`，否则写 `o.getattr("m")?.call1((f()?,))?`，保证先查找方法
+- 方法调用：参数都是纯的时写 `o.method1("m", (x, 1))?`（没有参数时 `o.method0("m")?`），否则写 `o.attr("m")?.call1((f()?,))?`，保证先查找方法
 - `in`/`not in` 用 `contains`，`is` 用 `Bound::is`，与 `None` 比较用 `is_none()`。它们的结果是 Rust `bool`，需要对象时才 `rt::bool(py, ..)`
 - `and`/`or` 在条件里是 `&&`/`||`，右侧有 prelude 时写成 block。需要值时生成 `if` 表达式，左操作数先放进临时变量，决定结果时直接 move 出来；左操作数是 Rust `bool` 时不需要临时变量。左操作数是常量时在转换时就决定。作为语句的 `a or f()` 生成 `if !a.is_truthy()? { f()?; }`
 - 链式比较：`a < b < c` 在条件里是 `a.lt(&b)? && b.lt(c)?`；中间操作数需要临时变量时，它和之后所有用到它的比较放在同一个 block 里：`a.lt(b)? && { let rhs = f(py)?; b.lt(&rhs)? && rhs.lt(d)? }`。需要值时第一个比较结果放进临时变量，`if result.is_truthy()? { b.rich_compare(c, ..)? } else { result }`
@@ -513,7 +536,7 @@ h.call0()?.contains(&item)?
 - 增量赋值的 runtime 函数按 `operator` 模块命名：`rt::iadd`、`rt::itruediv`、`rt::ior` 等。`x += v` 写成 `x = rt::iadd(&x, v)?;`
 - 容器字面量用 PyO3 的构造函数：`PyList::new(py, [1, 2, 3])?`、`PyTuple::new(..)`、`PySet::new(..)`、`[("a", 1)].into_py_dict(py)?`，空的用 `PyList::empty(py)`、`PyDict::new(py)`。元素都是同类型的字面量时直接写，否则统一写成 `&Bound`。所有元素先求值再构造，与 `BUILD_LIST`/`BUILD_MAP` 一致
 - 带展开的容器字面量（M8a）用 runtime 的宏，写法接近 Python：`rt::list!(py, a, *b)?`、`rt::tuple!(..)`、`rt::set!(..)`、`rt::dict!(py, **d, (k, v))?`。宏按书写顺序求值，连续的普通元素成组加入，`*x` 和 `LIST_EXTEND`/`SET_UPDATE` 一样迭代，`**m` 和 `DICT_UPDATE` 一样合并（后面的 key 覆盖前面的），不可迭代、不是 mapping 时的报错与 CPython 一致。`tuple!` 先建 list 再转换，与 CPython 相同
-- 下标 `get_item`/`set_item`/`del_item`，属性 `getattr`/`setattr`/`delattr`。切片用 `rt::slice(py, start, stop)?` 和 `rt::slice_step(..)`，省略的部分是 `py.None()`，因为 `PySlice::new` 只接受整数，而 Python 的切片对象保留 `None`
+- 下标 `get_item`/`set_item`/`del_item`，属性 `attr`/`set_attr`/`del_attr`（`rt::Attributes`，见第 4 节）。切片用 `rt::slice(py, start, stop)?` 和 `rt::slice_step(..)`，省略的部分是 `py.None()`，因为 `PySlice::new` 只接受整数，而 Python 的切片对象保留 `None`
 - 解包用 `rt::unpack`（固定个数，返回数组）和 `rt::unpack_star`（返回 `([前], 列表, [后])`），按 CPython 的 `UNPACK_SEQUENCE` 逐步迭代，错误信息一致
 - f-string：每个字段是 `rt::format(&value, "spec")?`（`PyObject_Format`，没有 spec 时传 `""`），`!r`/`!s`/`!a` 是 `repr()?`/`str()?`/`rt::ascii(..)?`，嵌套的 spec 本身也是 f-string。多段时用 `rt::fstring(py, (a, " = ", b))?` 拼接（`"".join`），超过 12 段时嵌套
 - `assert` 写成 `if !cond { return Err(PyAssertionError::new_err(msg)); }`，消息只在失败时求值
@@ -552,7 +575,7 @@ Ok(list.into_any())
 
 // return {k: v for k, v in d.items() if v % 2 == 0}
 let dict = PyDict::new(py);
-for item in d.call_method0("items")?.try_iter()? {
+for item in d.method0("items")?.try_iter()? {
     let [k, v] = rt::unpack(&item?)?;
     if v.rem(2)?.eq(0)? {
         dict.set_item(&k, &v)?;
@@ -599,7 +622,7 @@ rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
   for word in words {
       let word = word?;
       if word.is_truthy()? {
-          return Ok(Some(word.call_method0("upper")?));
+          return Ok(Some(word.method0("upper")?));
       }
       py.check_signals()?;
   }
@@ -795,7 +818,7 @@ if let rt::Flow::Return(value) = finally.resume()? {
 ```rust
 if let rt::Flow::Return(value) =
     frame.with(&rt::builtin(py, "open")?.call1((path,))?, |f| {
-        Ok(rt::Flow::Return(f.call_method0("readline")?))
+        Ok(rt::Flow::Return(f.method0("readline")?))
     })?
 {
     return Ok(value);
@@ -846,8 +869,8 @@ pub mod point {
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Point.__init__", 7, |_| {
-            slf.setattr("x", x)?;
-            slf.setattr("y", y)?;
+            slf.set_attr("x", x)?;
+            slf.set_attr("y", y)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -859,7 +882,7 @@ pub mod point {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Point.describe", 19, |_| {
-            rt::str(m.py(), "point on ").add(rt::super_(__class__, slf)?.call_method0("describe")?)
+            rt::str(m.py(), "point on ").add(rt::super_(__class__, slf)?.method0("describe")?)
         })
     }
 }
@@ -890,7 +913,7 @@ m.set_global(
 ### 方法
 
 - 类体里的 `def` 创建 `Function`，Rust fn 放在类的 mod 里，名字就是方法名，和模块级的函数名、mod 里别的名字冲突时加 `_`（property 的 setter、deleter 是 `label_`、`label__`）。`self` 参数叫 `slf`，`rt::function!` 里写成 `slf as "self"`
-- 方法和模块函数一样接收 `m`。实例属性是 `slf.getattr("x")?`、`slf.setattr("x", v)?`，调用自己的方法是 `slf.call_method0("describe")?`，都是动态的，和 Python 一样受子类覆盖、`__getattr__`、`__slots__` 影响；方法之间不直接调用
+- 方法和模块函数一样接收 `m`。实例属性是 `slf.attr("x")?`、`slf.set_attr("x", v)?`，调用自己的方法是 `slf.method0("describe")?`，都是动态的，和 Python 一样受子类覆盖、`__getattr__`、`__slots__` 影响；方法之间不直接调用
 - `staticmethod`、`classmethod`、`property` 和别的装饰器一样处理，不需要特殊支持
 - `Function` 有 `__get__`，绑定后是 `types.MethodType`，和 Python 函数一样。M5 还给它加了一个 `__code__`：没有字节码，只描述签名（`co_name`、`co_qualname`、参数个数、`co_varnames`、`co_freevars`、flags），给检查 `co_freevars` 的代码（`dataclass(slots=True)`）用
 
@@ -1137,7 +1160,7 @@ def evens(limit):
 拆开的 `if` 里保留的语句保持原来的缩进（节选自 `tests/golden/mixed_nested.rs`）：
 
 ```rust
-        if m.global("sys")?.getattr("argv")?.len()? > 5 {
+        if m.global("sys")?.attr("argv")?.len()? > 5 {
             m.set_global("mode", "many")?;
             // mixed_nested.py:12, kept as Python: unpacking in a display at 12:15
             rt::exec_python!(

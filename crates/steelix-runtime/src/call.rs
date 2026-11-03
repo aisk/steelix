@@ -21,6 +21,12 @@ pub fn function_str(function: &Bound<'_, PyAny>) -> PyResult<String> {
     }
 }
 
+/// The interned string for a keyword argument spelled in the source.
+#[doc(hidden)]
+pub fn keyword<'py>(py: Python<'py>, name: &'static str) -> Borrowed<'static, 'py, PyString> {
+    crate::interned(py, name)
+}
+
 /// Whether `value` can be iterated, by the test CPython uses after an
 /// iteration failed.
 fn is_iterable(value: &Bound<'_, PyAny>) -> bool {
@@ -57,7 +63,7 @@ pub fn star_args<'py>(
 
 /// `*value` among other positional arguments (`LIST_EXTEND`).
 pub fn extend_args(args: &Bound<'_, PyList>, value: &Bound<'_, PyAny>) -> PyResult<()> {
-    match args.call_method1("extend", (value,)) {
+    match args.call_method1(crate::interned(args.py(), "extend"), (value,)) {
         Ok(_) => Ok(()),
         Err(err) if err.is_instance_of::<PyTypeError>(value.py()) && !is_iterable(value) => {
             Err(crate::raised(PyTypeError::new_err(format!(
@@ -193,12 +199,19 @@ macro_rules! call {
     (@kwarg $function:ident, $kwargs:ident, (kw $name:ident $value:expr)) => {
         $crate::pyo3::types::PyDictMethods::set_item(
             &$kwargs,
-            $crate::function::python_name(stringify!($name)),
+            $crate::call::keyword(
+                $crate::pyo3::Bound::py(&$kwargs),
+                $crate::function::python_name(stringify!($name)),
+            ),
             $value,
         )?
     };
     (@kwarg $function:ident, $kwargs:ident, (kw $name:literal $value:expr)) => {
-        $crate::pyo3::types::PyDictMethods::set_item(&$kwargs, $name, $value)?
+        $crate::pyo3::types::PyDictMethods::set_item(
+            &$kwargs,
+            $crate::call::keyword($crate::pyo3::Bound::py(&$kwargs), $name),
+            $value,
+        )?
     };
     (@kwarg $function:ident, $kwargs:ident, (merge $value:expr)) => {{
         let value = &$value;

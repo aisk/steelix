@@ -2,6 +2,7 @@ use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::exceptions::PySystemExit;
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 /// Executes the body of `json/__main__.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
@@ -12,7 +13,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // tests/test_projects.py runs it transpiled and with CPython and compares.
         m.set_global("json", rt::import(m, "json.tool")?)?;
         if m.global("__name__")?.eq("__main__")? {
-            match (|| m.global("json")?.getattr("tool")?.call_method0("main"))() {
+            match (|| m.global("json")?.attr("tool")?.method0("main"))() {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyBrokenPipeError>(m.py()) => {
                     let exception = frame.catch(err);
@@ -20,7 +21,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     let _handling = rt::Handling::new(&exception);
                     return Err(frame.raise(PySystemExit::new_err((m
                         .global("exc")?
-                        .getattr("errno")?
+                        .attr("errno")?
                         .unbind(),))));
                 }
                 Err(err) => return Err(err),

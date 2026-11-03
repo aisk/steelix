@@ -2,11 +2,12 @@ use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // complex_constants.py:1
 pub fn parts<'py>(m: &rt::Module<'py>, z: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "parts", 1, |_| {
-        Ok(PyTuple::new(m.py(), [&z.getattr("real")?, &z.getattr("imag")?])?.into_any())
+        Ok(PyTuple::new(m.py(), [&z.attr("real")?, &z.attr("imag")?])?.into_any())
     })
 }
 
@@ -33,7 +34,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::complex(py, 0.0, 0.0),
                 rt::complex(py, 0.0, f64::INFINITY),
                 rt::complex(py, 0.0, 3.0).neg()?,
-                rt::complex(py, 0.0, 1.0).get_type().getattr("__name__")?,
+                rt::complex(py, 0.0, 1.0).get_type().attr("__name__")?,
             ),
         )?;
         rt::builtins::print(
@@ -68,7 +69,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("x")?.call_method0("conjugate")?,
+                m.global("x")?.method0("conjugate")?,
                 m.global("x")?.pow(2, py.None())?,
                 m.global("x")?.neg()?,
             ),

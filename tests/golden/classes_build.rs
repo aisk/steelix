@@ -14,6 +14,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // classes_build.py:5
 pub fn trace<'py>(
@@ -39,8 +40,8 @@ pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bou
         ) -> PyResult<Bound<'py, PyAny>> {
             let py = m.py();
             rt::frame!(m, "deco.<locals>.apply", 13, |_| {
-                rt::builtins::print(py, ("apply", label, cls.getattr("__name__")?))?;
-                cls.setattr(
+                rt::builtins::print(py, ("apply", label, cls.attr("__name__")?))?;
+                cls.set_attr(
                     "decorated",
                     rt::builtin(py, "getattr")?
                         .call1((cls, "decorated", PyTuple::empty(py)))?
@@ -72,7 +73,7 @@ pub fn fake_meta<'py>(
             rt::frame!(m, "fake_meta.<locals>.<genexpr>", 265, |_| {
                 for k in ns {
                     let k = k?;
-                    if !k.call_method1("startswith", ("__",))?.is_truthy()? {
+                    if !k.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(k));
                     }
                     m.py().check_signals()?;
@@ -161,7 +162,7 @@ pub mod logged {
         let py = m.py();
         rt::frame!(m, "Logged.__setitem__", 38, |_| {
             rt::builtins::print(py, ("set", key))?;
-            rt::super_(__class__, slf)?.call_method1("__setitem__", (key, value))?;
+            rt::super_(__class__, slf)?.method1("__setitem__", (key, value))?;
             Ok(rt::none(py))
         })
     }
@@ -217,7 +218,7 @@ pub mod meta {
             let list = PyList::empty(py);
             for b in bases.try_iter()? {
                 let b = b?;
-                list.append(b.getattr("__name__")?)?;
+                list.append(b.attr("__name__")?)?;
                 py.check_signals()?;
             }
             rt::builtins::print(py, ("prepare", name, list, kwargs))?;
@@ -241,7 +242,7 @@ pub mod meta {
                 py,
                 ("new", name, rt::builtin(py, "sorted")?.call1((kwargs,))?),
             )?;
-            rt::super_(__class__, mcls)?.getattr("__new__")?.call1((
+            rt::super_(__class__, mcls)?.attr("__new__")?.call1((
                 mcls,
                 name,
                 bases,
@@ -263,7 +264,7 @@ pub mod meta {
         let py = m.py();
         rt::frame!(m, "Meta.__init__", 53, |_| {
             rt::builtins::print(py, ("init", name))?;
-            rt::super_(__class__, cls)?.call_method1("__init__", (name, bases, ns))?;
+            rt::super_(__class__, cls)?.method1("__init__", (name, bases, ns))?;
             Ok(rt::none(py))
         })
     }
@@ -301,7 +302,7 @@ pub mod with_meta {
         let py = m.py();
         rt::frame!(m, "WithMeta.method", 63, |_| {
             rt::super_(__class__, slf)?
-                .call_method0("__repr__")?
+                .method0("__repr__")?
                 .get_item(rt::slice(py, py.None(), 9)?)
         })
     }
@@ -339,21 +340,21 @@ pub mod plugin {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Plugin.__init_subclass__", 73, |_| {
             rt::call!(
-                rt::super_(__class__, cls)?.getattr("__init_subclass__")?,
+                rt::super_(__class__, cls)?.attr("__init_subclass__")?,
                 **kwargs
             )?;
-            cls.setattr(
+            cls.set_attr(
                 "plugin_name",
                 if name.is_truthy()? {
                     name.clone()
                 } else {
-                    cls.getattr("__name__")?.call_method0("lower")?
+                    cls.attr("__name__")?.method0("lower")?
                 },
             )?;
             m.global("Plugin")?
-                .getattr("registry")?
-                .getattr("append")?
-                .call1((cls.getattr("plugin_name")?,))?;
+                .attr("registry")?
+                .attr("append")?
+                .call1((cls.attr("plugin_name")?,))?;
             Ok(rt::none(m.py()))
         })
     }
@@ -415,8 +416,8 @@ pub mod field {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Field.__set_name__", 91, |_| {
-            rt::builtins::print(py, ("set_name", owner.getattr("__name__")?, name))?;
-            slf.setattr("name", name)?;
+            rt::builtins::print(py, ("set_name", owner.attr("__name__")?, name))?;
+            slf.set_attr("name", name)?;
             Ok(rt::none(py))
         })
     }
@@ -432,9 +433,9 @@ pub mod field {
             if obj.is_none() {
                 return Ok(slf.clone());
             }
-            obj.getattr("__dict__")?
-                .getattr("get")?
-                .call1((slf.getattr("name")?, "unset"))
+            obj.attr("__dict__")?
+                .attr("get")?
+                .call1((slf.attr("name")?, "unset"))
         })
     }
 }
@@ -786,7 +787,7 @@ pub mod drop_cell {
         rt::frame!(m, "DropCell.__new__", 240, |_| {
             let mut ns = ns.clone();
             let dict = PyDict::new(py);
-            for item in ns.call_method0("items")?.try_iter()? {
+            for item in ns.method0("items")?.try_iter()? {
                 let [k, v] = rt::unpack(&item?)?;
                 if k.ne("__classcell__")? {
                     dict.set_item(&k, &v)?;
@@ -794,7 +795,7 @@ pub mod drop_cell {
                 py.check_signals()?;
             }
             ns = dict.into_any();
-            rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, &ns))
+            rt::super_(__class__, mcls)?.method1("__new__", (mcls, name, bases, &ns))
         })
     }
 }
@@ -949,7 +950,7 @@ pub mod outer {
                 slf: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
                 rt::frame!(m, "Outer.Inner.Deepest.where", 293, |_| {
-                    slf.get_type().getattr("__qualname__")
+                    slf.get_type().attr("__qualname__")
                 })
             }
         }
@@ -958,7 +959,7 @@ pub mod outer {
     // classes_build.py:296
     pub fn make<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Outer.make", 296, |_| {
-            slf.getattr("Inner")?.call_method0("Deepest")
+            slf.attr("Inner")?.method0("Deepest")
         })
     }
 }
@@ -1011,7 +1012,7 @@ pub mod original {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Original.hello", 320, |_| {
-            rt::str(m.py(), "original:").add(__class__.get()?.getattr("__name__")?)
+            rt::str(m.py(), "original:").add(__class__.get()?.attr("__name__")?)
         })
     }
 
@@ -1024,7 +1025,7 @@ pub mod original {
         let py = m.py();
         rt::frame!(m, "Original.via_super", 323, |_| {
             rt::super_(__class__, slf)?
-                .call_method0("__repr__")?
+                .method0("__repr__")?
                 .get_item(rt::slice(py, py.None(), 10)?)
         })
     }
@@ -1056,10 +1057,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Ordered")?.getattr("decorated")?,
-                m.global("Ordered")?.getattr("x")?,
-                m.global("Ordered")?.getattr("y")?,
-                m.global("Ordered")?.getattr("__firstlineno__")?,
+                m.global("Ordered")?.attr("decorated")?,
+                m.global("Ordered")?.attr("x")?,
+                m.global("Ordered")?.attr("y")?,
+                m.global("Ordered")?.attr("__firstlineno__")?,
             ),
         )?;
         m.set_global(
@@ -1087,9 +1088,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("WithMeta")?.get_type().getattr("__name__")?,
-                m.global("WithMeta")?.getattr("a")?,
-                m.global("WithMeta")?.call0()?.call_method0("method")?,
+                m.global("WithMeta")?.get_type().attr("__name__")?,
+                m.global("WithMeta")?.attr("a")?,
+                m.global("WithMeta")?.call0()?.method0("method")?,
             ),
         )?;
         m.set_global(
@@ -1112,9 +1113,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Plugin")?.getattr("registry")?,
-                m.global("Csv")?.getattr("plugin_name")?,
-                m.global("Json")?.getattr("plugin_name")?,
+                m.global("Plugin")?.attr("registry")?,
+                m.global("Csv")?.attr("plugin_name")?,
+                m.global("Json")?.attr("plugin_name")?,
             ),
         )?;
         m.set_global(
@@ -1127,14 +1128,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         m.set_global("r", m.global("Record")?.call0()?)?;
         m.global("r")?
-            .getattr("__dict__")?
+            .attr("__dict__")?
             .set_item("title", "hello")?;
         rt::builtins::print(
             py,
             (
-                m.global("r")?.getattr("title")?,
-                m.global("r")?.getattr("body")?,
-                m.global("Record")?.getattr("title")?.getattr("name")?,
+                m.global("r")?.attr("title")?,
+                m.global("r")?.attr("body")?,
+                m.global("Record")?.attr("title")?.attr("name")?,
             ),
         )?;
         m.set_global("Alias", rt::class!(m, "Alias"(), alias::body, line = 111)?)?;
@@ -1152,10 +1153,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("FromAlias")?
-                    .getattr("__bases__")?
+                    .attr("__bases__")?
                     .rich_compare(PyTuple::new(py, [&m.global("Base")?])?, CompareOp::Eq)?,
                 m.global("FromAlias")?
-                    .getattr("__orig_bases__")?
+                    .attr("__orig_bases__")?
                     .rich_compare(PyTuple::new(py, [&m.global("alias")?])?, CompareOp::Eq)?,
             ),
         )?;
@@ -1176,7 +1177,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (m.global("Starred")?
-                .getattr("__bases__")?
+                .attr("__bases__")?
                 .rich_compare(PyTuple::new(py, [&m.global("Base")?])?, CompareOp::Eq)?,),
         )?;
         // classes_build.py:137, kept as Python: class definition in a function at 140:9
@@ -1366,7 +1367,7 @@ def errors():
             )?,
         )?;
         rt::builtins::print(py, (m.global("NotAClass")?,))?;
-        if m.global("Ordered")?.getattr("x")?.is_truthy()? {
+        if m.global("Ordered")?.attr("x")?.is_truthy()? {
             m.set_global(
                 "Conditional",
                 rt::class!(m, "Conditional"(), conditional::body, line = 278)?,
@@ -1377,23 +1378,21 @@ def errors():
                 rt::class!(m, "Conditional"(), conditional_::body, line = 283)?,
             )?;
         }
-        rt::builtins::print(py, (m.global("Conditional")?.getattr("branch")?,))?;
+        rt::builtins::print(py, (m.global("Conditional")?.attr("branch")?,))?;
         m.set_global("Outer", rt::class!(m, "Outer"(), outer::body, line = 290)?)?;
         rt::builtins::print(
             py,
             (
-                m.global("Outer")?
-                    .getattr("Inner")?
-                    .getattr("__qualname__")?,
+                m.global("Outer")?.attr("Inner")?.attr("__qualname__")?,
                 m.global("Outer")?
                     .call0()?
-                    .call_method0("make")?
-                    .call_method0("where")?,
+                    .method0("make")?
+                    .method0("where")?,
                 m.global("Outer")?
-                    .getattr("Inner")?
-                    .getattr("Deepest")?
-                    .getattr("where")?
-                    .getattr("__qualname__")?,
+                    .attr("Inner")?
+                    .attr("Deepest")?
+                    .attr("where")?
+                    .attr("__qualname__")?,
             ),
         )?;
         for item in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
@@ -1405,8 +1404,8 @@ def errors():
             rt::builtins::print(
                 py,
                 (
-                    m.global("InLoop")?.getattr("index")?,
-                    m.global("InLoop")?.getattr("__qualname__")?,
+                    m.global("InLoop")?.attr("index")?,
+                    m.global("InLoop")?.attr("__qualname__")?,
                 ),
             )?;
             py.check_signals()?;
@@ -1432,9 +1431,9 @@ def replaced(cls):
         rt::builtins::print(
             py,
             (
-                m.global("Original")?.call0()?.call_method0("hello")?,
-                m.global("Original")?.getattr("__name__")?,
-                m.global("Original")?.call0()?.call_method0("via_super")?,
+                m.global("Original")?.call0()?.method0("hello")?,
+                m.global("Original")?.attr("__name__")?,
+                m.global("Original")?.call0()?.method0("via_super")?,
             ),
         )?;
         Ok(())

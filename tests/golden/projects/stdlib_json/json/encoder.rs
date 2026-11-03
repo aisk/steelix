@@ -12,6 +12,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyDict;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // json/encoder.py:40
 /// Return a JSON representation of a Python string
@@ -29,7 +30,7 @@ pub fn py_encode_basestring<'py>(
         ) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(m, "py_encode_basestring.<locals>.replace", 44, |_| {
                 m.global("ESCAPE_DCT")?
-                    .get_item(r#match.call_method1("group", (0,))?)
+                    .get_item(r#match.method1("group", (0,))?)
             })
         }
         let replace = rt::function!(
@@ -38,7 +39,7 @@ pub fn py_encode_basestring<'py>(
             qualname = "py_encode_basestring.<locals>.replace"
         )?;
         rt::str(m.py(), "\"")
-            .add(m.global("ESCAPE")?.call_method1("sub", (&replace, s))?)?
+            .add(m.global("ESCAPE")?.method1("sub", (&replace, s))?)?
             .add("\"")
     })
 }
@@ -63,7 +64,7 @@ pub fn py_encode_basestring_ascii<'py>(
                 "py_encode_basestring_ascii.<locals>.replace",
                 56,
                 |frame| {
-                    let s = r#match.call_method1("group", (0,))?;
+                    let s = r#match.method1("group", (0,))?;
                     let mut n: Bound<'py, PyAny>;
                     let s1: Bound<'py, PyAny>;
                     let s2: Bound<'py, PyAny>;
@@ -73,15 +74,14 @@ pub fn py_encode_basestring_ascii<'py>(
                             let _handling = rt::Handling::new(&frame.catch(err));
                             n = rt::builtin(py, "ord")?.call1((&s,))?;
                             if n.lt(65536)? {
-                                rt::str(py, "\\u{0:04x}").call_method1("format", (&n,))
+                                rt::str(py, "\\u{0:04x}").method1("format", (&n,))
                             } else {
                                 // return '\\u%04x' % (n,)
                                 // surrogate pair
                                 n = rt::isub(&n, 65536)?;
                                 s1 = rt::int(py, 55296).bitor(n.rshift(10)?.bitand(1023)?)?;
                                 s2 = rt::int(py, 56320).bitor(n.bitand(1023)?)?;
-                                rt::str(py, "\\u{0:04x}\\u{1:04x}")
-                                    .call_method1("format", (&s1, &s2))
+                                rt::str(py, "\\u{0:04x}\\u{1:04x}").method1("format", (&s1, &s2))
                             }
                         }
                         Err(err) => Err(err),
@@ -95,10 +95,7 @@ pub fn py_encode_basestring_ascii<'py>(
             qualname = "py_encode_basestring_ascii.<locals>.replace"
         )?;
         rt::str(m.py(), "\"")
-            .add(
-                m.global("ESCAPE_ASCII")?
-                    .call_method1("sub", (&replace, s))?,
-            )?
+            .add(m.global("ESCAPE_ASCII")?.method1("sub", (&replace, s))?)?
             .add("\"")
     })
 }
@@ -223,21 +220,21 @@ pub mod json_encoder {
         default: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "JSONEncoder.__init__", 108, |_| {
-            slf.setattr("skipkeys", skipkeys)?;
-            slf.setattr("ensure_ascii", ensure_ascii)?;
-            slf.setattr("check_circular", check_circular)?;
-            slf.setattr("allow_nan", allow_nan)?;
-            slf.setattr("sort_keys", sort_keys)?;
-            slf.setattr("indent", indent)?;
+            slf.set_attr("skipkeys", skipkeys)?;
+            slf.set_attr("ensure_ascii", ensure_ascii)?;
+            slf.set_attr("check_circular", check_circular)?;
+            slf.set_attr("allow_nan", allow_nan)?;
+            slf.set_attr("sort_keys", sort_keys)?;
+            slf.set_attr("indent", indent)?;
             if !separators.is_none() {
                 let [item_separator, key_separator] = rt::unpack(separators)?;
-                slf.setattr("item_separator", item_separator)?;
-                slf.setattr("key_separator", key_separator)?;
+                slf.set_attr("item_separator", item_separator)?;
+                slf.set_attr("key_separator", key_separator)?;
             } else if !indent.is_none() {
-                slf.setattr("item_separator", ",")?;
+                slf.set_attr("item_separator", ",")?;
             }
             if !default.is_none() {
-                slf.setattr("default", default)?;
+                slf.set_attr("default", default)?;
             }
             Ok(rt::none(m.py()))
         })
@@ -271,7 +268,7 @@ pub mod json_encoder {
                 m.py(),
                 (
                     "Object of type ",
-                    rt::format(&o.getattr("__class__")?.getattr("__name__")?, "")?,
+                    rt::format(&o.attr("__class__")?.attr("__name__")?, "")?,
                     " is not JSON serializable",
                 ),
             )?
@@ -295,7 +292,7 @@ pub mod json_encoder {
         rt::frame!(m, "JSONEncoder.encode", 188, |_| {
             // This is for extremely simple cases and benchmarks.
             if o.is_instance(&rt::builtin(py, "str")?)? {
-                if slf.getattr("ensure_ascii")?.is_truthy()? {
+                if slf.attr("ensure_ascii")?.is_truthy()? {
                     return m.global("encode_basestring_ascii")?.call1((o,));
                 } else {
                     return m.global("encode_basestring")?.call1((o,));
@@ -304,13 +301,13 @@ pub mod json_encoder {
             // This doesn't pass the iterator directly to ''.join() because the
             // exceptions aren't as detailed.  The list call should be roughly
             // equivalent to the PySequence_Fast that ''.join() would do.
-            let mut chunks = rt::call!(slf.getattr("iterencode")?, o, _one_shot = true)?;
+            let mut chunks = rt::call!(slf.attr("iterencode")?, o, _one_shot = true)?;
             if !chunks.is_instance(
                 PyTuple::new(py, [&rt::builtin(py, "list")?, &rt::builtin(py, "tuple")?])?.as_any(),
             )? {
                 chunks = rt::builtin(py, "list")?.call1((&chunks,))?;
             }
-            rt::str(py, "").call_method1("join", (&chunks,))
+            rt::str(py, "").method1("join", (&chunks,))
         })
     }
 
@@ -331,12 +328,12 @@ pub mod json_encoder {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "JSONEncoder.iterencode", 210, |_| {
-            let markers = if slf.getattr("check_circular")?.is_truthy()? {
+            let markers = if slf.attr("check_circular")?.is_truthy()? {
                 PyDict::new(py).into_any()
             } else {
                 rt::none(py)
             };
-            let _encoder = if slf.getattr("ensure_ascii")?.is_truthy()? {
+            let _encoder = if slf.attr("ensure_ascii")?.is_truthy()? {
                 m.global("encode_basestring_ascii")?
             } else {
                 m.global("encode_basestring")?
@@ -384,45 +381,43 @@ pub mod json_encoder {
                 m,
                 floatstr(
                     o,
-                    allow_nan = slf.getattr("allow_nan")?,
-                    _repr = rt::builtin(py, "float")?.getattr("__repr__")?,
+                    allow_nan = slf.attr("allow_nan")?,
+                    _repr = rt::builtin(py, "float")?.attr("__repr__")?,
                     _inf = m.global("INFINITY")?,
                     _neginf = m.global("INFINITY")?.neg()?
                 ),
                 qualname = "JSONEncoder.iterencode.<locals>.floatstr"
             )?;
-            let indent = if slf.getattr("indent")?.is_none()
-                || slf
-                    .getattr("indent")?
-                    .is_instance(&rt::builtin(py, "str")?)?
+            let indent = if slf.attr("indent")?.is_none()
+                || slf.attr("indent")?.is_instance(&rt::builtin(py, "str")?)?
             {
-                slf.getattr("indent")?
+                slf.attr("indent")?
             } else {
-                rt::str(py, " ").mul(slf.getattr("indent")?)?
+                rt::str(py, " ").mul(slf.attr("indent")?)?
             };
             let _iterencode = if _one_shot.is_truthy()? && !m.global("c_make_encoder")?.is_none() {
                 m.global("c_make_encoder")?.call1((
                     &markers,
-                    slf.getattr("default")?,
+                    slf.attr("default")?,
                     &_encoder,
                     &indent,
-                    slf.getattr("key_separator")?,
-                    slf.getattr("item_separator")?,
-                    slf.getattr("sort_keys")?,
-                    slf.getattr("skipkeys")?,
-                    slf.getattr("allow_nan")?,
+                    slf.attr("key_separator")?,
+                    slf.attr("item_separator")?,
+                    slf.attr("sort_keys")?,
+                    slf.attr("skipkeys")?,
+                    slf.attr("allow_nan")?,
                 ))?
             } else {
                 m.global("_make_iterencode")?.call1((
                     &markers,
-                    slf.getattr("default")?,
+                    slf.attr("default")?,
                     &_encoder,
                     &indent,
                     &floatstr,
-                    slf.getattr("key_separator")?,
-                    slf.getattr("item_separator")?,
-                    slf.getattr("sort_keys")?,
-                    slf.getattr("skipkeys")?,
+                    slf.attr("key_separator")?,
+                    slf.attr("item_separator")?,
+                    slf.attr("sort_keys")?,
+                    slf.attr("skipkeys")?,
                     _one_shot,
                 ))?
             };
@@ -485,17 +480,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "ESCAPE",
             m.global("re")?
-                .call_method1("compile", ("[\\x00-\\x1f\\\\\"\\b\\f\\n\\r\\t]",))?,
+                .method1("compile", ("[\\x00-\\x1f\\\\\"\\b\\f\\n\\r\\t]",))?,
         )?;
         m.set_global(
             "ESCAPE_ASCII",
             m.global("re")?
-                .call_method1("compile", ("([\\\\\"]|[^\\ -~])",))?,
+                .method1("compile", ("([\\\\\"]|[^\\ -~])",))?,
         )?;
         m.set_global(
             "HAS_UTF8",
             m.global("re")?
-                .call_method1("compile", (rt::bytes(py, b"[\x80-\xff]"),))?,
+                .method1("compile", (rt::bytes(py, b"[\x80-\xff]"),))?,
         )?;
         m.set_global(
             "ESCAPE_DCT",
@@ -512,10 +507,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         for item in rt::builtin(py, "range")?.call1((32,))?.try_iter()? {
             m.set_global("i", item?)?;
-            m.global("ESCAPE_DCT")?.getattr("setdefault")?.call1((
+            m.global("ESCAPE_DCT")?.attr("setdefault")?.call1((
                 rt::builtin(py, "chr")?.call1((m.global("i")?,))?,
                 rt::str(py, "\\u{0:04x}")
-                    .getattr("format")?
+                    .attr("format")?
                     .call1((m.global("i")?,))?,
             ))?;
             py.check_signals()?;

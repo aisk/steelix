@@ -4,6 +4,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod account {
     use super::*;
@@ -87,19 +88,19 @@ pub mod account {
         owner: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.__init__", 8, |_| {
-            slf.setattr("_Account__owner", owner)?;
+            slf.set_attr("_Account__owner", owner)?;
             {
-                let __class__ = slf.getattr("__class__")?;
-                __class__.setattr(
+                let __class__ = slf.attr("__class__")?;
+                __class__.set_attr(
                     "_Account__count",
-                    rt::iadd(&__class__.getattr("_Account__count")?, 1)?,
+                    rt::iadd(&__class__.attr("_Account__count")?, 1)?,
                 )?;
             }
             {
                 let Account = m.global("Account")?;
-                Account.setattr(
+                Account.set_attr(
                     "_Account__count",
-                    rt::iadd(&Account.getattr("_Account__count")?, 0)?,
+                    rt::iadd(&Account.attr("_Account__count")?, 0)?,
                 )?;
             }
             Ok(rt::none(m.py()))
@@ -112,7 +113,7 @@ pub mod account {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.__secret", 13, |_| {
-            rt::str(m.py(), "secret of ").add(slf.getattr("_Account__owner")?)
+            rt::str(m.py(), "secret of ").add(slf.attr("_Account__owner")?)
         })
     }
 
@@ -122,7 +123,7 @@ pub mod account {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.reveal", 16, |_| {
-            slf.call_method0("_Account__secret")
+            slf.method0("_Account__secret")
         })
     }
 
@@ -138,7 +139,7 @@ pub mod account {
     // classes_mangling.py:23
     pub fn count<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.count", 22, |_| {
-            m.global("Account")?.getattr("_Account__count")
+            m.global("Account")?.attr("_Account__count")
         })
     }
 
@@ -168,7 +169,7 @@ pub mod account {
             slf: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(m, "Account.__Inner.level", 29, |_| {
-                slf.getattr("_Inner__level")
+                slf.attr("_Inner__level")
             })
         }
     }
@@ -176,7 +177,7 @@ pub mod account {
     // classes_mangling.py:32
     pub fn inner<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Account.inner", 32, |_| {
-            slf.call_method0("_Account__Inner")?.call_method0("level")
+            slf.method0("_Account__Inner")?.method0("level")
         })
     }
 
@@ -242,7 +243,7 @@ pub mod _under {
 
     // classes_mangling.py:50
     pub fn call<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "_Under.call", 50, |_| { slf.call_method0("_Under__x") })
+        rt::frame!(m, "_Under.call", 50, |_| { slf.method0("_Under__x") })
     }
 }
 
@@ -272,7 +273,7 @@ pub mod ___ {
 
     // classes_mangling.py:58
     pub fn call<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "___.call", 58, |_| { slf.call_method0("__y") })
+        rt::frame!(m, "___.call", 58, |_| { slf.method0("__y") })
     }
 }
 
@@ -301,22 +302,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("a")?.call_method0("reveal")?,
-                m.global("a")?.getattr("_Account__owner")?,
-                m.global("Account")?.call_method0("count")?,
-                m.global("a")?.call_method0("inner")?,
-                m.global("a")?.call_method0("get")?,
-                rt::call!(m.global("a")?.getattr("get")?, _Account__key = 1)?,
+                m.global("a")?.method0("reveal")?,
+                m.global("a")?.attr("_Account__owner")?,
+                m.global("Account")?.method0("count")?,
+                m.global("a")?.method0("inner")?,
+                m.global("a")?.method0("get")?,
+                rt::call!(m.global("a")?.attr("get")?, _Account__key = 1)?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("a")?.call_method0("handler")?,
-                m.global("a")?.call_method0("names")?,
+                m.global("a")?.method0("handler")?,
+                m.global("a")?.method0("names")?,
                 rt::builtin(py, "hasattr")?.call1((m.global("a")?, "__owner"))?,
                 m.global("Account")?
-                    .getattr("__dict__")?
+                    .attr("__dict__")?
                     .contains("_Account__secret")?,
             ),
         )?;
@@ -324,9 +325,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("Account")?
-                    .getattr("_Account__Inner")?
-                    .getattr("__qualname__")?,
-                m.global("Account")?.getattr("__static_attributes__")?,
+                    .attr("_Account__Inner")?
+                    .attr("__qualname__")?,
+                m.global("Account")?.attr("__static_attributes__")?,
             ),
         )?;
         // classes_mangling.py:67
@@ -348,15 +349,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("_Under")?.call0()?.call_method0("call")?,
-                m.global("___")?.call0()?.call_method0("call")?,
+                m.global("_Under")?.call0()?.method0("call")?,
+                m.global("___")?.call0()?.method0("call")?,
                 rt::builtin(py, "sorted")?.call1((rt::genexpr!(
                     m,
-                    genexpr(m.global("___")?.getattr("__dict__")?.try_iter()?)
+                    genexpr(m.global("___")?.attr("__dict__")?.try_iter()?)
                 )?,))?,
             ),
         )?;
-        rt::builtins::print(py, (m.global("Account")?.getattr("_Account__slots_like")?,))?;
+        rt::builtins::print(py, (m.global("Account")?.attr("_Account__slots_like")?,))?;
         Ok(())
     })
 }

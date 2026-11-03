@@ -3,6 +3,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // temp_lifetimes.py:28
 pub fn make<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -37,7 +38,7 @@ pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(py, ("after function and", &value))?;
         let r = m
             .global("weakref")?
-            .getattr("ref")?
+            .attr("ref")?
             .call1((make(m, &rt::str(py, "function weak"))?, m.global("gone")?))?;
         rt::builtins::print(py, ("after function weak", r.call0()?.is_none()))?;
         Ok(rt::none(py))
@@ -69,9 +70,9 @@ pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "augmented", 95, |_| {
         let holder = m.global("Holder")?.call0()?;
-        holder.setattr("attr", make(m, &rt::str(py, "function attr"))?)?;
-        make(m, &rt::str(py, "function aug target"))?.setattr("attr", 0)?;
-        holder.setattr("attr", rt::iadd(&holder.getattr("attr")?, 1)?)?;
+        holder.set_attr("attr", make(m, &rt::str(py, "function attr"))?)?;
+        make(m, &rt::str(py, "function aug target"))?.set_attr("attr", 0)?;
+        holder.set_attr("attr", rt::iadd(&holder.attr("attr")?, 1)?)?;
         rt::builtins::print(py, ("after function aug",))?;
         Ok(rt::none(py))
     })
@@ -127,7 +128,7 @@ pub mod tracked {
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Tracked.__init__", 11, |_| {
-            slf.setattr("name", name)?;
+            slf.set_attr("name", name)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -139,7 +140,7 @@ pub mod tracked {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Tracked.__del__", 14, |_| {
-            rt::builtins::print(py, ("del", slf.getattr("name")?))?;
+            rt::builtins::print(py, ("del", slf.attr("name")?))?;
             Ok(rt::none(py))
         })
     }
@@ -211,19 +212,19 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(py, ("after module pair",))?;
         m.set_global("h", m.global("Holder")?.call0()?)?;
         let value = make(m, &rt::str(py, "module attr"))?;
-        m.global("h")?.setattr("attr", value)?;
-        make(m, &rt::str(py, "aug target"))?.setattr("attr", 0)?;
+        m.global("h")?.set_attr("attr", value)?;
+        make(m, &rt::str(py, "aug target"))?.set_attr("attr", 0)?;
         rt::builtins::print(py, ("after aug target",))?;
         {
             let h = m.global("h")?;
-            h.setattr("attr", rt::iadd(&h.getattr("attr")?, 1)?)?;
+            h.set_attr("attr", rt::iadd(&h.attr("attr")?, 1)?)?;
         }
         rt::builtins::print(py, ("after aug",))?;
         // A weakref callback fires when the last reference goes.
         m.set_global(
             "w",
             m.global("weakref")?
-                .getattr("ref")?
+                .attr("ref")?
                 .call1((make(m, &rt::str(py, "weak"))?, m.global("gone")?))?,
         )?;
         rt::builtins::print(py, ("after weak", m.global("w")?.call0()?.is_none()))?;

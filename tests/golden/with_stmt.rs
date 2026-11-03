@@ -9,6 +9,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // with_stmt.py:45
 pub fn write_and_read<'py>(
@@ -17,11 +18,11 @@ pub fn write_and_read<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "write_and_read", 45, |frame| {
         frame.with(&m.global("open")?.call1((path, "w"))?, |f| {
-            f.call_method1("write", ("hello\n",))?;
+            f.method1("write", ("hello\n",))?;
             Ok(())
         })?;
         if let rt::Flow::Return(value) = frame.with(&m.global("open")?.call1((path,))?, |f| {
-            Ok(rt::Flow::Return(f.call_method0("read")?))
+            Ok(rt::Flow::Return(f.method0("read")?))
         })? {
             return Ok(value);
         }
@@ -152,7 +153,7 @@ pub fn exit_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     "caught",
                     m.global("repr")?.call1((&e,))?,
                     "context",
-                    m.global("repr")?.call1((e.getattr("__context__")?,))?,
+                    m.global("repr")?.call1((e.attr("__context__")?,))?,
                 ))?;
             }
             Err(err) => return Err(err),
@@ -250,7 +251,7 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
         fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::none(m.py()))
         }
-        m.setattr(
+        m.set_attr(
             "__enter__",
             rt::function!(
                 module,
@@ -265,7 +266,7 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
         ) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::none(m.py()))
         }
-        m.setattr(
+        m.set_attr(
             "__exit__",
             rt::function!(
                 module,
@@ -358,10 +359,10 @@ pub mod manager {
         fail_exit: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Manager.__init__", 8, |_| {
-            slf.setattr("name", name)?;
-            slf.setattr("suppress", suppress)?;
-            slf.setattr("fail_enter", fail_enter)?;
-            slf.setattr("fail_exit", fail_exit)?;
+            slf.set_attr("name", name)?;
+            slf.set_attr("suppress", suppress)?;
+            slf.set_attr("fail_enter", fail_enter)?;
+            slf.set_attr("fail_exit", fail_exit)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -373,18 +374,18 @@ pub mod manager {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Manager.__enter__", 14, |frame| {
-            m.global("print")?.call1(("enter", slf.getattr("name")?))?;
-            if slf.getattr("fail_enter")?.is_truthy()? {
+            m.global("print")?.call1(("enter", slf.attr("name")?))?;
+            if slf.attr("fail_enter")?.is_truthy()? {
                 return Err(frame.raise(
                     m.global("RuntimeError")?
-                        .call1((rt::str(py, "enter failed: ").add(slf.getattr("name")?)?,))?,
+                        .call1((rt::str(py, "enter failed: ").add(slf.attr("name")?)?,))?,
                 ));
             }
             Ok(PyTuple::new(
                 py,
                 [
-                    &slf.getattr("name")?,
-                    &m.global("len")?.call1((slf.getattr("name")?,))?,
+                    &slf.attr("name")?,
+                    &m.global("len")?.call1((slf.attr("name")?,))?,
                 ],
             )?
             .into_any())
@@ -403,9 +404,9 @@ pub mod manager {
         rt::frame!(m, "Manager.__exit__", 20, |frame| {
             m.global("print")?.call1((
                 "exit",
-                slf.getattr("name")?,
+                slf.attr("name")?,
                 if exc_type.is_truthy()? {
-                    exc_type.getattr("__name__")?
+                    exc_type.attr("__name__")?
                 } else {
                     rt::none(py)
                 },
@@ -413,15 +414,15 @@ pub mod manager {
                 !tb.is_none(),
                 "handled:",
                 m.global("repr")?
-                    .call1((m.global("sys")?.call_method0("exception")?,))?,
+                    .call1((m.global("sys")?.method0("exception")?,))?,
             ))?;
-            if slf.getattr("fail_exit")?.is_truthy()? {
+            if slf.attr("fail_exit")?.is_truthy()? {
                 return Err(frame.raise(
                     m.global("KeyError")?
-                        .call1((rt::str(py, "exit failed: ").add(slf.getattr("name")?)?,))?,
+                        .call1((rt::str(py, "exit failed: ").add(slf.attr("name")?)?,))?,
                 ));
             }
-            slf.getattr("suppress")
+            slf.attr("suppress")
         })
     }
 }
@@ -536,9 +537,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "path",
             m.global("os")?
-                .getattr("path")?
-                .getattr("join")?
-                .call1((m.global("tempfile")?.call_method0("mkdtemp")?, "data.txt"))?,
+                .attr("path")?
+                .attr("join")?
+                .call1((m.global("tempfile")?.method0("mkdtemp")?, "data.txt"))?,
         )?;
         m.global("print")?
             .call1((m.global("write_and_read")?.call1((m.global("path")?,))?,))?;

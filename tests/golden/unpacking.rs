@@ -3,6 +3,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // unpacking.py:4
 pub fn swap<'py>(
@@ -51,7 +52,7 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let value2 = PyList::new(py, [5])?.into_any();
         let a = value2.clone();
         let b = value2.clone();
-        a.call_method1("append", (6,))?;
+        a.method1("append", (6,))?;
         rt::builtins::print(py, (&r#box, &a, &b, a.is(&b)))?;
         let mut total = rt::int(py, 0);
         for item3 in rt::builtin(py, "enumerate")?
@@ -74,7 +75,7 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let mut value: Bound<'py, PyAny>;
         for item4 in [("k", "v")]
             .into_py_dict(py)?
-            .call_method0("items")?
+            .method0("items")?
             .try_iter()?
         {
             let [key2, value2] = rt::unpack(&item4?)?;

@@ -1,13 +1,11 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // plugins/count.py:4
 pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "run", 4, |_| {
-        Ok(rt::int(
-            m.py(),
-            m.global("greet")?.call_method0("run")?.len()?,
-        ))
+        Ok(rt::int(m.py(), m.global("greet")?.method0("run")?.len()?))
     })
 }
 

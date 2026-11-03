@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // module_setattr.py:7
 pub fn plain<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -30,7 +31,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         m.global("setattr")?.call1((
             m.global("sys")?
-                .getattr("modules")?
+                .attr("modules")?
                 .get_item(m.global("__name__")?)?,
             "plain",
             rt::function!(m, lambda(x), qualname = "<lambda>")?,
@@ -40,11 +41,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "me",
             m.global("sys")?
-                .getattr("modules")?
+                .attr("modules")?
                 .get_item(m.global("__name__")?)?,
         )?;
         let plain2 = m.global("plain")?;
-        m.global("me")?.setattr("other", plain2)?;
+        m.global("me")?.set_attr("other", plain2)?;
         m.global("print")?
             .call1((m.global("other")?.call1((1,))?,))?;
         m.global("exec")?
@@ -56,7 +57,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // `vars(obj)` reads another namespace and does not count.
         m.global("print")?
             .call1((m.global("vars")?.call1((rt::call!(
-                m.global("types")?.getattr("SimpleNamespace")?,
+                m.global("types")?.attr("SimpleNamespace")?,
                 a = 1
             )?,))?,))?;
         Ok(())

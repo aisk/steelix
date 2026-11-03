@@ -7,6 +7,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // `*` and `**` in list, tuple, set and dict displays.
 // displays_unpacking.py:4
@@ -84,7 +85,7 @@ pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound
             (
                 &one,
                 rt::tuple!(py, *one, *a, 9)?,
-                one.get_type().getattr("__name__")?,
+                one.get_type().attr("__name__")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -114,7 +115,7 @@ pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "sets.<locals>.<genexpr>", 63, |_| {
                 if let Some(k) = rt::next(s)? {
-                    return Ok(Some(k.getattr("name")?));
+                    return Ok(Some(k.attr("name")?));
                 }
                 Ok(None)
             })
@@ -259,7 +260,7 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
-                    rt::builtins::print(py, (e.get_type().getattr("__name__")?, &e))?;
+                    rt::builtins::print(py, (e.get_type().attr("__name__")?, &e))?;
                 }
                 Err(err) => return Err(err),
             }
@@ -306,8 +307,8 @@ pub mod noisy {
         items: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Noisy.__init__", 12, |_| {
-            slf.setattr("label", label)?;
-            slf.setattr("items", items)?;
+            slf.set_attr("label", label)?;
+            slf.set_attr("items", items)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -318,8 +319,8 @@ pub mod noisy {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Noisy.__iter__", 16, |_| {
-            rt::builtins::print(m.py(), ("iter", slf.getattr("label")?))?;
-            Ok(slf.getattr("items")?.try_iter()?.into_any())
+            rt::builtins::print(m.py(), ("iter", slf.attr("label")?))?;
+            Ok(slf.attr("items")?.try_iter()?.into_any())
         })
     }
 }
@@ -368,7 +369,7 @@ pub mod key {
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Key.__init__", 24, |_| {
-            slf.setattr("name", name)?;
+            slf.set_attr("name", name)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -380,8 +381,8 @@ pub mod key {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Key.__hash__", 27, |_| {
-            rt::builtins::print(py, ("hash", slf.getattr("name")?))?;
-            rt::builtin(py, "hash")?.call1((slf.getattr("name")?,))
+            rt::builtins::print(py, ("hash", slf.attr("name")?))?;
+            rt::builtin(py, "hash")?.call1((slf.attr("name")?,))
         })
     }
 
@@ -394,8 +395,8 @@ pub mod key {
         rt::frame!(m, "Key.__eq__", 31, |_| {
             Ok(if other.is_instance(&m.global("Key")?)? {
                 other
-                    .getattr("name")?
-                    .rich_compare(slf.getattr("name")?, CompareOp::Eq)?
+                    .attr("name")?
+                    .rich_compare(slf.attr("name")?, CompareOp::Eq)?
             } else {
                 rt::bool(m.py(), false)
             })
@@ -408,7 +409,7 @@ pub mod key {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Key.__repr__", 34, |_| {
-            rt::fstring(m.py(), ("Key(", slf.getattr("name")?.repr()?, ")"))
+            rt::fstring(m.py(), ("Key(", slf.attr("name")?.repr()?, ")"))
         })
     }
 }
@@ -449,9 +450,7 @@ pub mod mapping {
         slf: &Bound<'py, PyAny>,
         key: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Mapping.__getitem__", 42, |_| {
-            key.call_method0("upper")
-        })
+        rt::frame!(m, "Mapping.__getitem__", 42, |_| { key.method0("upper") })
     }
 }
 

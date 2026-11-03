@@ -22,6 +22,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod base {
     use super::*;
@@ -163,7 +164,7 @@ pub mod mixed {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Mixed.greet", 19, |_| {
-            rt::str(m.py(), "native:").add(rt::super_(__class__, slf)?.call_method0("greet")?)
+            rt::str(m.py(), "native:").add(rt::super_(__class__, slf)?.method0("greet")?)
         })
     }
 
@@ -173,7 +174,7 @@ pub mod mixed {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Mixed.call_private", 33, |_| {
-            slf.call_method0("_Mixed__private")
+            slf.method0("_Mixed__private")
         })
     }
 
@@ -183,9 +184,9 @@ pub mod mixed {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Mixed.uses_kept", 39, |_| {
-            slf.call_method0("kept_greet")?
+            slf.method0("kept_greet")?
                 .add("|")?
-                .add(slf.call_method1("kept_static", (4,))?.str()?)
+                .add(slf.method1("kept_static", (4,))?.str()?)
         })
     }
 }
@@ -238,7 +239,7 @@ pub mod native_sub {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "NativeSub.greet", 68, |_| {
-            rt::str(m.py(), "nsub:").add(rt::super_(__class__, slf)?.call_method0("greet")?)
+            rt::str(m.py(), "nsub:").add(rt::super_(__class__, slf)?.method0("greet")?)
         })
     }
 }
@@ -346,50 +347,50 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("m")?.call_method0("greet")?,
-                m.global("m")?.call_method0("kept_greet")?,
-                m.global("m")?.call_method0("uses_kept")?,
-                m.global("m")?.call_method0("call_private")?,
+                m.global("m")?.method0("greet")?,
+                m.global("m")?.method0("kept_greet")?,
+                m.global("m")?.method0("uses_kept")?,
+                m.global("m")?.method0("call_private")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Mixed")?.getattr("squares")?,
-                m.global("Mixed")?.getattr("native_after")?,
-                m.global("Mixed")?.getattr("lookup")?,
-                m.global("Mixed")?.call_method1("kept_static", (5,))?,
-            ),
-        )?;
-        rt::builtins::print(
-            py,
-            (
-                m.global("Mixed")?
-                    .getattr("kept_greet")?
-                    .getattr("__qualname__")?,
-                m.global("Mixed")?
-                    .getattr("kept_greet")?
-                    .getattr("__code__")?
-                    .getattr("co_firstlineno")?,
+                m.global("Mixed")?.attr("squares")?,
+                m.global("Mixed")?.attr("native_after")?,
+                m.global("Mixed")?.attr("lookup")?,
+                m.global("Mixed")?.method1("kept_static", (5,))?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("Mixed")?
-                    .getattr("__dict__")?
+                    .attr("kept_greet")?
+                    .attr("__qualname__")?,
+                m.global("Mixed")?
+                    .attr("kept_greet")?
+                    .attr("__code__")?
+                    .attr("co_firstlineno")?,
+            ),
+        )?;
+        rt::builtins::print(
+            py,
+            (
+                m.global("Mixed")?
+                    .attr("__dict__")?
                     .get_item("kept_static")?
                     .get_type()
-                    .getattr("__name__")?,
-                m.global("Mixed")?.getattr("__static_attributes__")?,
+                    .attr("__name__")?,
+                m.global("Mixed")?.attr("__static_attributes__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Mixed")?.getattr("__firstlineno__")?,
-                m.global("Mixed")?.getattr("__qualname__")?,
-                m.global("Mixed")?.getattr("__module__")?,
+                m.global("Mixed")?.attr("__firstlineno__")?,
+                m.global("Mixed")?.attr("__qualname__")?,
+                m.global("Mixed")?.attr("__module__")?,
             ),
         )?;
         // classes_mixed.py:54
@@ -400,7 +401,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             rt::frame!(m, "<genexpr>", 54, |_| {
                 for k in __dict__ {
                     let k = k?;
-                    if !k.call_method1("startswith", ("__",))?.is_truthy()? {
+                    if !k.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(k));
                     }
                     m.py().check_signals()?;
@@ -412,17 +413,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
                 m,
-                genexpr(m.global("Mixed")?.getattr("__dict__")?.try_iter()?)
+                genexpr(m.global("Mixed")?.attr("__dict__")?.try_iter()?)
             )?,))?,),
         )?;
-        m.set_global("coro", m.global("m")?.call_method0("kept_async")?)?;
-        match (|| m.global("coro")?.call_method1("send", (py.None(),)))() {
+        m.set_global("coro", m.global("m")?.method0("kept_async")?)?;
+        match (|| m.global("coro")?.method1("send", (py.None(),)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("stop", &exception)?;
                 let _handling = rt::Handling::new(&exception);
-                rt::builtins::print(py, (m.global("stop")?.getattr("value")?,))?;
+                rt::builtins::print(py, (m.global("stop")?.attr("value")?,))?;
                 m.unbind_global("stop")?;
             }
             Err(err) => return Err(err),
@@ -443,7 +444,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("NativeSub")?.call0()?.call_method0("greet")?,
+                m.global("NativeSub")?.call0()?.method0("greet")?,
                 m.global("NativeSub")?
                     .call0()?
                     .is_instance(&m.global("Mixed")?)?,
@@ -454,16 +455,14 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
+                m.global("Outer")?.method0("Inner")?.method0("kept")?,
                 m.global("Outer")?
-                    .call_method0("Inner")?
-                    .call_method0("kept")?,
+                    .method0("Inner")?
+                    .method0("kept_hidden")?,
                 m.global("Outer")?
-                    .call_method0("Inner")?
-                    .call_method0("kept_hidden")?,
-                m.global("Outer")?
-                    .getattr("Inner")?
-                    .getattr("kept")?
-                    .getattr("__qualname__")?,
+                    .attr("Inner")?
+                    .attr("kept")?
+                    .attr("__qualname__")?,
             ),
         )?;
         // classes_mixed.py:90, kept as Python: class definition in a function at 91:5
@@ -487,12 +486,12 @@ def decorate(cls):
         rt::builtins::print(
             py,
             (
-                m.global("Decorated")?.call0()?.call_method0("kept")?,
+                m.global("Decorated")?.call0()?.method0("kept")?,
                 m.global("Decorated")?
-                    .getattr("__mro__")?
+                    .attr("__mro__")?
                     .get_item(1)?
                     .call0()?
-                    .call_method0("kept")?,
+                    .method0("kept")?,
             ),
         )?;
         // classes_mixed.py:107, kept as Python: annotation in a compound statement of a class body at 109:9
@@ -508,11 +507,11 @@ class WholeKept:
         rt::builtins::print(
             py,
             (
-                m.global("WholeKept")?.getattr("conditional")?,
-                m.global("WholeKept")?.getattr("__annotations__")?,
+                m.global("WholeKept")?.attr("conditional")?,
+                m.global("WholeKept")?.attr("__annotations__")?,
             ),
         )?;
-        match (|| m.global("m")?.call_method0("failing"))() {
+        match (|| m.global("m")?.method0("failing"))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
@@ -522,19 +521,15 @@ class WholeKept:
                 m.set_global(
                     "tb",
                     m.global("traceback")?
-                        .getattr("extract_tb")?
-                        .call1((m.global("err")?.getattr("__traceback__")?,))?,
+                        .attr("extract_tb")?
+                        .call1((m.global("err")?.attr("__traceback__")?,))?,
                 )?;
                 let list = PyList::empty(py);
                 for f in m.global("tb")?.try_iter()? {
                     let f = f?;
                     list.append(PyTuple::new(
                         py,
-                        [
-                            &f.getattr("name")?,
-                            &f.getattr("lineno")?,
-                            &f.getattr("line")?,
-                        ],
+                        [&f.attr("name")?, &f.attr("lineno")?, &f.attr("line")?],
                     )?)?;
                     py.check_signals()?;
                 }

@@ -12,6 +12,7 @@ are kept as Python source and run in place by `rt::exec_python!` (design §13).
 from __future__ import annotations
 
 import ast
+import dataclasses
 from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
@@ -164,6 +165,8 @@ def _lower(
     items += module.class_mods
     items.append(exec_module)
 
+    if _uses_attributes(items):
+        module.uses.add("steelix_runtime::Attributes")
     uses = ["pyo3::prelude::*"]
     uses += sorted(module.uses)
     uses.append("steelix_runtime as rt")
@@ -173,6 +176,21 @@ def _lower(
         inner_doc=_python_summary(parsed, tree, plan),
     )
     return LoweredModule(parsed.name, move_returned_locals(file), plan)
+
+
+# The methods of `rt::Attributes`, which the module has to import.
+_ATTRIBUTES_METHODS = frozenset({"attr", "set_attr", "del_attr", "method0", "method1"})
+
+
+def _uses_attributes(node: object) -> bool:
+    """Whether generated code calls a method of `rt::Attributes`."""
+    if isinstance(node, rs.MethodCall) and node.method in _ATTRIBUTES_METHODS:
+        return True
+    if isinstance(node, (list, tuple)):
+        return any(_uses_attributes(child) for child in node)
+    if dataclasses.is_dataclass(node):
+        return any(_uses_attributes(getattr(node, f.name)) for f in dataclasses.fields(node))
+    return False
 
 
 def _lower_exec_module(

@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // introspection.py:8
 /// Compute an area.
@@ -53,72 +54,69 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("nested", m.global("outer")?.call0()?)?;
         m.global("print")?.call1((
             m.global("inspect")?
-                .getattr("signature")?
+                .attr("signature")?
                 .call1((m.global("nested")?,))?,
-            m.global("nested")?.getattr("__doc__")?,
-            m.global("nested")?.getattr("__qualname__")?,
+            m.global("nested")?.attr("__doc__")?,
+            m.global("nested")?.attr("__qualname__")?,
         ))?;
         m.global("print")?.call1((
-            m.global("area")?.getattr("__doc__")?,
-            m.global("area")?.getattr("__module__")?,
-            m.global("area")?.getattr("__globals__")?.is(m.globals()),
+            m.global("area")?.attr("__doc__")?,
+            m.global("area")?.attr("__module__")?,
+            m.global("area")?.attr("__globals__")?.is(m.globals()),
         ))?;
         m.global("print")?.call1((
-            m.global("area")?.getattr("__defaults__")?,
-            m.global("area")?.getattr("__kwdefaults__")?,
+            m.global("area")?.attr("__defaults__")?,
+            m.global("area")?.attr("__kwdefaults__")?,
         ))?;
         m.global("print")?.call1((m
             .global("pickle")?
-            .getattr("loads")?
+            .attr("loads")?
             .call1((m
                 .global("pickle")?
-                .getattr("dumps")?
+                .attr("dumps")?
                 .call1((m.global("area")?,))?,))?
             .is(m.global("area")?),))?;
         // Annotations are evaluated lazily, so `Shape` may be defined after `area`.
         m.global("print")?.call1((rt::call!(
-            m.global("annotationlib")?.getattr("get_annotations")?,
+            m.global("annotationlib")?.attr("get_annotations")?,
             m.global("area")?,
-            format = m
-                .global("annotationlib")?
-                .getattr("Format")?
-                .getattr("STRING")?
+            format = m.global("annotationlib")?.attr("Format")?.attr("STRING")?
         )?,))?;
         m.global("print")?.call1((rt::call!(
-            m.global("annotationlib")?.getattr("get_annotations")?,
+            m.global("annotationlib")?.attr("get_annotations")?,
             m.global("area")?,
             format = m
                 .global("annotationlib")?
-                .getattr("Format")?
-                .getattr("FORWARDREF")?
+                .attr("Format")?
+                .attr("FORWARDREF")?
         )?
         .get_item("return")?
-        .getattr("__forward_arg__")?,))?;
+        .attr("__forward_arg__")?,))?;
         m.set_global("Shape", "a shape")?;
         m.set_global("Length", m.global("float")?)?;
         m.global("print")?
-            .call1((m.global("area")?.getattr("__annotations__")?,))?;
+            .call1((m.global("area")?.attr("__annotations__")?,))?;
         m.global("print")?.call1((m
             .global("inspect")?
-            .getattr("signature")?
+            .attr("signature")?
             .call1((m.global("area")?,))?,))?;
         m.global("print")?.call1((
             m.global("area")?.call1((3.0,))?,
             m.global("callable")?.call1((m.global("area")?,))?,
-            m.global("area")?.getattr("__name__")?,
+            m.global("area")?.attr("__name__")?,
         ))?;
-        m.global("area")?.setattr("__name__", "surface")?;
+        m.global("area")?.set_attr("__name__", "surface")?;
         m.global("print")?.call1((
-            m.global("area")?.getattr("__name__")?,
+            m.global("area")?.attr("__name__")?,
             m.global("repr")?
                 .call1((m.global("area")?,))?
-                .call_method1("startswith", ("<function area at ",))?,
+                .method1("startswith", ("<function area at ",))?,
         ))?;
-        m.global("area")?.setattr("extra", 1)?;
+        m.global("area")?.set_attr("extra", 1)?;
         m.global("print")?
-            .call1((m.global("area")?.getattr("__dict__")?,))?;
+            .call1((m.global("area")?.attr("__dict__")?,))?;
         m.global("print")?
-            .call1((m.global("outer")?.getattr("__annotations__")?,))?;
+            .call1((m.global("outer")?.attr("__annotations__")?,))?;
         Ok(())
     })
 }

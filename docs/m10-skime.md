@@ -246,6 +246,34 @@ pop(&ctx)
 
 改写只能消除被改写部分内部的调用，Python 调用原生函数的开销留在所有还没改写的地方，所以要先从 runtime 和生成方式上解决。
 
+### M11 之后
+
+M11 按上面的两个原因做了几项低成本的改进（design §6 "调用的开销"）：`Function` 支持 vectorcall 和 `Py_TPFLAGS_METHOD_DESCRIPTOR`，只有位置参数的调用不做绑定，生成代码的属性名和方法名经过 `rt::Attributes` 使用驻留的字符串。
+
+| skime | CPython | M10 | M11 |
+| --- | --- | --- | --- |
+| fib 22（release） | 0.48 s | 2.93 s | 1.10 s |
+| 自己的 108 个测试（ext 模式，release） | 0.16 s | 0.40 s | 0.24 s |
+
+fib 22 分步看：只换 runtime（vectorcall、method descriptor、快速路径，生成代码不变）是 2.11 s，再加上驻留的属性名是 1.10 s。去掉 method descriptor 是 1.20 s。
+
+单次调用（`timeit`，扩展模块，release，`tests/cases` 风格的小模块，"循环"是原生函数里的 `while` 循环，每轮的时间包括循环本身）
+
+| | CPython | M10 | M11 |
+| --- | --- | --- | --- |
+| Python 调用 `f(1, 2)` | 21 ns | 63 ns | 31 ns |
+| Python 调用 `g(1)`（有 keyword-only 参数，走完整的绑定） | 27 ns | 86 ns | 78 ns |
+| Python 调用 `c.m()` | 24 ns | 107 ns | 50 ns |
+| Python 调用 `c.m2(1)`（用默认值补参数） | 26 ns | 107 ns | 56 ns |
+| Python 调用 `C(1)`（`__init__` 是原生的） | 65 ns | 171 ns | 95 ns |
+| 空循环 | 14 ns | 28 ns | 28 ns |
+| 循环里 `c.m()`（原生到原生，经过属性） | 34 ns | 145 ns | 74 ns |
+| 循环里 `o.f(i, i)`（`o` 是 `SimpleNamespace`） | 49 ns | 112 ns | 66 ns |
+| 循环里 `C(i)` | 76 ns | 222 ns | 135 ns |
+| 循环里直接调用 `f(i, i)` | 34 ns | 29 ns | 29 ns |
+
+剩下的差距主要在 CPython 的特化（`LOAD_ATTR`、`LOAD_GLOBAL` 的 inline cache，`CALL_ALLOC_AND_ENTER_INIT`），原生代码每次都走通用的 `PyObject_GetAttr` 和 dict 查找。另外 `ctx.push(ctx.top())` 这样参数不纯的方法调用仍然先创建 bound method（design §6）。
+
 ## 8. 发现的问题
 
 ### steelix（已修复）
@@ -277,7 +305,7 @@ pop(&ctx)
 
 ## 10. 建议（按优先级）
 
-1. **降低调用原生函数的开销（性能里程碑）。** `Function` 实现 vectorcall（PEP 590），加 `Py_TPFLAGS_METHOD_DESCRIPTOR` 让 `obj.method()` 不创建 bound method，参数绑定在只有位置参数时走快速路径；生成代码里的字面量属性名用 intern 的字符串（`pyo3::intern!` 或 runtime 的缓存，要兼顾可读性，例如 `rt` 提供带缓存的 `attr`/`set_attr`/`call_method`）。目标是像 skime 这样的程序不再比 CPython 慢几倍，单是 intern 就有 1.8 倍
+1. **降低调用原生函数的开销（性能里程碑，M11 已做，见第 7 节）。** `Function` 实现 vectorcall（PEP 590），加 `Py_TPFLAGS_METHOD_DESCRIPTOR` 让 `obj.method()` 不创建 bound method，参数绑定在只有位置参数时走快速路径；生成代码里的字面量属性名用 intern 的字符串（`pyo3::intern!` 或 runtime 的缓存，要兼顾可读性，例如 `rt` 提供带缓存的 `attr`/`set_attr`/`call_method`）。目标是像 skime 这样的程序不再比 CPython 慢几倍，单是 intern 就有 1.8 倍
 2. **一个 crate 同时出 bin 和 ext。** 生成的 crate 同时有 `[lib]`（cdylib）和 `[[bin]]`，或者 `steelix` 提供把一个 crate 的模块文件用于另一种模式的命令，让项目自己的测试套件能直接测改写后的代码。顺带写一份"用项目自己的 pytest 测原生代码"的做法（这次最有用的验证手段），并修好 ext 模式的 `python -m pkg`
 3. **补充 §15。** 加上这次遇到的几种情况：用原生函数取代一个类的用途（保留还是删除类）、适配层构造别的模块的类的实例（按 import 的别名取 globals）、抛项目自己的异常类（并在 runtime 里加一个小工具）、内联别的类的方法时的语义变化、Python 源码本身是生成的时候怎么保持单一来源
 4. **为第二步提供"属性读写索引"。** 静态列出项目里每个类的每个实例属性被哪些函数读写（`ctx.ip` 这类），作为 `steelix coverage` 或单独命令的输出。改写 `Context` 这样被五个模块共享的类之前，没有这张表只能靠 grep

@@ -5,6 +5,7 @@
 
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // mixed_future_annotations.py:4
 pub fn native<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -45,9 +46,9 @@ def kept(x: int) -> Iterator[str]:
         rt::builtins::print(
             m.py(),
             (
-                m.global("native")?.getattr("__annotations__")?,
-                m.global("kept")?.getattr("__annotations__")?,
-                m.global("Box")?.getattr("__annotations__")?,
+                m.global("native")?.attr("__annotations__")?,
+                m.global("kept")?.attr("__annotations__")?,
+                m.global("Box")?.attr("__annotations__")?,
             ),
         )?;
         Ok(())

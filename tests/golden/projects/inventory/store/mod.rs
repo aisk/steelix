@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // store/__init__.py:12
 pub fn total_value<'py>(
@@ -22,19 +23,14 @@ pub fn total_value<'py>(
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "total_value.<locals>.<genexpr>", 13, |_| {
                 if let Some(item) = rt::next(iter)? {
-                    return Ok(Some(item.call_method0("value")?));
+                    return Ok(Some(item.method0("value")?));
                 }
                 Ok(None)
             })
         }
         rt::builtin(m.py(), "sum")?.call1((rt::genexpr!(
             m,
-            genexpr(
-                inventory
-                    .getattr("items")?
-                    .call_method0("values")?
-                    .try_iter()?
-            ),
+            genexpr(inventory.attr("items")?.method0("values")?.try_iter()?),
             qualname = "total_value.<locals>.<genexpr>"
         )?,))
     })

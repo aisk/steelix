@@ -44,6 +44,12 @@ impl Signature {
         self.positional + usize::from(self.varargs)
     }
 
+    /// Whether all parameters are positional: no `*args`, keyword-only
+    /// parameters or `**kwargs`.
+    fn is_positional(&self) -> bool {
+        self.names.len() == self.positional
+    }
+
     /// Index of a parameter that can be passed by keyword.
     fn keyword_index(&self, keyword: &str) -> Option<usize> {
         let kwonly = self.kwonly_start()..self.kwonly_start() + self.kwonly;
@@ -137,6 +143,8 @@ struct Meta {
 
 #[pyclass(frozen, dict, weakref, name = "function", module = "steelix_runtime")]
 pub struct Function {
+    /// Read by CPython through `tp_vectorcall_offset`, see [`vectorcall`].
+    vectorcall: ffi::vectorcallfunc,
     /// The name the `def` gave it, which `Module::default` uses to tell the
     /// function a direct call was compiled against from a replacement.
     def_name: &'static str,
@@ -202,6 +210,7 @@ impl Function {
             type_params: PyTuple::empty(py).unbind(),
         };
         let function = Function {
+            vectorcall,
             def_name: name,
             signature: def.signature,
             body: def.body,
@@ -210,7 +219,9 @@ impl Function {
             closure_names: def.closure_names,
             meta: Mutex::new(meta),
         };
-        Ok(Bound::new(py, function)?.into_any())
+        let function = Bound::new(py, function)?;
+        enable_vectorcall(&function);
+        Ok(function.into_any())
     }
 
     fn meta(&self) -> std::sync::MutexGuard<'_, Meta> {
@@ -224,6 +235,13 @@ impl Function {
     /// Whether this is the function that `def name` created in `globals`.
     pub(crate) fn is_def(&self, name: &str, globals: &Bound<'_, PyDict>) -> bool {
         self.def_name == name && self.globals.bind(globals.py()).is(globals)
+    }
+
+    fn defaults<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyTuple>> {
+        let meta = self.meta();
+        meta.defaults
+            .as_ref()
+            .map(|d| d.clone_ref(py).into_bound(py))
     }
 
     fn qualname(&self, py: Python<'_>) -> String {
@@ -274,13 +292,49 @@ impl Function {
         ))
     }
 
+    /// Calls the function: binds the arguments to the parameters and runs
+    /// the body. `kwnames` are the keywords of `kwvalues`, like vectorcall.
+    fn call<'py>(
+        &self,
+        py: Python<'py>,
+        args: &[Bound<'py, PyAny>],
+        kwnames: &[Bound<'py, PyAny>],
+        kwvalues: &[Bound<'py, PyAny>],
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let module = Module::from_globals(self.globals.bind(py).clone());
+        let closure = match &self.closure {
+            Some(closure) => closure.bind(py).as_slice(),
+            None => &[],
+        };
+        let sig = self.signature;
+        // The common calls need no binding: positional arguments only, for
+        // a function with positional parameters only.
+        if kwnames.is_empty() && sig.is_positional() {
+            if args.len() == sig.positional {
+                return (self.body)(&module, closure, args);
+            }
+            if args.len() < sig.positional
+                && let Some(defaults) = self.defaults(py)
+                && let Some(first) = defaults.len().checked_sub(sig.positional - args.len())
+            {
+                // The missing ones are the last parameters, whose defaults
+                // are the last ones.
+                let bound = [args, &defaults.as_slice()[first..]].concat();
+                return (self.body)(&module, closure, &bound);
+            }
+        }
+        let bound = self.bind(py, args, kwnames, kwvalues)?;
+        (self.body)(&module, closure, &bound)
+    }
+
     /// Binds call arguments to parameters like CPython's `initialize_locals`,
     /// raising the same `TypeError`s.
     fn bind<'py>(
         &self,
         py: Python<'py>,
-        args: &Bound<'py, PyTuple>,
-        kwargs: Option<&Bound<'py, PyDict>>,
+        args: &[Bound<'py, PyAny>],
+        kwnames: &[Bound<'py, PyAny>],
+        kwvalues: &[Bound<'py, PyAny>],
     ) -> PyResult<Vec<Bound<'py, PyAny>>> {
         let sig = self.signature;
         let (defaults, kwdefaults) = {
@@ -296,11 +350,11 @@ impl Function {
         };
         let mut slots: Vec<Option<Bound<'py, PyAny>>> = vec![None; sig.names.len()];
         let given = args.len();
-        for (slot, arg) in slots.iter_mut().zip(args.iter()).take(sig.positional) {
-            *slot = Some(arg);
+        for (slot, arg) in slots.iter_mut().zip(args).take(sig.positional) {
+            *slot = Some(arg.clone());
         }
         if sig.varargs {
-            let extra = args.get_slice(sig.positional.min(given), given);
+            let extra = PyTuple::new(py, &args[sig.positional.min(given)..])?;
             slots[sig.positional] = Some(extra.into_any());
         }
         let varkw = if sig.varkw {
@@ -311,25 +365,23 @@ impl Function {
             None
         };
 
-        if let Some(kwargs) = kwargs {
-            for (key, value) in kwargs.iter() {
-                let Ok(keyword) = key.cast::<PyString>() else {
-                    return Err(PyTypeError::new_err("keywords must be strings"));
-                };
-                let keyword = keyword.to_cow()?;
-                match sig.keyword_index(&keyword) {
-                    Some(index) if slots[index].is_some() => {
-                        return Err(PyTypeError::new_err(format!(
-                            "{}() got multiple values for argument '{keyword}'",
-                            self.qualname(py)
-                        )));
-                    }
-                    Some(index) => slots[index] = Some(value),
-                    None => match &varkw {
-                        Some(dict) => dict.set_item(key, value)?,
-                        None => return Err(self.unexpected_keyword(py, kwargs, &keyword)),
-                    },
+        for (key, value) in kwnames.iter().zip(kwvalues) {
+            let Ok(keyword) = key.cast::<PyString>() else {
+                return Err(PyTypeError::new_err("keywords must be strings"));
+            };
+            let keyword = keyword.to_cow()?;
+            match sig.keyword_index(&keyword) {
+                Some(index) if slots[index].is_some() => {
+                    return Err(PyTypeError::new_err(format!(
+                        "{}() got multiple values for argument '{keyword}'",
+                        self.qualname(py)
+                    )));
                 }
+                Some(index) => slots[index] = Some(value.clone()),
+                None => match &varkw {
+                    Some(dict) => dict.set_item(key, value)?,
+                    None => return Err(self.unexpected_keyword(py, kwnames, &keyword)),
+                },
             }
         }
 
@@ -372,7 +424,7 @@ impl Function {
                 }
                 match kwdefaults
                     .as_ref()
-                    .map(|d| d.get_item(sig.name(i)))
+                    .map(|d| d.get_item(crate::interned(py, sig.name(i))))
                     .transpose()?
                     .flatten()
                 {
@@ -394,7 +446,7 @@ impl Function {
     fn unexpected_keyword(
         &self,
         py: Python<'_>,
-        kwargs: &Bound<'_, PyDict>,
+        kwnames: &[Bound<'_, PyAny>],
         keyword: &str,
     ) -> PyErr {
         let sig = self.signature;
@@ -402,7 +454,7 @@ impl Function {
         // Positional-only parameters passed by keyword get their own message.
         let posonly: Vec<&str> = (0..sig.posonly)
             .map(|i| sig.name(i))
-            .filter(|name| kwargs.contains(name).unwrap_or(false))
+            .filter(|&name| kwnames.iter().any(|key| key.eq(name).unwrap_or(false)))
             .collect();
         if !posonly.is_empty() {
             return PyTypeError::new_err(format!(
@@ -476,14 +528,11 @@ impl Function {
         kwargs: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = slf.py();
-        let this = slf.get();
-        let bound = this.bind(py, args, kwargs)?;
-        let closure = match &this.closure {
-            Some(closure) => closure.bind(py).iter().collect(),
-            None => Vec::new(),
+        let (kwnames, kwvalues): (Vec<_>, Vec<_>) = match kwargs {
+            Some(kwargs) => kwargs.iter().unzip(),
+            None => (Vec::new(), Vec::new()),
         };
-        let module = Module::from_globals(this.globals.bind(py).clone());
-        (this.body)(&module, &closure, &bound)
+        slf.get().call(py, args.as_slice(), &kwnames, &kwvalues)
     }
 
     fn __get__<'py>(
@@ -859,6 +908,90 @@ impl Function {
         meta.annotate = None;
         meta.annotations = None;
     }
+}
+
+/// Lets CPython call functions without building an argument tuple and
+/// dict (PEP 590), and lets `obj.method()` call a method without creating a
+/// bound method object, like it does for Python functions.
+///
+/// PyO3 classes can not declare either, so the type object is completed
+/// when the first function is created: `tp_vectorcall_offset` points at the
+/// `vectorcall` field, and `Py_TPFLAGS_METHOD_DESCRIPTOR` promises that
+/// `f.__get__(obj)(*args)` is `f(obj, *args)`, which `__get__` guarantees.
+/// `__call__` and `__get__` stay as they are for everything else.
+fn enable_vectorcall(function: &Bound<'_, Function>) {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        let field = &function.get().vectorcall as *const ffi::vectorcallfunc;
+        let offset = field as isize - function.as_ptr() as isize;
+        // SAFETY: we are attached to the interpreter and no function exists
+        // yet besides this one, so nothing has looked at these slots. Every
+        // instance has the same layout, so the field is at the same offset.
+        unsafe {
+            let ty = function.get_type_ptr();
+            (*ty).tp_vectorcall_offset = offset as ffi::Py_ssize_t;
+            (*ty).tp_flags |= ffi::Py_TPFLAGS_HAVE_VECTORCALL | ffi::Py_TPFLAGS_METHOD_DESCRIPTOR;
+            ffi::PyType_Modified(ty);
+        }
+    });
+}
+
+/// The vectorcall entry point (`vectorcallfunc`): positional arguments
+/// first, then the values of the keywords named in `kwnames`.
+///
+/// It goes through the trampoline PyO3 wraps its own fastcall functions in
+/// (same arguments, `nargsf` as a signed size), which turns errors and
+/// panics into exceptions and tells PyO3 that the thread is attached.
+unsafe extern "C" fn vectorcall(
+    callable: *mut ffi::PyObject,
+    args: *const *mut ffi::PyObject,
+    nargsf: usize,
+    kwnames: *mut ffi::PyObject,
+) -> *mut ffi::PyObject {
+    use pyo3::impl_::trampoline::{MethodDef, fastcall_cfunction_with_keywords as fastcall};
+    struct Call;
+    impl MethodDef<fastcall::Func> for Call {
+        const METH: fastcall::Func = call_vector;
+    }
+    // SAFETY: CPython calls this with the thread attached.
+    unsafe { fastcall::<Call>(callable, args, nargsf as ffi::Py_ssize_t, kwnames) }
+}
+
+/// Calls the `Function` `callable` with vectorcall arguments.
+///
+/// Unlike `tp_call`, CPython does not check the recursion limit before a
+/// vectorcall, so this does, with the same message.
+///
+/// # Safety
+///
+/// The arguments are those of a vectorcall of a `Function`.
+unsafe fn call_vector(
+    py: Python<'_>,
+    callable: *mut ffi::PyObject,
+    args: *const *mut ffi::PyObject,
+    nargsf: ffi::Py_ssize_t,
+    kwnames: *mut ffi::PyObject,
+) -> PyResult<*mut ffi::PyObject> {
+    let _guard = crate::RecursionGuard::enter(py)?;
+    // SAFETY: `callable` is a `Function`, the type that has this slot.
+    let function = unsafe { Borrowed::from_ptr(py, callable).cast_unchecked::<Function>() };
+    // SAFETY: `kwnames` is NULL or a tuple of strings that outlives the call.
+    let kwnames = unsafe { Borrowed::from_ptr_or_opt(py, kwnames) }
+        .map(|names| unsafe { names.cast_unchecked::<PyTuple>() });
+    let kwnames = kwnames.as_deref().map_or(&[][..], |names| names.as_slice());
+    let nargs = nargsf as usize & !ffi::PY_VECTORCALL_ARGUMENTS_OFFSET;
+    let total = nargs + kwnames.len();
+    let all: &[Bound<'_, PyAny>] = if total == 0 {
+        &[]
+    } else {
+        // SAFETY: `args` holds `total` object pointers, borrowed for the
+        // duration of the call, and `Bound<PyAny>` has the layout of a
+        // pointer (which `PyTuple::as_slice` relies on too).
+        unsafe { std::slice::from_raw_parts(args.cast(), total) }
+    };
+    let (args, kwvalues) = all.split_at(nargs);
+    let result = function.get().call(py, args, kwnames, kwvalues)?;
+    Ok(result.into_ptr())
 }
 
 fn string_attribute(value: Option<&Bound<'_, PyAny>>, attr: &str) -> PyResult<Py<PyString>> {

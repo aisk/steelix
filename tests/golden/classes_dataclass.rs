@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod item {
     use super::*;
@@ -35,7 +36,7 @@ pub mod item {
         quantity: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Item.total", 15, |_| {
-            slf.getattr("price")?.mul(quantity)
+            slf.attr("price")?.mul(quantity)
         })
     }
 }
@@ -64,7 +65,7 @@ pub mod version {
     pub fn bump<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Version.bump", 24, |_| {
             m.global("Version")?
-                .call1((slf.getattr("major")?, slf.getattr("minor")?.add(1)?))
+                .call1((slf.attr("major")?, slf.attr("minor")?.add(1)?))
         })
     }
 }
@@ -139,7 +140,7 @@ pub mod slotted {
     // classes_dataclass.py:83
     pub fn total<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Slotted.total", 83, |_| {
-            slf.getattr("x")?.add(slf.getattr("y")?)
+            slf.attr("x")?.add(slf.attr("y")?)
         })
     }
 }
@@ -174,7 +175,7 @@ pub mod child {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Child.total", 95, |_| {
             rt::super_(__class__, slf)?
-                .call_method1("total", (quantity,))?
+                .method1("total", (quantity,))?
                 .add(1)
         })
     }
@@ -234,8 +235,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("item")?,
-                m.global("item")?.call_method1("total", (3,))?,
-                m.global("Item")?.getattr("__annotations__")?,
+                m.global("item")?.method1("total", (3,))?,
+                m.global("Item")?.attr("__annotations__")?,
                 m.global("Item")?
                     .call1(("a",))?
                     .rich_compare(m.global("Item")?.call1(("a",))?, CompareOp::Eq)?,
@@ -246,7 +247,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("v")?,
-                m.global("v")?.call_method0("bump")?,
+                m.global("v")?.method0("bump")?,
                 rt::builtin(py, "sorted")?.call1((PyList::new(
                     py,
                     [
@@ -256,17 +257,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     ],
                 )?,))?,
                 m.global("v")?
-                    .rich_compare(m.global("v")?.call_method0("bump")?, CompareOp::Lt)?,
+                    .rich_compare(m.global("v")?.method0("bump")?, CompareOp::Lt)?,
             ),
         )?;
         match (|| -> PyResult<()> {
-            m.global("v")?.setattr("major", 3)?;
+            m.global("v")?.set_attr("major", 3)?;
             Ok(())
         })() {
             Ok(()) => {}
             Err(err)
                 if frame.matches(&err, 1, || {
-                    m.global("dataclasses")?.getattr("FrozenInstanceError")
+                    m.global("dataclasses")?.attr("FrozenInstanceError")
                 })? =>
             {
                 let exception = frame.catch(err);
@@ -286,12 +287,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         let list = PyList::empty(py);
         for f in m
             .global("dataclasses")?
-            .getattr("fields")?
+            .attr("fields")?
             .call1((m.global("Version")?,))?
             .try_iter()?
         {
             let f = f?;
-            list.append(f.getattr("name")?)?;
+            list.append(f.attr("name")?)?;
             py.check_signals()?;
         }
         rt::builtins::print(py, (value, list))?;
@@ -299,11 +300,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("typing")?
-                    .getattr("get_type_hints")?
-                    .call1((m.global("Item")?.getattr("total")?,))?,
+                    .attr("get_type_hints")?
+                    .call1((m.global("Item")?.attr("total")?,))?,
                 m.global("typing")?
-                    .getattr("get_type_hints")?
-                    .call1((m.global("Version")?.getattr("bump")?,))?,
+                    .attr("get_type_hints")?
+                    .call1((m.global("Version")?.attr("bump")?,))?,
             ),
         )?;
         m.set_global(
@@ -321,47 +322,39 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ]
             )?,
         )?;
-        rt::builtins::print(py, (m.global("Node")?.getattr("__annotations__")?,))?;
+        rt::builtins::print(py, (m.global("Node")?.attr("__annotations__")?,))?;
         rt::builtins::print(
             py,
             (m.global("typing")?
-                .getattr("get_type_hints")?
+                .attr("get_type_hints")?
                 .call1((m.global("Node")?,))?,),
         )?;
         rt::builtins::print(
             py,
-            (m.global("Node")?
-                .getattr("link")?
-                .getattr("__annotations__")?,),
+            (m.global("Node")?.attr("link")?.attr("__annotations__")?,),
         )?;
         rt::builtins::print(
             py,
             (rt::call!(
-                m.global("annotationlib")?.getattr("get_annotations")?,
+                m.global("annotationlib")?.attr("get_annotations")?,
                 m.global("Node")?,
-                format = m
-                    .global("annotationlib")?
-                    .getattr("Format")?
-                    .getattr("STRING")?
+                format = m.global("annotationlib")?.attr("Format")?.attr("STRING")?
             )?,),
         )?;
         rt::builtins::print(
             py,
             (m.global("Node")?
-                .getattr("__annotate__")?
-                .call1((m
-                    .global("annotationlib")?
-                    .getattr("Format")?
-                    .getattr("VALUE")?,))?
-                .rich_compare(m.global("Node")?.getattr("__annotations__")?, CompareOp::Eq)?,),
+                .attr("__annotate__")?
+                .call1((m.global("annotationlib")?.attr("Format")?.attr("VALUE")?,))?
+                .rich_compare(m.global("Node")?.attr("__annotations__")?, CompareOp::Eq)?,),
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("Node")?
-                    .getattr("__annotate__")?
-                    .getattr("__qualname__")?,
-                m.global("Node")?.getattr("parent")?,
+                    .attr("__annotate__")?
+                    .attr("__qualname__")?,
+                m.global("Node")?.attr("parent")?,
             ),
         )?;
         m.set_global(
@@ -377,15 +370,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (rt::call!(
-                m.global("annotationlib")?.getattr("get_annotations")?,
+                m.global("annotationlib")?.attr("get_annotations")?,
                 m.global("Forward")?,
                 format = m
                     .global("annotationlib")?
-                    .getattr("Format")?
-                    .getattr("FORWARDREF")?
+                    .attr("Format")?
+                    .attr("FORWARDREF")?
             )?,),
         )?;
-        match (|| m.global("Forward")?.getattr("__annotations__"))() {
+        match (|| m.global("Forward")?.attr("__annotations__"))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyNameError>(py) => {
                 let exception = frame.catch(err);
@@ -397,7 +390,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) => return Err(err),
         }
         m.set_global("Later", rt::class!(m, "Later"(), later::body, line = 71)?)?;
-        rt::builtins::print(py, (m.global("Forward")?.getattr("__annotations__")?,))?;
+        rt::builtins::print(py, (m.global("Forward")?.attr("__annotations__")?,))?;
         {
             let decorator = rt::call!(m.global("dataclass")?, slots = true)?;
             let slotted = rt::class!(
@@ -414,8 +407,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("s")?,
-                m.global("s")?.call_method0("total")?,
-                m.global("Slotted")?.getattr("__slots__")?,
+                m.global("s")?.method0("total")?,
+                m.global("Slotted")?.attr("__slots__")?,
                 rt::builtin(py, "hasattr")?.call1((m.global("s")?, "__dict__"))?,
             ),
         )?;
@@ -436,7 +429,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("Child")?.call1(("x", 2.0))?,
                 m.global("Child")?
                     .call1(("x", 2.0))?
-                    .call_method1("total", (2,))?,
+                    .method1("total", (2,))?,
             ),
         )?;
         m.set_global(
@@ -445,8 +438,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m,
                 "Typed"(
                     m.global("typing")?
-                        .getattr("Generic")?
-                        .get_item(m.global("typing")?.call_method1("TypeVar", ("T",))?)?
+                        .attr("Generic")?
+                        .get_item(m.global("typing")?.method1("TypeVar", ("T",))?)?
                 ),
                 typed::body,
                 line = 102,
@@ -457,8 +450,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("Typed")?.get_item(rt::builtin(py, "int")?)?,
-                m.global("Typed")?.getattr("__annotations__")?,
-                m.global("Typed")?.call0()?.getattr("value")?,
+                m.global("Typed")?.attr("__annotations__")?,
+                m.global("Typed")?.call0()?.attr("value")?,
             ),
         )?;
         Ok(())

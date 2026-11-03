@@ -2,6 +2,7 @@ use pyo3::exceptions::PyAssertionError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // globals_assert.py:9
 pub fn bump<'py>(m: &rt::Module<'py>, step: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -15,7 +16,7 @@ pub fn bump<'py>(m: &rt::Module<'py>, step: &Bound<'py, PyAny>) -> PyResult<Boun
 // globals_assert.py:16
 pub fn remember<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "remember", 16, |_| {
-        m.global("names")?.call_method1("append", (name,))?;
+        m.global("names")?.method1("append", (name,))?;
         Ok(rt::int(m.py(), m.global("names")?.len()?))
     })
 }
@@ -98,7 +99,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             (
                 rt::builtin(py, "hasattr")?.call1((
                     m.global("sys")?
-                        .getattr("modules")?
+                        .attr("modules")?
                         .get_item(m.global("__name__")?)?,
                     "counter",
                 ))?,

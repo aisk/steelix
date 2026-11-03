@@ -10,6 +10,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // json/__init__.py:123
 /// Serialize ``obj`` as a JSON formatted stream to ``fp`` (a
@@ -85,7 +86,7 @@ pub fn dump<'py>(
             && !kw.is_truthy()?
         {
             m.global("_default_encoder")?
-                .call_method1("iterencode", (obj,))?
+                .method1("iterencode", (obj,))?
         } else {
             if cls.is_none() {
                 cls = m.global("JSONEncoder")?;
@@ -102,13 +103,13 @@ pub fn dump<'py>(
                 sort_keys = sort_keys,
                 **kw
             )?
-            .call_method1("iterencode", (obj,))?
+            .method1("iterencode", (obj,))?
         };
         // could accelerate with writelines in some versions of Python, at
         // a debuggability cost
         for chunk in iterable.try_iter()? {
             let chunk = chunk?;
-            fp.call_method1("write", (&chunk,))?;
+            fp.method1("write", (&chunk,))?;
             py.check_signals()?;
         }
         Ok(rt::none(py))
@@ -185,7 +186,7 @@ pub fn dumps<'py>(
             && !sort_keys.is_truthy()?
             && !kw.is_truthy()?
         {
-            return m.global("_default_encoder")?.call_method1("encode", (obj,));
+            return m.global("_default_encoder")?.method1("encode", (obj,));
         }
         if cls.is_none() {
             cls = m.global("JSONEncoder")?;
@@ -202,7 +203,7 @@ pub fn dumps<'py>(
             sort_keys = sort_keys,
             **kw
         )?
-        .call_method1("encode", (obj,))
+        .method1("encode", (obj,))
     })
 }
 
@@ -213,13 +214,13 @@ pub fn detect_encoding<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "detect_encoding", 251, |_| {
-        let bstartswith = b.getattr("startswith")?;
+        let bstartswith = b.attr("startswith")?;
         if bstartswith
             .call1((PyTuple::new(
                 py,
                 [
-                    &m.global("codecs")?.getattr("BOM_UTF32_BE")?,
-                    &m.global("codecs")?.getattr("BOM_UTF32_LE")?,
+                    &m.global("codecs")?.attr("BOM_UTF32_BE")?,
+                    &m.global("codecs")?.attr("BOM_UTF32_LE")?,
                 ],
             )?,))?
             .is_truthy()?
@@ -230,8 +231,8 @@ pub fn detect_encoding<'py>(
             .call1((PyTuple::new(
                 py,
                 [
-                    &m.global("codecs")?.getattr("BOM_UTF16_BE")?,
-                    &m.global("codecs")?.getattr("BOM_UTF16_LE")?,
+                    &m.global("codecs")?.attr("BOM_UTF16_BE")?,
+                    &m.global("codecs")?.attr("BOM_UTF16_LE")?,
                 ],
             )?,))?
             .is_truthy()?
@@ -239,7 +240,7 @@ pub fn detect_encoding<'py>(
             return Ok(rt::str(py, "utf-16"));
         }
         if bstartswith
-            .call1((m.global("codecs")?.getattr("BOM_UTF8")?,))?
+            .call1((m.global("codecs")?.attr("BOM_UTF8")?,))?
             .is_truthy()?
         {
             return Ok(rt::str(py, "utf-8-sig"));
@@ -313,7 +314,7 @@ pub fn load<'py>(
     rt::frame!(m, "load", 281, |_| {
         rt::call!(
             m.global("loads")?,
-            fp.call_method0("read")?,
+            fp.method0("read")?,
             cls = cls,
             object_hook = object_hook,
             parse_float = parse_float,
@@ -374,7 +375,7 @@ pub fn loads<'py>(
         let mut s = s.clone();
         let mut cls = cls.clone();
         if s.is_instance(&rt::builtin(py, "str")?)? {
-            if s.call_method1("startswith", ("\u{feff}",))?.is_truthy()? {
+            if s.method1("startswith", ("\u{feff}",))?.is_truthy()? {
                 return Err(frame.raise(m.global("JSONDecodeError")?.call1((
                     "Unexpected UTF-8 BOM (decode using utf-8-sig)",
                     &s,
@@ -393,13 +394,13 @@ pub fn loads<'py>(
                     py,
                     (
                         "the JSON object must be str, bytes or bytearray, not ",
-                        rt::format(&s.getattr("__class__")?.getattr("__name__")?, "")?,
+                        rt::format(&s.attr("__class__")?.attr("__name__")?, "")?,
                     ),
                 )?
                 .unbind(),))));
             }
             s = s
-                .getattr("decode")?
+                .attr("decode")?
                 .call1((detect_encoding(m, &s)?, "surrogatepass"))?;
         }
         if cls.is_none()
@@ -410,7 +411,7 @@ pub fn loads<'py>(
             && object_pairs_hook.is_none()
             && !kw.is_truthy()?
         {
-            return m.global("_default_decoder")?.call_method1("decode", (&s,));
+            return m.global("_default_decoder")?.method1("decode", (&s,));
         }
         if cls.is_none() {
             cls = m.global("JSONDecoder")?;
@@ -430,7 +431,7 @@ pub fn loads<'py>(
         if !parse_constant.is_none() {
             kw.set_item("parse_constant", parse_constant)?;
         }
-        rt::call!(cls, **kw)?.call_method1("decode", (&s,))
+        rt::call!(cls, **kw)?.method1("decode", (&s,))
     })
 }
 

@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // builtins_special.py:4
 pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -15,7 +16,7 @@ pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'
                 x.repr()?,
                 x.is_truthy()?,
                 x.get_type(),
-                x.get_type().getattr("__name__")?,
+                x.get_type().attr("__name__")?,
             ),
         )?;
         rt::builtins::print(

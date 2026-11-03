@@ -6,6 +6,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // store/reports/text.py:12
 pub fn render<'py>(
@@ -17,10 +18,10 @@ pub fn render<'py>(
         let out = PyList::empty(py).into_any();
         for line in m.global("lines")?.call1((inventory,))?.try_iter()? {
             let line = line?;
-            out.call_method1("append", (&line,))?;
+            out.method1("append", (&line,))?;
             py.check_signals()?;
         }
-        rt::str(py, "\n").call_method1("join", (&out,))
+        rt::str(py, "\n").method1("join", (&out,))
     })
 }
 

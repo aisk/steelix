@@ -4,6 +4,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // call_errors.py:6
 pub fn report<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -12,11 +13,11 @@ pub fn report<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyAny>) -> PyResult<Bo
         rt::builtins::print(
             py,
             (
-                args.getattr("exc_value")?
+                args.attr("exc_value")?
                     .get_type()
-                    .getattr("__name__")?
+                    .attr("__name__")?
                     .add(":")?,
-                args.getattr("exc_value")?,
+                args.attr("exc_value")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -33,13 +34,13 @@ pub fn attempt<'py>(
     rt::frame!(m, "attempt", 13, |_| {
         // A thread reports the exception through `threading.excepthook`.
         let worker = rt::call!(
-            m.global("threading")?.getattr("Thread")?,
+            m.global("threading")?.attr("Thread")?,
             target = f,
             args = args,
             kwargs = kwargs
         )?;
-        worker.call_method0("start")?;
-        worker.call_method0("join")?;
+        worker.method0("start")?;
+        worker.method0("join")?;
         Ok(rt::none(m.py()))
     })
 }
@@ -110,7 +111,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("threading", rt::import(m, "threading")?)?;
         rt::def!(m, report(args))?;
         let report2 = m.global("report")?;
-        m.global("threading")?.setattr("excepthook", report2)?;
+        m.global("threading")?.set_attr("excepthook", report2)?;
         rt::def!(m, attempt(f, *args, **kwargs))?;
         rt::def!(m, f(a, b = 1))?;
         rt::def!(m, g(x, /, y, *, z))?;

@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // relative_imports.py:22
 pub fn in_function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -30,10 +31,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("print")?.call1((
                     m.global("type")?
                         .call1((m.global("err")?,))?
-                        .getattr("__name__")?,
+                        .attr("__name__")?,
                     m.global("err")?,
-                    m.global("err")?.getattr("name")?,
-                    m.global("err")?.getattr("path")?,
+                    m.global("err")?.attr("name")?,
+                    m.global("err")?.attr("path")?,
                 ))?;
                 m.unbind_global("err")?;
             }
@@ -52,7 +53,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("print")?.call1((
                     m.global("type")?
                         .call1((m.global("err")?,))?
-                        .getattr("__name__")?,
+                        .attr("__name__")?,
                     m.global("err")?,
                 ))?;
                 m.unbind_global("err")?;
@@ -72,7 +73,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("print")?.call1((
                     m.global("type")?
                         .call1((m.global("err")?,))?
-                        .getattr("__name__")?,
+                        .attr("__name__")?,
                     m.global("err")?,
                 ))?;
                 m.unbind_global("err")?;
@@ -114,9 +115,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     let _handling = rt::Handling::new(&exception);
                     m.global("print")?.call1((
                         m.global("module")?,
-                        m.global("err")?.getattr("name")?,
-                        m.global("err")?.getattr("name_from")?,
-                        !m.global("err")?.getattr("path")?.is_none(),
+                        m.global("err")?.attr("name")?,
+                        m.global("err")?.attr("name_from")?,
+                        !m.global("err")?.attr("path")?.is_none(),
                     ))?;
                     m.unbind_global("err")?;
                 }
@@ -137,10 +138,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("print")?.call1((
                     m.global("str")?
                         .call1((m.global("err")?,))?
-                        .getattr("replace")?
+                        .attr("replace")?
                         .call1((m.global("__file__")?, "<file>"))?,
-                    m.global("err")?.getattr("name")?,
-                    m.global("err")?.getattr("name_from")?,
+                    m.global("err")?.attr("name")?,
+                    m.global("err")?.attr("name_from")?,
                 ))?;
                 m.unbind_global("err")?;
             }
@@ -157,12 +158,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.set_global("err", &exception)?;
                 let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
-                    m.global("err")?.getattr("name")?,
-                    m.global("err")?.getattr("name_from")?,
-                    m.global("err")?.getattr("path")?.rich_compare(
-                        m.global("__import__")?
-                            .call1(("json",))?
-                            .getattr("__file__")?,
+                    m.global("err")?.attr("name")?,
+                    m.global("err")?.attr("name_from")?,
+                    m.global("err")?.attr("path")?.rich_compare(
+                        m.global("__import__")?.call1(("json",))?.attr("__file__")?,
                         CompareOp::Eq,
                     )?,
                 ))?;

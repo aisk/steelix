@@ -6,6 +6,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyIterator;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // json/tool.py:37
 pub fn _colorize_json<'py>(
@@ -29,24 +30,24 @@ pub fn _colorize_json<'py>(
                     let mut m: Bound<'py, PyAny>;
                     for item in module
                         .global("_group_to_theme_color")?
-                        .call_method0("items")?
+                        .method0("items")?
                         .try_iter()?
                     {
                         let [group, color] = rt::unpack(&item?)?;
-                        m = r#match.call_method1("group", (&group,))?;
+                        m = r#match.method1("group", (&group,))?;
                         if m.is_truthy()? {
                             return rt::fstring(
                                 py,
                                 (
                                     rt::format(&theme.get_item(&color)?, "")?,
                                     rt::format(&m, "")?,
-                                    rt::format(&theme.getattr("reset")?, "")?,
+                                    rt::format(&theme.attr("reset")?, "")?,
                                 ),
                             );
                         }
                         py.check_signals()?;
                     }
-                    r#match.call_method0("group")
+                    r#match.method0("group")
                 }
             )
         }
@@ -55,7 +56,7 @@ pub fn _colorize_json<'py>(
             _replace_match_callback[theme](r#match),
             qualname = "_colorize_json.<locals>._replace_match_callback"
         )?;
-        m.global("re")?.getattr("sub")?.call1((
+        m.global("re")?.attr("sub")?.call1((
             m.global("_color_pattern")?,
             &_replace_match_callback,
             json_str,
@@ -72,55 +73,55 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             "A simple command line interface for json module to validate and pretty-print JSON objects.",
         );
         let parser = rt::call!(
-            m.global("argparse")?.getattr("ArgumentParser")?,
+            m.global("argparse")?.attr("ArgumentParser")?,
             description = &description,
             color = true
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "infile",
             nargs = "?",
             help = "a JSON file to be validated or pretty-printed",
             default = "-"
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "outfile",
             nargs = "?",
             help = "write the output of infile to outfile",
             default = py.None()
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "--sort-keys",
             action = "store_true",
             default = false,
             help = "sort the output of dictionaries alphabetically by key"
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "--no-ensure-ascii",
             dest = "ensure_ascii",
             action = "store_false",
             help = "disable escaping of non-ASCII characters"
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "--json-lines",
             action = "store_true",
             default = false,
             help = "parse input using the JSON Lines format. Use with --no-indent or --compact to produce valid JSON Lines output."
         )?;
-        let group = parser.call_method0("add_mutually_exclusive_group")?;
+        let group = parser.method0("add_mutually_exclusive_group")?;
         rt::call!(
-            group.getattr("add_argument")?,
+            group.attr("add_argument")?,
             "--indent",
             default = 4,
             r#type = rt::builtin(py, "int")?,
             help = "separate items with newlines and use this number of spaces for indentation"
         )?;
         rt::call!(
-            group.getattr("add_argument")?,
+            group.attr("add_argument")?,
             "--tab",
             action = "store_const",
             dest = "indent",
@@ -128,7 +129,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             help = "separate items with newlines and use tabs for indentation"
         )?;
         rt::call!(
-            group.getattr("add_argument")?,
+            group.attr("add_argument")?,
             "--no-indent",
             action = "store_const",
             dest = "indent",
@@ -136,38 +137,38 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             help = "separate items with spaces rather than newlines"
         )?;
         rt::call!(
-            group.getattr("add_argument")?,
+            group.attr("add_argument")?,
             "--compact",
             action = "store_true",
             help = "suppress all whitespace separation (most compact)"
         )?;
-        let options = parser.call_method0("parse_args")?;
+        let options = parser.method0("parse_args")?;
         let dump_args = [
-            ("sort_keys", &options.getattr("sort_keys")?),
-            ("indent", &options.getattr("indent")?),
-            ("ensure_ascii", &options.getattr("ensure_ascii")?),
+            ("sort_keys", &options.attr("sort_keys")?),
+            ("indent", &options.attr("indent")?),
+            ("ensure_ascii", &options.attr("ensure_ascii")?),
         ]
         .into_py_dict(py)?
         .into_any();
-        if options.getattr("compact")?.is_truthy()? {
+        if options.attr("compact")?.is_truthy()? {
             dump_args.set_item("indent", py.None())?;
             dump_args.set_item("separators", PyTuple::new(py, [",", ":"])?)?;
         }
         match (|| -> PyResult<()> {
-            let infile = if options.getattr("infile")?.eq("-")? {
-                m.global("sys")?.getattr("stdin")?
+            let infile = if options.attr("infile")?.eq("-")? {
+                m.global("sys")?.attr("stdin")?
             } else {
                 rt::call!(
                     rt::builtin(py, "open")?,
-                    options.getattr("infile")?,
+                    options.attr("infile")?,
                     encoding = "utf-8"
                 )?
             };
             let mut objs: Option<Bound<'py, PyAny>> = None;
             let result = (|| -> PyResult<()> {
                 let lines: Bound<'py, PyAny>;
-                if options.getattr("json_lines")?.is_truthy()? {
-                    lines = infile.call_method0("readlines")?;
+                if options.attr("json_lines")?.is_truthy()? {
+                    lines = infile.method0("readlines")?;
                     // json/tool.py:95
                     fn genexpr<'py>(
                         m: &rt::Module<'py>,
@@ -175,9 +176,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     ) -> PyResult<Option<Bound<'py, PyAny>>> {
                         rt::frame!(m, "main.<locals>.<genexpr>", 95, |_| {
                             if let Some(line) = rt::next(lines)? {
-                                return Ok(Some(
-                                    m.global("json")?.call_method1("loads", (&line,))?,
-                                ));
+                                return Ok(Some(m.global("json")?.method1("loads", (&line,))?));
                             }
                             Ok(None)
                         })
@@ -189,23 +188,23 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     )?);
                 } else {
                     objs = Some(
-                        PyTuple::new(py, [&m.global("json")?.call_method1("load", (&infile,))?])?
+                        PyTuple::new(py, [&m.global("json")?.method1("load", (&infile,))?])?
                             .into_any(),
                     );
                 }
                 Ok(())
             })();
             let finally = frame.finally(result);
-            if !infile.is(m.global("sys")?.getattr("stdin")?) {
-                infile.call_method0("close")?;
+            if !infile.is(m.global("sys")?.attr("stdin")?) {
+                infile.method0("close")?;
             }
             finally.resume()?;
-            let outfile = if options.getattr("outfile")?.is_none() {
-                m.global("sys")?.getattr("stdout")?
+            let outfile = if options.attr("outfile")?.is_none() {
+                m.global("sys")?.attr("stdout")?
             } else {
                 rt::call!(
                     rt::builtin(py, "open")?,
-                    options.getattr("outfile")?,
+                    options.attr("outfile")?,
                     "w",
                     encoding = "utf-8"
                 )?
@@ -215,28 +214,21 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 let mut obj: Bound<'py, PyAny>;
                 let mut json_str: Bound<'py, PyAny>;
                 if rt::call!(m.global("can_colorize")?, file = &outfile)?.is_truthy()? {
-                    t = rt::call!(m.global("get_theme")?, tty_file = &outfile)?
-                        .getattr("syntax")?;
+                    t = rt::call!(m.global("get_theme")?, tty_file = &outfile)?.attr("syntax")?;
                     for item in rt::local(&objs, "objs")?.try_iter()? {
                         obj = item?;
-                        json_str =
-                            rt::call!(m.global("json")?.getattr("dumps")?, &obj, **dump_args)?;
+                        json_str = rt::call!(m.global("json")?.attr("dumps")?, &obj, **dump_args)?;
                         outfile
-                            .getattr("write")?
+                            .attr("write")?
                             .call1((_colorize_json(m, &json_str, &t)?,))?;
-                        outfile.call_method1("write", ("\n",))?;
+                        outfile.method1("write", ("\n",))?;
                         py.check_signals()?;
                     }
                 } else {
                     for item2 in rt::local(&objs, "objs")?.try_iter()? {
                         obj = item2?;
-                        rt::call!(
-                            m.global("json")?.getattr("dump")?,
-                            &obj,
-                            &outfile,
-                            **dump_args
-                        )?;
-                        outfile.call_method1("write", ("\n",))?;
+                        rt::call!(m.global("json")?.attr("dump")?, &obj, &outfile, **dump_args)?;
+                        outfile.method1("write", ("\n",))?;
                         py.check_signals()?;
                     }
                 }
@@ -275,7 +267,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // so we can use a looser but simpler regex to match
         // the various parts, most notably strings and numbers,
         // where the regex given by the spec is much more complex.
-        m.set_global("_color_pattern", m.global("re")?.getattr("compile")?.call1(("\n    (?P<key>\"(\\\\.|[^\"\\\\])*\")(?=:)           |\n    (?P<string>\"(\\\\.|[^\"\\\\])*\")             |\n    (?P<number>NaN|-?Infinity|[0-9\\-+.Ee]+) |\n    (?P<boolean>true|false)                 |\n    (?P<null>null)\n", m.global("re")?.getattr("VERBOSE")?))?)?;
+        m.set_global("_color_pattern", m.global("re")?.attr("compile")?.call1(("\n    (?P<key>\"(\\\\.|[^\"\\\\])*\")(?=:)           |\n    (?P<string>\"(\\\\.|[^\"\\\\])*\")             |\n    (?P<number>NaN|-?Infinity|[0-9\\-+.Ee]+) |\n    (?P<boolean>true|false)                 |\n    (?P<null>null)\n", m.global("re")?.attr("VERBOSE")?))?)?;
         m.set_global(
             "_group_to_theme_color",
             [
@@ -298,7 +290,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     let _handling = rt::Handling::new(&exception);
                     return Err(frame.raise(PySystemExit::new_err((m
                         .global("exc")?
-                        .getattr("errno")?
+                        .attr("errno")?
                         .unbind(),))));
                 }
                 Err(err) => return Err(err),

@@ -6,6 +6,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod point {
     use super::*;
@@ -51,8 +52,8 @@ pub mod point {
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Point.__init__", 9, |_| {
-            slf.setattr("x", x)?;
-            slf.setattr("y", y)?;
+            slf.set_attr("x", x)?;
+            slf.set_attr("y", y)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -66,8 +67,8 @@ pub mod point {
         let py = m.py();
         rt::frame!(m, "Point.__eq__", 13, |_| {
             Ok(if other.is_instance(&m.global("Point")?)? {
-                PyTuple::new(py, [&slf.getattr("x")?, &slf.getattr("y")?])?.rich_compare(
-                    PyTuple::new(py, [&other.getattr("x")?, &other.getattr("y")?])?,
+                PyTuple::new(py, [&slf.attr("x")?, &slf.attr("y")?])?.rich_compare(
+                    PyTuple::new(py, [&other.attr("x")?, &other.attr("y")?])?,
                     CompareOp::Eq,
                 )?
             } else {
@@ -86,9 +87,9 @@ pub mod point {
                 m.py(),
                 (
                     "Point(",
-                    slf.getattr("x")?.repr()?,
+                    slf.attr("x")?.repr()?,
                     ", ",
-                    slf.getattr("y")?.repr()?,
+                    slf.attr("y")?.repr()?,
                     ")",
                 ),
             )
@@ -131,7 +132,7 @@ pub mod slots {
         a: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Slots.__init__", 25, |_| {
-            slf.setattr("a", a)?;
+            slf.set_attr("a", a)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -147,7 +148,7 @@ pub mod slots {
                 py,
                 [
                     &m.global("Slots")?,
-                    PyTuple::new(py, [&slf.getattr("a")?])?.as_any(),
+                    PyTuple::new(py, [&slf.attr("a")?])?.as_any(),
                 ],
             )?
             .into_any())
@@ -195,8 +196,8 @@ pub mod tree {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Tree.__init__", 33, |_| {
-            slf.setattr("value", value)?;
-            slf.setattr("children", rt::builtin(py, "list")?.call1((children,))?)?;
+            slf.set_attr("value", value)?;
+            slf.set_attr("children", rt::builtin(py, "list")?.call1((children,))?)?;
             Ok(rt::none(py))
         })
     }
@@ -208,13 +209,13 @@ pub mod tree {
         memo: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Tree.__deepcopy__", 37, |_| {
-            rt::builtins::print(m.py(), ("deepcopy", slf.getattr("value")?))?;
+            rt::builtins::print(m.py(), ("deepcopy", slf.attr("value")?))?;
             rt::call!(
                 m.global("Tree")?,
-                slf.getattr("value")?,
+                slf.attr("value")?,
                 *m.global("copy")?
-                    .getattr("deepcopy")?
-                    .call1((slf.getattr("children")?, memo))?
+                    .attr("deepcopy")?
+                    .call1((slf.attr("children")?, memo))?
             )
         })
     }
@@ -230,25 +231,23 @@ pub mod tree {
             ) -> PyResult<Option<Bound<'py, PyAny>>> {
                 rt::frame!(m, "Tree.total.<locals>.<genexpr>", 42, |_| {
                     if let Some(child) = rt::next(children)? {
-                        return Ok(Some(child.call_method0("total")?));
+                        return Ok(Some(child.method0("total")?));
                     }
                     Ok(None)
                 })
             }
             Ok(if false {
-                slf.getattr("value")?
+                slf.attr("value")?
                     .add(rt::builtin(py, "sum")?.call1((rt::genexpr!(
                         m,
-                        genexpr(slf.getattr("children")?.try_iter()?),
+                        genexpr(slf.attr("children")?.try_iter()?),
                         qualname = "Tree.total.<locals>.<genexpr>"
                     )?,))?)?
             } else {
-                slf.getattr("value")?.add(rt::builtin(py, "sum")?.call1((
-                    rt::builtin(py, "map")?.call1((
-                        m.global("Tree")?.getattr("total")?,
-                        slf.getattr("children")?,
-                    ))?,
-                ))?)?
+                slf.attr("value")?.add(
+                    rt::builtin(py, "sum")?.call1((rt::builtin(py, "map")?
+                        .call1((m.global("Tree")?.attr("total")?, slf.attr("children")?))?,))?,
+                )?
             })
         })
     }
@@ -285,9 +284,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         m.set_global(
             "q",
-            m.global("pickle")?.getattr("loads")?.call1((m
+            m.global("pickle")?.attr("loads")?.call1((m
                 .global("pickle")?
-                .getattr("dumps")?
+                .attr("dumps")?
                 .call1((m.global("p")?,))?,))?,
         )?;
         rt::builtins::print(
@@ -302,20 +301,20 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "r",
             m.global("copy")?
-                .getattr("deepcopy")?
+                .attr("deepcopy")?
                 .call1((m.global("p")?,))?,
         )?;
-        m.global("r")?.getattr("y")?.call_method1("append", (4,))?;
+        m.global("r")?.attr("y")?.method1("append", (4,))?;
         rt::builtins::print(
             py,
             (
                 m.global("p")?,
                 m.global("r")?,
                 m.global("copy")?
-                    .getattr("copy")?
+                    .attr("copy")?
                     .call1((m.global("p")?,))?
-                    .getattr("y")?
-                    .is(m.global("p")?.getattr("y")?),
+                    .attr("y")?
+                    .is(m.global("p")?.attr("y")?),
             ),
         )?;
         match (|| rt::builtin(py, "hash")?.call1((m.global("p")?,)))() {
@@ -333,20 +332,20 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("s")?.getattr("a")?,
+                m.global("s")?.attr("a")?,
                 rt::builtin(py, "hasattr")?.call1((m.global("s")?, "__dict__"))?,
                 m.global("pickle")?
-                    .getattr("loads")?
+                    .attr("loads")?
                     .call1((m
                         .global("pickle")?
-                        .getattr("dumps")?
+                        .attr("dumps")?
                         .call1((m.global("s")?,))?,))?
-                    .getattr("a")?,
-                m.global("Slots")?.getattr("__slots__")?,
+                    .attr("a")?,
+                m.global("Slots")?.attr("__slots__")?,
             ),
         )?;
         match (|| -> PyResult<()> {
-            m.global("s")?.setattr("c", 1)?;
+            m.global("s")?.set_attr("c", 1)?;
             Ok(())
         })() {
             Ok(()) => {}
@@ -371,31 +370,31 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "u",
             m.global("copy")?
-                .getattr("deepcopy")?
+                .attr("deepcopy")?
                 .call1((m.global("t")?,))?,
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("u")?.call_method0("total")?,
+                m.global("u")?.method0("total")?,
                 m.global("u")?
-                    .getattr("children")?
+                    .attr("children")?
                     .get_item(1)?
-                    .getattr("children")?
+                    .attr("children")?
                     .get_item(0)?
-                    .getattr("value")?,
+                    .attr("value")?,
                 !m.global("u")?.is(m.global("t")?),
             ),
         )?;
         rt::builtins::print(
             py,
             (m.global("pickle")?
-                .getattr("loads")?
+                .attr("loads")?
                 .call1((m
                     .global("pickle")?
-                    .getattr("dumps")?
-                    .call1((m.global("Point")?.getattr("__init__")?,))?,))?
-                .is(m.global("Point")?.getattr("__init__")?),),
+                    .attr("dumps")?
+                    .call1((m.global("Point")?.attr("__init__")?,))?,))?
+                .is(m.global("Point")?.attr("__init__")?),),
         )?;
         rt::builtins::print(
             py,
@@ -404,7 +403,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("s")?.is_instance(&m.global("Point")?)?,
                 rt::builtin(py, "issubclass")?
                     .call1((m.global("Point")?, rt::builtin(py, "object")?))?,
-                m.global("p")?.get_type().getattr("__mro__")?,
+                m.global("p")?.get_type().attr("__mro__")?,
             ),
         )?;
         Ok(())

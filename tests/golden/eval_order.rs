@@ -5,6 +5,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // eval_order.py:4
 pub fn trace<'py>(
@@ -22,8 +23,8 @@ pub fn trace<'py>(
 pub fn make_box<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "make_box", 9, |_| {
         let types = rt::import(m, "types")?;
-        let r#box = types.call_method0("SimpleNamespace")?;
-        r#box.setattr("x", 10)?;
+        let r#box = types.method0("SimpleNamespace")?;
+        r#box.set_attr("x", 10)?;
         Ok(r#box)
     })
 }
@@ -57,19 +58,19 @@ pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "attributes", 24, |_| {
         let r#box = make_box(m)?;
         let value = trace(m, &rt::str(py, "value"), &rt::int(py, 20))?;
-        trace(m, &rt::str(py, "object"), &r#box)?.setattr("x", value)?;
-        rt::builtins::print(py, (r#box.getattr("x")?,))?;
+        trace(m, &rt::str(py, "object"), &r#box)?.set_attr("x", value)?;
+        rt::builtins::print(py, (r#box.attr("x")?,))?;
         {
             let target = trace(m, &rt::str(py, "object"), &r#box)?;
-            target.setattr(
+            target.set_attr(
                 "x",
                 rt::iadd(
-                    &target.getattr("x")?,
+                    &target.attr("x")?,
                     trace(m, &rt::str(py, "increment"), &rt::int(py, 1))?,
                 )?,
             )?;
         }
-        rt::builtins::print(py, (r#box.getattr("x")?,))?;
+        rt::builtins::print(py, (r#box.attr("x")?,))?;
         Ok(rt::none(py))
     })
 }
@@ -190,7 +191,7 @@ pub fn calls<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(
             py,
             (trace(m, &rt::str(py, "receiver"), &s)?
-                .getattr("split")?
+                .attr("split")?
                 .call1((trace(m, &rt::str(py, "separator"), &rt::str(py, ","))?,))?,),
         )?;
         rt::builtins::print(
@@ -325,7 +326,7 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             .into_py_dict(py)?
             .into_any();
         {
-            let split = trace(m, &rt::str(py, "obj"), &rt::str(py, "a-b"))?.getattr("split")?;
+            let split = trace(m, &rt::str(py, "obj"), &rt::str(py, "a-b"))?.attr("split")?;
             let item2 = trace(m, &rt::str(py, "sep"), &rt::str(py, "-"))?;
             rt::builtins::print(
                 py,

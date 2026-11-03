@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // try_finally.py:6
 pub fn log<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyTuple>) -> PyResult<Bound<'py, PyAny>> {
@@ -120,11 +121,11 @@ pub fn jumps_run_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
                 if i.eq(3)? {
                     return Ok(rt::Flow::Break);
                 }
-                out.call_method1("append", (&i,))?;
+                out.method1("append", (&i,))?;
                 Ok(rt::Flow::Next)
             })();
             let finally = frame.finally(result);
-            out.getattr("append")?.call1((i.neg()?,))?;
+            out.attr("append")?.call1((i.neg()?,))?;
             match finally.resume()? {
                 rt::Flow::Break => break,
                 rt::Flow::Continue => {
@@ -181,7 +182,7 @@ pub fn exception_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
                                 &rt::str(py, "caught"),
                                 e.repr()?.as_any(),
                                 &rt::str(py, "context"),
-                                e.getattr("__context__")?.repr()?.as_any(),
+                                e.attr("__context__")?.repr()?.as_any(),
                             ],
                         )?,
                     )?;
@@ -206,7 +207,7 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
                     py,
                     [
                         &rt::str(py, "in finally:"),
-                        m.global("sys")?.call_method0("exception")?.repr()?.as_any(),
+                        m.global("sys")?.method0("exception")?.repr()?.as_any(),
                     ],
                 )?,
             )?;
@@ -228,7 +229,7 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
                 py,
                 [
                     &rt::str(py, "in finally:"),
-                    m.global("sys")?.call_method0("exception")?.repr()?.as_any(),
+                    m.global("sys")?.method0("exception")?.repr()?.as_any(),
                 ],
             )?,
         )?;
@@ -244,20 +245,20 @@ pub fn finally_after_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         let events = PyList::empty(py).into_any();
         let result = (|| -> PyResult<Bound<'py, PyAny>> {
             match (|| -> PyResult<()> {
-                events.call_method1("append", ("body",))?;
+                events.method1("append", ("body",))?;
                 Err(frame.raise(PyIndexError::new_err("x")))
             })() {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                     let _handling = rt::Handling::new(&frame.catch(err));
-                    events.call_method1("append", ("handler",))?;
+                    events.method1("append", ("handler",))?;
                     Ok(events.clone())
                 }
                 Err(err) => Err(err),
             }
         })();
         let finally = frame.finally(result);
-        events.call_method1("append", ("finally",))?;
+        events.method1("append", ("finally",))?;
         finally.resume()
     })
 }

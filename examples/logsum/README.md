@@ -59,17 +59,17 @@ pub fn parse_line<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "parse_line", 28, |_| {
-        let parts = line.call_method0("split")?;
+        let parts = line.method0("split")?;
         if parts.len()? < 10
             || !parts
                 .get_item(3)?
-                .call_method1("startswith", ("[",))?
+                .method1("startswith", ("[",))?
                 .is_truthy()?
         {
             return Ok(rt::none(py));
         }
         let status = parts.get_item(8)?;
-        if status.len()? != 3 || !status.call_method0("isdigit")?.is_truthy()? {
+        if status.len()? != 3 || !status.method0("isdigit")?.is_truthy()? {
             return Ok(rt::none(py));
         }
         let size = parts.get_item(9)?;
@@ -77,7 +77,7 @@ pub fn parse_line<'py>(
         if parts.len()? > 10
             && parts
                 .get_item(10)?
-                .call_method1("endswith", ("ms",))?
+                .method1("endswith", ("ms",))?
                 .is_truthy()?
         {
             millis = rt::builtin(py, "int")?.call1((parts

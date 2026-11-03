@@ -2,6 +2,7 @@ pub mod text;
 
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 /// Executes the body of `store/reports/__init__.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
@@ -14,7 +15,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             m.py(),
             (
                 "store.reports: imported",
-                m.global("Item")?.getattr("__module__")?,
+                m.global("Item")?.attr("__module__")?,
             ),
         )?;
         Ok(())

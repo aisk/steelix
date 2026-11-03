@@ -5,6 +5,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // logsum.py:20
 pub fn parse_args<'py>(
@@ -14,33 +15,30 @@ pub fn parse_args<'py>(
     let py = m.py();
     rt::frame!(m, "parse_args", 20, |_| {
         let parser = rt::call!(
-            m.global("argparse")?.getattr("ArgumentParser")?,
+            m.global("argparse")?.attr("ArgumentParser")?,
             prog = "logsum",
-            description = m
-                .global("__doc__")?
-                .call_method0("splitlines")?
-                .get_item(0)?
+            description = m.global("__doc__")?.method0("splitlines")?.get_item(0)?
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "logfile",
             help = "access log to read"
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "--top",
             r#type = rt::builtin(py, "int")?,
             default = m.global("DEFAULT_TOP")?,
             help = "paths to list"
         )?;
         rt::call!(
-            parser.getattr("add_argument")?,
+            parser.attr("add_argument")?,
             "--slow",
             r#type = rt::builtin(py, "int")?,
             default = m.global("SLOW_MS")?,
             help = "slow request threshold (ms)"
         )?;
-        parser.call_method1("parse_args", (argv,))
+        parser.method1("parse_args", (argv,))
     })
 }
 
@@ -52,17 +50,17 @@ pub fn parse_line<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "parse_line", 28, |_| {
-        let parts = line.call_method0("split")?;
+        let parts = line.method0("split")?;
         if parts.len()? < 10
             || !parts
                 .get_item(3)?
-                .call_method1("startswith", ("[",))?
+                .method1("startswith", ("[",))?
                 .is_truthy()?
         {
             return Ok(rt::none(py));
         }
         let status = parts.get_item(8)?;
-        if status.len()? != 3 || !status.call_method0("isdigit")?.is_truthy()? {
+        if status.len()? != 3 || !status.method0("isdigit")?.is_truthy()? {
             return Ok(rt::none(py));
         }
         let size = parts.get_item(9)?;
@@ -70,7 +68,7 @@ pub fn parse_line<'py>(
         if parts.len()? > 10
             && parts
                 .get_item(10)?
-                .call_method1("endswith", ("ms",))?
+                .method1("endswith", ("ms",))?
                 .is_truthy()?
         {
             millis = rt::builtin(py, "int")?.call1((parts
@@ -83,16 +81,10 @@ pub fn parse_line<'py>(
                 "hour",
                 &parts.get_item(3)?.get_item(rt::slice(py, 13, 15)?)?,
             ),
-            (
-                "method",
-                &parts.get_item(5)?.call_method1("lstrip", ("\"",))?,
-            ),
+            ("method", &parts.get_item(5)?.method1("lstrip", ("\"",))?),
             (
                 "path",
-                &parts
-                    .get_item(6)?
-                    .call_method1("split", ("?",))?
-                    .get_item(0)?,
+                &parts.get_item(6)?.method1("split", ("?",))?.get_item(0)?,
             ),
             ("status", &rt::builtin(py, "int")?.call1((&status,))?),
             (
@@ -118,12 +110,12 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
         let requests = PyList::empty(py).into_any();
         let mut malformed = rt::int(py, 0);
         let mut request: Bound<'py, PyAny>;
-        for line in rt::call!(path.getattr("read_text")?, encoding = "utf-8")?
-            .call_method0("splitlines")?
+        for line in rt::call!(path.attr("read_text")?, encoding = "utf-8")?
+            .method0("splitlines")?
             .try_iter()?
         {
             let line = line?;
-            if !line.call_method0("strip")?.is_truthy()? {
+            if !line.method0("strip")?.is_truthy()? {
                 py.check_signals()?;
                 continue;
             }
@@ -138,7 +130,7 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
             if request.is_none() {
                 malformed = rt::iadd(&malformed, 1)?;
             } else {
-                requests.call_method1("append", (&request,))?;
+                requests.method1("append", (&request,))?;
             }
             py.check_signals()?;
         }
@@ -193,7 +185,7 @@ pub fn tally<'py>(
         for request in requests.try_iter()? {
             let request = request?;
             key = request.get_item(field)?;
-            counts.set_item(&key, counts.call_method1("get", (&key, 0))?.add(1)?)?;
+            counts.set_item(&key, counts.method1("get", (&key, 0))?.add(1)?)?;
             py.check_signals()?;
         }
         Ok(counts)
@@ -213,14 +205,14 @@ pub fn print_statuses<'py>(
             let request = request?;
             name = m
                 .global("STATUS_CLASSES")?
-                .getattr("get")?
+                .attr("get")?
                 .call1((request.get_item("status")?.floor_div(100)?, "other"))?;
-            classes.set_item(&name, classes.call_method1("get", (&name, 0))?.add(1)?)?;
+            classes.set_item(&name, classes.method1("get", (&name, 0))?.add(1)?)?;
             py.check_signals()?;
         }
         let peak = rt::call!(
             rt::builtin(py, "max")?,
-            classes.call_method0("values")?,
+            classes.method0("values")?,
             default = 0
         )?;
         rt::builtins::print(py, ("status",))?;
@@ -297,7 +289,7 @@ pub fn print_paths<'py>(
         }
         let ranked = rt::call!(
             rt::builtin(py, "sorted")?,
-            paths.call_method0("items")?,
+            paths.method0("items")?,
             key = rt::function!(m, lambda(item), qualname = "print_paths.<locals>.<lambda>")?
         )?;
         rt::builtins::print(
@@ -349,11 +341,11 @@ pub fn print_latency<'py>(
         for item in requests.try_iter()? {
             request = item?;
             if !request.get_item("ms")?.is_none() {
-                timed.getattr("append")?.call1((request.get_item("ms")?,))?;
+                timed.attr("append")?.call1((request.get_item("ms")?,))?;
             }
             py.check_signals()?;
         }
-        timed.call_method0("sort")?;
+        timed.method0("sort")?;
         rt::builtins::print(
             py,
             (rt::fstring(
@@ -386,7 +378,7 @@ pub fn print_latency<'py>(
         for item2 in requests.try_iter()? {
             request = item2?;
             if !request.get_item("ms")?.is_none() && request.get_item("ms")?.ge(slow)? {
-                slow_requests.call_method1("append", (&request,))?;
+                slow_requests.method1("append", (&request,))?;
             }
             py.check_signals()?;
         }
@@ -448,7 +440,7 @@ pub fn print_hours<'py>(
         let hours = tally(m, requests, &rt::str(py, "hour"))?;
         let peak = rt::call!(
             rt::builtin(py, "max")?,
-            hours.call_method0("values")?,
+            hours.method0("values")?,
             default = 0
         )?;
         rt::builtins::print(py, ("requests per hour",))?;
@@ -482,12 +474,12 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
     let py = m.py();
     rt::frame!(m, "main", 137, |_| {
         let args = parse_args(m, argv)?;
-        let path = m.global("Path")?.call1((args.getattr("logfile")?,))?;
-        if !path.call_method0("is_file")?.is_truthy()? {
+        let path = m.global("Path")?.call1((args.attr("logfile")?,))?;
+        if !path.method0("is_file")?.is_truthy()? {
             rt::call!(
                 rt::builtin(py, "print")?,
                 rt::fstring(py, ("logsum: ", rt::format(&path, "")?, ": no such file"))?,
-                file = m.global("sys")?.getattr("stderr")?
+                file = m.global("sys")?.attr("stderr")?
             )?;
             return Ok(rt::int(py, 2));
         }
@@ -497,7 +489,7 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
         for request in requests.try_iter()? {
             let request = request?;
             total_bytes = rt::iadd(&total_bytes, request.get_item("bytes")?)?;
-            clients.getattr("add")?.call1((request.get_item("ip")?,))?;
+            clients.attr("add")?.call1((request.get_item("ip")?,))?;
             py.check_signals()?;
         }
         rt::call!(
@@ -505,7 +497,7 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
             rt::fstring(
                 py,
                 (
-                    rt::format(&path.getattr("name")?, "")?,
+                    rt::format(&path.attr("name")?, "")?,
                     ": ",
                     rt::format(&rt::int(py, requests.len()?), "")?,
                     " requests"
@@ -550,9 +542,9 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
         rt::builtins::print(py, ())?;
         print_statuses(m, &requests)?;
         rt::builtins::print(py, ())?;
-        print_paths(m, &requests, &args.getattr("top")?)?;
+        print_paths(m, &requests, &args.attr("top")?)?;
         rt::builtins::print(py, ())?;
-        print_latency(m, &requests, &args.getattr("slow")?)?;
+        print_latency(m, &requests, &args.attr("slow")?)?;
         rt::builtins::print(py, ())?;
         print_hours(m, &requests)?;
         Ok(rt::int(py, 0))
@@ -606,10 +598,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, print_hours(requests))?;
         rt::def!(m, main(argv))?;
         if m.global("__name__")?.eq("__main__")? {
-            m.global("sys")?.getattr("exit")?.call1((main(
+            m.global("sys")?.attr("exit")?.call1((main(
                 m,
                 &m.global("sys")?
-                    .getattr("argv")?
+                    .attr("argv")?
                     .get_item(rt::slice(py, 1, py.None())?)?,
             )?,))?;
         }

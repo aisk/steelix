@@ -5,6 +5,7 @@ use pyo3::types::PyList;
 use pyo3::types::PySet;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod a {
     use super::*;
@@ -52,7 +53,7 @@ pub mod b {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "B.who", 16, |_| {
-            PyList::new(m.py(), ["B"])?.add(rt::super_(__class__, slf)?.call_method0("who")?)
+            PyList::new(m.py(), ["B"])?.add(rt::super_(__class__, slf)?.method0("who")?)
         })
     }
 }
@@ -80,7 +81,7 @@ pub mod c {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "C.who", 21, |_| {
-            PyList::new(m.py(), ["C"])?.add(rt::super_(__class__, slf)?.call_method0("who")?)
+            PyList::new(m.py(), ["C"])?.add(rt::super_(__class__, slf)?.method0("who")?)
         })
     }
 }
@@ -108,7 +109,7 @@ pub mod d {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "D.who", 26, |_| {
-            PyList::new(m.py(), ["D"])?.add(rt::super_(__class__, slf)?.call_method0("who")?)
+            PyList::new(m.py(), ["D"])?.add(rt::super_(__class__, slf)?.method0("who")?)
         })
     }
 }
@@ -155,9 +156,9 @@ pub mod color {
             rt::fstring(
                 m.py(),
                 (
-                    rt::format(&slf.getattr("name")?.call_method0("lower")?, "")?,
+                    rt::format(&slf.attr("name")?.method0("lower")?, "")?,
                     "=",
-                    rt::format(&slf.getattr("value")?, "")?,
+                    rt::format(&slf.attr("value")?, "")?,
                 ),
             )
         })
@@ -168,7 +169,7 @@ pub mod color {
         m: &rt::Module<'py>,
         cls: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Color.default", 42, |_| { cls.getattr("GREEN") })
+        rt::frame!(m, "Color.default", 42, |_| { cls.attr("GREEN") })
     }
 
     // classes_inherit.py:47
@@ -177,7 +178,7 @@ pub mod color {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Color.is_warm", 46, |_| {
-            Ok(rt::bool(m.py(), slf.is(m.global("Color")?.getattr("RED")?)))
+            Ok(rt::bool(m.py(), slf.is(m.global("Color")?.attr("RED")?)))
         })
     }
 }
@@ -218,8 +219,8 @@ pub mod planet {
         radius: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Planet.__init__", 59, |_| {
-            slf.setattr("mass", mass)?;
-            slf.setattr("radius", radius)?;
+            slf.set_attr("mass", mass)?;
+            slf.set_attr("radius", radius)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -233,8 +234,8 @@ pub mod planet {
         rt::frame!(m, "Planet.gravity", 63, |_| {
             rt::builtin(py, "round")?.call1((
                 rt::float(py, 6.67e-11)
-                    .mul(slf.getattr("mass")?)?
-                    .div(slf.getattr("radius")?.pow(2, py.None())?)?,
+                    .mul(slf.attr("mass")?)?
+                    .div(slf.attr("radius")?.pow(2, py.None())?)?,
                 2,
             ))
         })
@@ -287,9 +288,9 @@ pub mod shade {
         label: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Shade.__new__", 80, |_| {
-            let obj = rt::builtin(m.py(), "object")?.call_method1("__new__", (cls,))?;
-            obj.setattr("_value_", value)?;
-            obj.setattr("label", label)?;
+            let obj = rt::builtin(m.py(), "object")?.method1("__new__", (cls,))?;
+            obj.set_attr("_value_", value)?;
+            obj.set_attr("label", label)?;
             Ok(obj)
         })
     }
@@ -314,7 +315,7 @@ pub mod point {
     // classes_inherit.py:97
     pub fn norm1<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Point.norm1", 97, |_| {
-            slf.getattr("x")?.abs()?.add(slf.getattr("y")?.abs()?)
+            slf.attr("x")?.abs()?.add(slf.attr("y")?.abs()?)
         })
     }
 }
@@ -337,7 +338,7 @@ pub mod shape {
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         rt::frame!(ns, "Shape", 114, |_| {
             {
-                let decorator = ns.get("abc")?.getattr("abstractmethod")?;
+                let decorator = ns.get("abc")?.attr("abstractmethod")?;
                 let function = rt::function!(ns, area(slf as "self"), qualname = "Shape.area")?;
                 ns.set("area", decorator.call1((function,))?)?;
             }
@@ -367,9 +368,9 @@ pub mod shape {
             rt::fstring(
                 m.py(),
                 (
-                    rt::format(&slf.get_type().getattr("__name__")?, "")?,
+                    rt::format(&slf.get_type().attr("__name__")?, "")?,
                     " with area ",
-                    rt::format(&slf.call_method0("area")?, "")?,
+                    rt::format(&slf.method0("area")?, "")?,
                 ),
             )
         })
@@ -406,7 +407,7 @@ pub mod square {
         side: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Square.__init__", 124, |_| {
-            slf.setattr("side", side)?;
+            slf.set_attr("side", side)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -414,7 +415,7 @@ pub mod square {
     // classes_inherit.py:127
     pub fn area<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Square.area", 127, |_| {
-            slf.getattr("side")?.pow(2, m.py().None())
+            slf.attr("side")?.pow(2, m.py().None())
         })
     }
 }
@@ -453,11 +454,11 @@ pub mod worker {
         let py = m.py();
         rt::frame!(m, "Worker.__init__", 139, |_| {
             rt::call!(
-                rt::super_(__class__, slf)?.getattr("__init__")?,
+                rt::super_(__class__, slf)?.attr("__init__")?,
                 name = rt::fstring(py, ("worker-", rt::format(n, "")?))?
             )?;
-            slf.setattr("n", n)?;
-            slf.setattr("result", py.None())?;
+            slf.set_attr("n", n)?;
+            slf.set_attr("result", py.None())?;
             Ok(rt::none(py))
         })
     }
@@ -466,10 +467,10 @@ pub mod worker {
     pub fn run<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Worker.run", 144, |_| {
-            slf.setattr(
+            slf.set_attr(
                 "result",
                 rt::builtin(py, "sum")?
-                    .call1((rt::builtin(py, "range")?.call1((slf.getattr("n")?,))?,))?,
+                    .call1((rt::builtin(py, "range")?.call1((slf.attr("n")?,))?,))?,
             )?;
             Ok(rt::none(py))
         })
@@ -505,8 +506,8 @@ pub mod upper {
         rt::frame!(m, "Upper.__call__", 157, |_| {
             rt::builtin(py, "setattr")?.call1((
                 namespace,
-                slf.getattr("dest")?,
-                values.call_method0("upper")?,
+                slf.attr("dest")?,
+                values.method0("upper")?,
             ))?;
             Ok(rt::none(py))
         })
@@ -551,7 +552,7 @@ pub mod reversed {
         let py = m.py();
         rt::frame!(m, "Reversed.__init__", 167, |_| {
             rt::super_(__class__, slf)?
-                .getattr("__init__")?
+                .attr("__init__")?
                 .call1((rt::builtin(py, "reversed")?.call1((items,))?,))?;
             Ok(rt::none(py))
         })
@@ -565,7 +566,7 @@ pub mod reversed {
         item: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Reversed.append", 170, |_| {
-            rt::super_(__class__, slf)?.call_method1("insert", (0, item))?;
+            rt::super_(__class__, slf)?.method1("insert", (0, item))?;
             Ok(rt::none(m.py()))
         })
     }
@@ -622,11 +623,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "D",
             rt::class!(m, "D"(m.global("B")?, m.global("C")?), d::body, line = 25)?,
         )?;
-        let value = m.global("D")?.call0()?.call_method0("who")?;
+        let value = m.global("D")?.call0()?.method0("who")?;
         let list = PyList::empty(py);
-        for k in m.global("D")?.getattr("__mro__")?.try_iter()? {
+        for k in m.global("D")?.attr("__mro__")?.try_iter()? {
             let k = k?;
-            list.append(k.getattr("__name__")?)?;
+            list.append(k.attr("__name__")?)?;
             py.check_signals()?;
         }
         rt::builtins::print(py, (value, list))?;
@@ -642,7 +643,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "Color",
             rt::class!(
                 m,
-                "Color"(m.global("enum")?.getattr("Enum")?),
+                "Color"(m.global("enum")?.attr("Enum")?),
                 color::body,
                 line = 34
             )?,
@@ -650,20 +651,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Color")?.getattr("RED")?,
+                m.global("Color")?.attr("RED")?,
                 m.global("Color")?.call1((2,))?,
-                m.global("Color")?
-                    .getattr("BLUE")?
-                    .call_method0("describe")?,
-                m.global("Color")?.call_method0("default")?,
-                m.global("Color")?.getattr("RED")?.getattr("is_warm")?,
+                m.global("Color")?.attr("BLUE")?.method0("describe")?,
+                m.global("Color")?.method0("default")?,
+                m.global("Color")?.attr("RED")?.attr("is_warm")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
                 rt::builtin(py, "list")?.call1((m.global("Color")?,))?,
-                m.global("Color")?.get_item("BLUE")?.getattr("value")?,
+                m.global("Color")?.get_item("BLUE")?.attr("value")?,
                 m.global("Color")?.len()?,
             ),
         )?;
@@ -671,7 +670,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "Planet",
             rt::class!(
                 m,
-                "Planet"(m.global("enum")?.getattr("Enum")?),
+                "Planet"(m.global("enum")?.attr("Enum")?),
                 planet::body,
                 line = 55,
                 attributes = ["mass", "radius"]
@@ -680,15 +679,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Planet")?.getattr("EARTH")?.getattr("gravity")?,
-                m.global("Planet")?.getattr("MARS")?.getattr("gravity")?,
+                m.global("Planet")?.attr("EARTH")?.attr("gravity")?,
+                m.global("Planet")?.attr("MARS")?.attr("gravity")?,
             ),
         )?;
         m.set_global(
             "Flags",
             rt::class!(
                 m,
-                "Flags"(m.global("enum")?.getattr("IntFlag")?),
+                "Flags"(m.global("enum")?.attr("IntFlag")?),
                 flags::body,
                 line = 71
             )?,
@@ -697,16 +696,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("Flags")?
-                    .getattr("READ")?
-                    .bitor(m.global("Flags")?.getattr("WRITE")?)?,
-                rt::builtin(py, "int")?.call1((m.global("Flags")?.getattr("READ")?,))?,
+                    .attr("READ")?
+                    .bitor(m.global("Flags")?.attr("WRITE")?)?,
+                rt::builtin(py, "int")?.call1((m.global("Flags")?.attr("READ")?,))?,
             ),
         )?;
         m.set_global(
             "Shade",
             rt::class!(
                 m,
-                "Shade"(m.global("enum")?.getattr("Enum")?),
+                "Shade"(m.global("enum")?.attr("Enum")?),
                 shade::body,
                 line = 79
             )?,
@@ -714,8 +713,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Shade")?.call1((1,))?.getattr("label")?,
-                m.global("Shade")?.getattr("LIGHT")?.getattr("value")?,
+                m.global("Shade")?.call1((1,))?.attr("label")?,
+                m.global("Shade")?.attr("LIGHT")?.attr("value")?,
             ),
         )?;
         m.set_global(
@@ -733,10 +732,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("p")?,
-                m.global("p")?.call_method0("norm1")?,
-                m.global("Point")?.getattr("_fields")?,
+                m.global("p")?.method0("norm1")?,
+                m.global("Point")?.attr("_fields")?,
                 m.global("Point")?.call1((1,))?,
-                rt::call!(m.global("p")?.getattr("_replace")?, y = 1)?,
+                rt::call!(m.global("p")?.attr("_replace")?, y = 1)?,
             ),
         )?;
         m.set_global(
@@ -758,16 +757,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             (
                 m.global("m")?,
                 m.global("Movie")?
-                    .getattr("__required_keys__")?
+                    .attr("__required_keys__")?
                     .rich_compare(PySet::new(py, ["title", "year"])?, CompareOp::Eq)?,
-                m.global("Movie")?.getattr("__annotations__")?,
+                m.global("Movie")?.attr("__annotations__")?,
             ),
         )?;
         m.set_global(
             "Shape",
             rt::class!(
                 m,
-                "Shape"(m.global("abc")?.getattr("ABC")?),
+                "Shape"(m.global("abc")?.attr("ABC")?),
                 shape::body,
                 line = 114
             )?,
@@ -796,15 +795,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Square")?.call1((3,))?.call_method0("describe")?,
-                m.global("Shape")?.getattr("__abstractmethods__")?,
+                m.global("Square")?.call1((3,))?.method0("describe")?,
+                m.global("Shape")?.attr("__abstractmethods__")?,
             ),
         )?;
         m.set_global(
             "Worker",
             rt::class!(
                 m,
-                "Worker"(m.global("threading")?.getattr("Thread")?),
+                "Worker"(m.global("threading")?.attr("Thread")?),
                 worker::body,
                 line = 138,
                 attributes = ["n", "result"]
@@ -833,24 +832,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         for item in m.global("workers")?.try_iter()? {
             m.set_global("w", item?)?;
-            m.global("w")?.call_method0("start")?;
+            m.global("w")?.method0("start")?;
             py.check_signals()?;
         }
         for item2 in m.global("workers")?.try_iter()? {
             m.set_global("w", item2?)?;
-            m.global("w")?.call_method0("join")?;
+            m.global("w")?.method0("join")?;
             py.check_signals()?;
         }
         let list2 = PyList::empty(py);
         for w in m.global("workers")?.try_iter()? {
             let w = w?;
-            list2.append(w.getattr("result")?)?;
+            list2.append(w.attr("result")?)?;
             py.check_signals()?;
         }
         let list3 = PyList::empty(py);
         for w in m.global("workers")?.try_iter()? {
             let w = w?;
-            list3.append(w.getattr("name")?)?;
+            list3.append(w.attr("name")?)?;
             py.check_signals()?;
         }
         rt::builtins::print(py, (list2, list3))?;
@@ -858,27 +857,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "Upper",
             rt::class!(
                 m,
-                "Upper"(m.global("argparse")?.getattr("Action")?),
+                "Upper"(m.global("argparse")?.attr("Action")?),
                 upper::body,
                 line = 156
             )?,
         )?;
         m.set_global(
             "parser",
-            rt::call!(
-                m.global("argparse")?.getattr("ArgumentParser")?,
-                prog = "demo"
-            )?,
+            rt::call!(m.global("argparse")?.attr("ArgumentParser")?, prog = "demo")?,
         )?;
         rt::call!(
-            m.global("parser")?.getattr("add_argument")?,
+            m.global("parser")?.attr("add_argument")?,
             "--name",
             action = m.global("Upper")?
         )?;
         rt::builtins::print(
             py,
             (m.global("parser")?
-                .getattr("parse_args")?
+                .attr("parse_args")?
                 .call1((PyList::new(py, ["--name", "bob"])?,))?,),
         )?;
         m.set_global(
@@ -895,7 +891,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             m.global("Reversed")?
                 .call1((PyList::new(py, [1, 2, 3])?,))?,
         )?;
-        m.global("r")?.call_method1("append", (0,))?;
+        m.global("r")?.method1("append", (0,))?;
         rt::builtins::print(
             py,
             (

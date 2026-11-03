@@ -9,6 +9,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // json/decoder.py:63
 pub fn _decode_uXXXX<'py>(
@@ -21,7 +22,7 @@ pub fn _decode_uXXXX<'py>(
     rt::frame!(module, "_decode_uXXXX", 63, |frame| {
         let esc = _m.call1((s, pos.add(1)?))?;
         if !esc.is_none() {
-            match (|| rt::builtin(py, "int")?.call1((esc.call_method0("group")?, 16)))() {
+            match (|| rt::builtin(py, "int")?.call1((esc.method0("group")?, 16)))() {
                 Ok(value) => return Ok(value),
                 Err(err) if err.is_instance_of::<PyValueError>(py) => {}
                 Err(err) => return Err(err),
@@ -53,7 +54,7 @@ pub fn py_scanstring<'py>(
     rt::frame!(module, "py_scanstring", 73, |frame| {
         let mut end = end.clone();
         let chunks = PyList::empty(py).into_any();
-        let _append = chunks.getattr("append")?;
+        let _append = chunks.attr("append")?;
         let begin = end.sub(1)?;
         let mut chunk: Bound<'py, PyAny>;
         let mut content: Bound<'py, PyAny>;
@@ -72,8 +73,8 @@ pub fn py_scanstring<'py>(
                     &begin,
                 ))?));
             }
-            end = chunk.call_method0("end")?;
-            [content, terminator] = rt::unpack(&chunk.call_method0("groups")?)?;
+            end = chunk.method0("end")?;
+            [content, terminator] = rt::unpack(&chunk.method0("groups")?)?;
             // Content is contains zero or more unescaped string characters
             if content.is_truthy()? {
                 _append.call1((&content,))?;
@@ -86,7 +87,7 @@ pub fn py_scanstring<'py>(
                 if strict.is_truthy()? {
                     // msg = "Invalid control character %r at" % (terminator,)
                     msg = rt::str(py, "Invalid control character {0!r} at")
-                        .call_method1("format", (&terminator,))?;
+                        .method1("format", (&terminator,))?;
                     return Err(frame.raise(module.global("JSONDecodeError")?.call1((
                         &msg,
                         s,
@@ -119,8 +120,7 @@ pub fn py_scanstring<'py>(
                     Ok(value) => char = value,
                     Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                         let _handling = rt::Handling::new(&frame.catch(err));
-                        msg = rt::str(py, "Invalid \\escape: {0!r}")
-                            .call_method1("format", (&esc,))?;
+                        msg = rt::str(py, "Invalid \\escape: {0!r}").method1("format", (&esc,))?;
                         return Err(
                             frame.raise(module.global("JSONDecodeError")?.call1((&msg, s, &end))?)
                         );
@@ -152,11 +152,7 @@ pub fn py_scanstring<'py>(
             _append.call1((&char,))?;
             py.check_signals()?;
         }
-        Ok(PyTuple::new(
-            py,
-            [&rt::str(py, "").call_method1("join", (&chunks,))?, &end],
-        )?
-        .into_any())
+        Ok(PyTuple::new(py, [&rt::str(py, "").method1("join", (&chunks,))?, &end])?.into_any())
     })
 }
 
@@ -177,12 +173,12 @@ pub fn JSONObject<'py>(
         let mut memo = memo.clone();
         let [s, mut end] = rt::unpack(s_and_end)?;
         let mut pairs = PyList::empty(py).into_any();
-        let pairs_append = pairs.getattr("append")?;
+        let pairs_append = pairs.attr("append")?;
         // Backwards compatibility
         if memo.is_none() {
             memo = PyDict::new(py).into_any();
         }
-        let memo_get = memo.getattr("setdefault")?;
+        let memo_get = memo.attr("setdefault")?;
         // Use a slice to prevent IndexError from being raised, the following
         // check will raise a more specific ValueError if the string is empty
         let mut nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
@@ -190,7 +186,7 @@ pub fn JSONObject<'py>(
         // Normally we expect nextchar == '"'
         if nextchar.ne("\"")? {
             if _ws.contains(&nextchar)? {
-                end = _w.call1((&s, &end))?.call_method0("end")?;
+                end = _w.call1((&s, &end))?.method0("end")?;
                 nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
             }
             // Trivial empty object
@@ -222,7 +218,7 @@ pub fn JSONObject<'py>(
             // To skip some function call overhead we optimize the fast paths where
             // the JSON key separator is ": " or just ":".
             if s.get_item(rt::slice(py, &end, end.add(1)?)?)?.ne(":")? {
-                end = _w.call1((&s, &end))?.call_method0("end")?;
+                end = _w.call1((&s, &end))?.method0("end")?;
                 if s.get_item(rt::slice(py, &end, end.add(1)?)?)?.ne(":")? {
                     return Err(frame.raise(m.global("JSONDecodeError")?.call1((
                         "Expecting ':' delimiter",
@@ -236,7 +232,7 @@ pub fn JSONObject<'py>(
                 if _ws.contains(s.get_item(&end)?)? {
                     end = rt::iadd(&end, 1)?;
                     if _ws.contains(s.get_item(&end)?)? {
-                        end = _w.call1((&s, end.add(1)?))?.call_method0("end")?;
+                        end = _w.call1((&s, end.add(1)?))?.method0("end")?;
                     }
                 }
                 Ok(())
@@ -259,7 +255,7 @@ pub fn JSONObject<'py>(
                         m.global("JSONDecodeError")?.call1((
                             "Expecting value",
                             &s,
-                            err.getattr("value")?,
+                            err.attr("value")?,
                         ))?,
                         py.None(),
                     ));
@@ -270,7 +266,7 @@ pub fn JSONObject<'py>(
             match (|| -> PyResult<()> {
                 nextchar = s.get_item(&end)?;
                 if _ws.contains(&nextchar)? {
-                    end = _w.call1((&s, end.add(1)?))?.call_method0("end")?;
+                    end = _w.call1((&s, end.add(1)?))?.method0("end")?;
                     nextchar = s.get_item(&end)?;
                 }
                 Ok(())
@@ -290,7 +286,7 @@ pub fn JSONObject<'py>(
                 ))?));
             }
             comma_idx = end.sub(1)?;
-            end = _w.call1((&s, &end))?.call_method0("end")?;
+            end = _w.call1((&s, &end))?.method0("end")?;
             nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
             end = rt::iadd(&end, 1)?;
             if nextchar.ne("\"")? {
@@ -335,14 +331,14 @@ pub fn JSONArray<'py>(
         let values = PyList::empty(py).into_any();
         let mut nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
         if _ws.contains(&nextchar)? {
-            end = _w.call1((&s, end.add(1)?))?.call_method0("end")?;
+            end = _w.call1((&s, end.add(1)?))?.method0("end")?;
             nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
         }
         // Look-ahead for trivial empty array
         if nextchar.eq("]")? {
             return Ok(PyTuple::new(py, [&values, &end.add(1)?])?.into_any());
         }
-        let _append = values.getattr("append")?;
+        let _append = values.attr("append")?;
         let mut value: Option<Bound<'py, PyAny>> = None;
         let mut comma_idx: Bound<'py, PyAny>;
         loop {
@@ -360,7 +356,7 @@ pub fn JSONArray<'py>(
                         m.global("JSONDecodeError")?.call1((
                             "Expecting value",
                             &s,
-                            err.getattr("value")?,
+                            err.attr("value")?,
                         ))?,
                         py.None(),
                     ));
@@ -370,7 +366,7 @@ pub fn JSONArray<'py>(
             _append.call1((rt::local(&value, "value")?,))?;
             nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
             if _ws.contains(&nextchar)? {
-                end = _w.call1((&s, end.add(1)?))?.call_method0("end")?;
+                end = _w.call1((&s, end.add(1)?))?.method0("end")?;
                 nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
             }
             end = rt::iadd(&end, 1)?;
@@ -388,7 +384,7 @@ pub fn JSONArray<'py>(
                 if _ws.contains(s.get_item(&end)?)? {
                     end = rt::iadd(&end, 1)?;
                     if _ws.contains(s.get_item(&end)?)? {
-                        end = _w.call1((&s, end.add(1)?))?.call_method0("end")?;
+                        end = _w.call1((&s, end.add(1)?))?.method0("end")?;
                     }
                 }
                 nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
@@ -458,16 +454,16 @@ pub mod json_decode_error {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "JSONDecodeError.__init__", 34, |_| {
-            let lineno = doc.call_method1("count", ("\n", 0, pos))?.add(1)?;
-            let colno = pos.sub(doc.call_method1("rfind", ("\n", 0, pos))?)?;
+            let lineno = doc.method1("count", ("\n", 0, pos))?.add(1)?;
+            let colno = pos.sub(doc.method1("rfind", ("\n", 0, pos))?)?;
             let errmsg = rt::str(py, "%s: line %d column %d (char %d)")
                 .rem(PyTuple::new(py, [msg, &lineno, &colno, pos])?)?;
-            rt::builtin(py, "ValueError")?.call_method1("__init__", (slf, &errmsg))?;
-            slf.setattr("msg", msg)?;
-            slf.setattr("doc", doc)?;
-            slf.setattr("pos", pos)?;
-            slf.setattr("lineno", &lineno)?;
-            slf.setattr("colno", &colno)?;
+            rt::builtin(py, "ValueError")?.method1("__init__", (slf, &errmsg))?;
+            slf.set_attr("msg", msg)?;
+            slf.set_attr("doc", doc)?;
+            slf.set_attr("pos", pos)?;
+            slf.set_attr("lineno", &lineno)?;
+            slf.set_attr("colno", &colno)?;
             Ok(rt::none(py))
         })
     }
@@ -482,14 +478,10 @@ pub mod json_decode_error {
             Ok(PyTuple::new(
                 py,
                 [
-                    &slf.getattr("__class__")?,
+                    &slf.attr("__class__")?,
                     PyTuple::new(
                         py,
-                        [
-                            &slf.getattr("msg")?,
-                            &slf.getattr("doc")?,
-                            &slf.getattr("pos")?,
-                        ],
+                        [&slf.attr("msg")?, &slf.attr("doc")?, &slf.attr("pos")?],
                     )?
                     .as_any(),
                 ],
@@ -543,7 +535,7 @@ pub mod json_decoder {
 )?)?;
             ns.set("decode", rt::function!(
     ns,
-    decode(slf as "self", s, _w = ns.get("WHITESPACE")?.getattr("match")?),
+    decode(slf as "self", s, _w = ns.get("WHITESPACE")?.attr("match")?),
     qualname = "JSONDecoder.decode",
     doc = "Return the Python representation of ``s`` (a ``str`` instance\ncontaining a JSON document).\n\n"
 )?)?;
@@ -601,8 +593,8 @@ pub mod json_decoder {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "JSONDecoder.__init__", 295, |_| {
-            slf.setattr("object_hook", object_hook)?;
-            slf.setattr(
+            slf.set_attr("object_hook", object_hook)?;
+            slf.set_attr(
                 "parse_float",
                 if parse_float.is_truthy()? {
                     parse_float.clone()
@@ -610,7 +602,7 @@ pub mod json_decoder {
                     rt::builtin(py, "float")?
                 },
             )?;
-            slf.setattr(
+            slf.set_attr(
                 "parse_int",
                 if parse_int.is_truthy()? {
                     parse_int.clone()
@@ -618,23 +610,23 @@ pub mod json_decoder {
                     rt::builtin(py, "int")?
                 },
             )?;
-            slf.setattr(
+            slf.set_attr(
                 "parse_constant",
                 if parse_constant.is_truthy()? {
                     parse_constant.clone()
                 } else {
-                    m.global("_CONSTANTS")?.getattr("__getitem__")?
+                    m.global("_CONSTANTS")?.attr("__getitem__")?
                 },
             )?;
-            slf.setattr("strict", strict)?;
-            slf.setattr("object_pairs_hook", object_pairs_hook)?;
-            slf.setattr("parse_object", m.global("JSONObject")?)?;
-            slf.setattr("parse_array", m.global("JSONArray")?)?;
-            slf.setattr("parse_string", m.global("scanstring")?)?;
-            slf.setattr("memo", PyDict::new(py))?;
-            slf.setattr(
+            slf.set_attr("strict", strict)?;
+            slf.set_attr("object_pairs_hook", object_pairs_hook)?;
+            slf.set_attr("parse_object", m.global("JSONObject")?)?;
+            slf.set_attr("parse_array", m.global("JSONArray")?)?;
+            slf.set_attr("parse_string", m.global("scanstring")?)?;
+            slf.set_attr("memo", PyDict::new(py))?;
+            slf.set_attr(
                 "scan_once",
-                m.global("scanner")?.call_method1("make_scanner", (slf,))?,
+                m.global("scanner")?.method1("make_scanner", (slf,))?,
             )?;
             Ok(rt::none(py))
         })
@@ -652,11 +644,11 @@ pub mod json_decoder {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "JSONDecoder.decode", 343, |frame| {
             let [obj, mut end] = rt::unpack(&rt::call!(
-                slf.getattr("raw_decode")?,
+                slf.attr("raw_decode")?,
                 s,
-                idx = _w.call1((s, 0))?.call_method0("end")?
+                idx = _w.call1((s, 0))?.method0("end")?
             )?)?;
-            end = _w.call1((s, &end))?.call_method0("end")?;
+            end = _w.call1((s, &end))?.method0("end")?;
             if end.ne(s.len()?)? {
                 return Err(frame.raise(m.global("JSONDecodeError")?.call1((
                     "Extra data",
@@ -687,7 +679,7 @@ pub mod json_decoder {
             let mut obj: Option<Bound<'py, PyAny>> = None;
             let mut end: Option<Bound<'py, PyAny>> = None;
             match (|| -> PyResult<()> {
-                let [obj2, end2] = rt::unpack(&slf.call_method1("scan_once", (s, idx))?)?;
+                let [obj2, end2] = rt::unpack(&slf.method1("scan_once", (s, idx))?)?;
                 obj = Some(obj2);
                 end = Some(end2);
                 Ok(())
@@ -700,7 +692,7 @@ pub mod json_decoder {
                         m.global("JSONDecodeError")?.call1((
                             "Expecting value",
                             s,
-                            err.getattr("value")?,
+                            err.attr("value")?,
                         ))?,
                         py.None(),
                     ));
@@ -742,9 +734,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "FLAGS",
             m.global("re")?
-                .getattr("VERBOSE")?
-                .bitor(m.global("re")?.getattr("MULTILINE")?)?
-                .bitor(m.global("re")?.getattr("DOTALL")?)?,
+                .attr("VERBOSE")?
+                .bitor(m.global("re")?.attr("MULTILINE")?)?
+                .bitor(m.global("re")?.attr("DOTALL")?)?,
         )?;
         m.set_global("NaN", rt::builtin(py, "float")?.call1(("nan",))?)?;
         m.set_global("PosInf", rt::builtin(py, "float")?.call1(("inf",))?)?;
@@ -771,13 +763,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "HEXDIGITS",
             m.global("re")?
-                .getattr("compile")?
+                .attr("compile")?
                 .call1(("[0-9A-Fa-f]{4}", m.global("FLAGS")?))?,
         )?;
         m.set_global(
             "STRINGCHUNK",
             m.global("re")?
-                .getattr("compile")?
+                .attr("compile")?
                 .call1(("(.*?)([\"\\\\\\x00-\\x1f])", m.global("FLAGS")?))?,
         )?;
         m.set_global(
@@ -796,7 +788,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         rt::def!(
             m,
-            _decode_uXXXX(s, pos, _m = m.global("HEXDIGITS")?.getattr("match")?)
+            _decode_uXXXX(s, pos, _m = m.global("HEXDIGITS")?.attr("match")?)
         )?;
         rt::def!(
             m,
@@ -805,7 +797,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 end,
                 strict = true,
                 _b = m.global("BACKSLASH")?,
-                _m = m.global("STRINGCHUNK")?.getattr("match")?
+                _m = m.global("STRINGCHUNK")?.attr("match")?
             ),
             doc = "Scan the string s for a JSON string. End is the index of the\ncharacter in s after the quote that started the JSON string.\nUnescapes all valid JSON string escape sequences and raises ValueError\non attempt to decode an invalid string. If strict is False then literal\ncontrol characters are allowed in the string.\n\nReturns a tuple of the decoded string and the index of the character in s\nafter the end quote."
         )?;
@@ -824,7 +816,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global(
             "WHITESPACE",
             m.global("re")?
-                .getattr("compile")?
+                .attr("compile")?
                 .call1(("[ \\t\\n\\r]*", m.global("FLAGS")?))?,
         )?;
         m.set_global("WHITESPACE_STR", " \t\n\r")?;
@@ -837,7 +829,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 object_hook,
                 object_pairs_hook,
                 memo = py.None(),
-                _w = m.global("WHITESPACE")?.getattr("match")?,
+                _w = m.global("WHITESPACE")?.attr("match")?,
                 _ws = m.global("WHITESPACE_STR")?
             )
         )?;
@@ -846,7 +838,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             JSONArray(
                 s_and_end,
                 scan_once,
-                _w = m.global("WHITESPACE")?.getattr("match")?,
+                _w = m.global("WHITESPACE")?.attr("match")?,
                 _ws = m.global("WHITESPACE_STR")?
             )
         )?;

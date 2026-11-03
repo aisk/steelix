@@ -586,7 +586,10 @@ fn set_cause<'py>(exception: &Bound<'py, PyAny>, cause: Option<Bound<'py, PyAny>
 
 /// Looks up a special method such as `__enter__` on the type of `object`,
 /// bound to `object`, like CPython's `_PyObject_LookupSpecial`.
-fn special_method<'py>(object: &Bound<'py, PyAny>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+fn special_method<'py>(
+    object: &Bound<'py, PyAny>,
+    name: &'static str,
+) -> PyResult<Bound<'py, PyAny>> {
     if let Some(method) = lookup_special(object, name)? {
         return Ok(method);
     }
@@ -607,18 +610,20 @@ fn special_method<'py>(object: &Bound<'py, PyAny>, name: &str) -> PyResult<Bound
 
 fn lookup_special<'py>(
     object: &Bound<'py, PyAny>,
-    name: &str,
+    name: &'static str,
 ) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let py = object.py();
+    let name = crate::interned(py, name);
     let class = object.get_type();
     for base in class.mro() {
         let base = base.cast_into::<PyType>()?;
         // SAFETY: a type object; `PyType_GetDict` returns a new reference to
         // the type's own dict, not the read-only proxy.
-        let dict = unsafe {
-            Bound::from_owned_ptr(object.py(), ffi::PyType_GetDict(base.as_ptr().cast()))
-        };
+        let dict = unsafe { Bound::from_owned_ptr(py, ffi::PyType_GetDict(base.as_ptr().cast())) };
         if let Some(attr) = dict.cast_into::<PyDict>()?.get_item(name)? {
-            let get = attr.get_type().getattr_opt("__get__")?;
+            let get = attr
+                .get_type()
+                .getattr_opt(crate::interned(py, "__get__"))?;
             return match get {
                 Some(get) => get.call1((&attr, object, &class)).map(Some),
                 None => Ok(Some(attr)),

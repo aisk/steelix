@@ -100,11 +100,11 @@ impl<'py> Namespace<'py> {
         let py = self.py();
         let key = crate::interned(py, name);
         if let Ok(dict) = self.mapping.cast_exact::<PyDict>() {
-            if let Some(value) = dict.get_item(&key)? {
+            if let Some(value) = dict.get_item(key)? {
                 return Ok(value);
             }
         } else {
-            match self.mapping.get_item(&key) {
+            match self.mapping.get_item(key) {
                 Ok(value) => return Ok(value),
                 Err(err) if err.is_instance_of::<PyKeyError>(py) => {}
                 Err(err) => return Err(err),
@@ -154,9 +154,9 @@ impl<'py> Namespace<'py> {
         let py = self.py();
         let key = crate::interned(py, "__annotations__");
         let present = if let Ok(dict) = self.mapping.cast_exact::<PyDict>() {
-            dict.contains(&key)?
+            dict.contains(key)?
         } else {
-            match self.mapping.get_item(&key) {
+            match self.mapping.get_item(key) {
                 Ok(_) => true,
                 Err(err) if err.is_instance_of::<PyKeyError>(py) => false,
                 Err(err) => return Err(err),

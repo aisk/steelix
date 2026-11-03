@@ -12,11 +12,12 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // mixed_mode.py:9
 pub fn log<'py>(m: &rt::Module<'py>, event: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "log", 9, |_| {
-        m.global("events")?.call_method1("append", (event,))?;
+        m.global("events")?.method1("append", (event,))?;
         Ok(event.clone())
     })
 }
@@ -36,10 +37,10 @@ pub fn use_counter<'py>(
         let counter = m
             .global("Counter")?
             .call1((start,))?
-            .call_method0("bump")?
-            .call_method0("bump")?;
+            .method0("bump")?
+            .method0("bump")?;
         counter
-            .getattr("value")?
+            .attr("value")?
             .add(rt::builtin(m.py(), "sum")?.call1((m.global("evens")?.call1((5,))?,))?)
     })
 }
@@ -64,7 +65,7 @@ pub fn trace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bou
             m,
             &rt::fstring(
                 m.py(),
-                ("decorating ", rt::format(&r#fn.getattr("__name__")?, "")?),
+                ("decorating ", rt::format(&r#fn.attr("__name__")?, "")?),
             )?,
         )?;
         Ok(r#fn.clone())
@@ -107,7 +108,7 @@ pub mod counter {
         start: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Counter.__init__", 22, |_| {
-            slf.setattr("value", start)?;
+            slf.set_attr("value", start)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -116,7 +117,7 @@ pub mod counter {
     pub fn bump<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Counter.bump", 25, |_| {
             // A method calling a native function.
-            slf.setattr("value", double(m, &slf.getattr("value")?)?)?;
+            slf.set_attr("value", double(m, &slf.attr("value")?)?)?;
             Ok(slf.clone())
         })
     }
@@ -171,35 +172,30 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
         rt::builtins::print(
             py,
             (
-                m.global("Counter")?.getattr("__module__")?,
-                m.global("Counter")?
-                    .getattr("bump")?
-                    .getattr("__qualname__")?,
-                m.global("evens")?.getattr("__qualname__")?,
-                m.global("evens")?.getattr("__module__")?,
+                m.global("Counter")?.attr("__module__")?,
+                m.global("Counter")?.attr("bump")?.attr("__qualname__")?,
+                m.global("evens")?.attr("__qualname__")?,
+                m.global("evens")?.attr("__module__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("os")?
-                    .getattr("path")?
-                    .getattr("basename")?
-                    .call1((m
-                        .global("evens")?
-                        .getattr("__code__")?
-                        .getattr("co_filename")?,))?,
+                    .attr("path")?
+                    .attr("basename")?
+                    .call1((m.global("evens")?.attr("__code__")?.attr("co_filename")?,))?,
                 m.global("evens")?
-                    .getattr("__code__")?
-                    .getattr("co_firstlineno")?,
+                    .attr("__code__")?
+                    .attr("co_firstlineno")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (m.global("inspect")?
-                .getattr("getsource")?
+                .attr("getsource")?
                 .call1((m.global("evens")?,))?
-                .call_method0("splitlines")?
+                .method0("splitlines")?
                 .get_item(0)?,),
         )?;
         match (|| -> PyResult<()> {
@@ -216,7 +212,7 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
         rt::builtins::print(
             py,
             (m.global("json")?
-                .getattr("dumps")?
+                .attr("dumps")?
                 .call1(([("kept", true)].into_py_dict(py)?,))?,),
         )?;
         m.set_global("FLAG", true)?;

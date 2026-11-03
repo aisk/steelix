@@ -14,6 +14,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // classes_body.py:7
 pub fn show_tb<'py>(m: &rt::Module<'py>, err: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -22,15 +23,12 @@ pub fn show_tb<'py>(m: &rt::Module<'py>, err: &Bound<'py, PyAny>) -> PyResult<Bo
         let list = PyList::empty(py);
         for f in m
             .global("traceback")?
-            .getattr("extract_tb")?
-            .call1((err.getattr("__traceback__")?,))?
+            .attr("extract_tb")?
+            .call1((err.attr("__traceback__")?,))?
             .try_iter()?
         {
             let f = f?;
-            list.append(PyTuple::new(
-                py,
-                [&f.getattr("name")?, &f.getattr("lineno")?],
-            )?)?;
+            list.append(PyTuple::new(py, [&f.attr("name")?, &f.attr("lineno")?])?)?;
             py.check_signals()?;
         }
         Ok(list.into_any())
@@ -61,7 +59,7 @@ pub mod body_ {
             ns.set("names", PyList::empty(py))?;
             if ns
                 .get("sys")?
-                .getattr("version_info")?
+                .attr("version_info")?
                 .ge(PyTuple::new(py, [3, 0])?)?
             {
                 ns.set(
@@ -97,9 +95,7 @@ pub mod body_ {
                 ns.set("handle", value)?;
                 ns.set(
                     "first",
-                    ns.get("handle")?
-                        .call_method0("readline")?
-                        .call_method0("strip")?,
+                    ns.get("handle")?.method0("readline")?.method0("strip")?,
                 )?;
                 Ok(())
             })?;
@@ -134,7 +130,7 @@ pub mod body_ {
                 slf: &Bound<'py, PyAny>,
             ) -> PyResult<Bound<'py, PyAny>> {
                 rt::frame!(m, "Body.<lambda>", 46, |_| {
-                    rt::str(m.py(), "lambda ").add(slf.get_type().getattr("__name__")?)
+                    rt::str(m.py(), "lambda ").add(slf.get_type().attr("__name__")?)
                 })
             }
             ns.set(
@@ -147,7 +143,7 @@ pub mod body_ {
                 "used",
                 ns.get("shadow")?.call1((PyList::new(py, [1, 2])?,))?,
             )?;
-            ns.set("builtin", ns.get("print")?.getattr("__name__")?)?;
+            ns.set("builtin", ns.get("print")?.attr("__name__")?)?;
             if !ns.get("total")?.eq(6)? {
                 return Err(frame.raise(PyAssertionError::new_err("total")));
             }
@@ -209,9 +205,9 @@ pub mod generic {
             rt::fstring(
                 m.py(),
                 (
-                    rt::format(&cls.getattr("__name__")?, "")?,
+                    rt::format(&cls.attr("__name__")?, "")?,
                     "[",
-                    rt::format(&item.getattr("__name__")?, "")?,
+                    rt::format(&item.attr("__name__")?, "")?,
                     "]",
                 ),
             )
@@ -225,7 +221,7 @@ pub mod generic {
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Generic.__init_subclass__", 65, |_| {
-            cls.setattr("created", true)?;
+            cls.set_attr("created", true)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -277,8 +273,8 @@ pub mod new {
         args: &Bound<'py, PyTuple>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "New.__new__", 77, |_| {
-            rt::builtins::print(m.py(), ("new", cls.getattr("__name__")?, args))?;
-            rt::super_(__class__, cls)?.call_method1("__new__", (cls,))
+            rt::builtins::print(m.py(), ("new", cls.attr("__name__")?, args))?;
+            rt::super_(__class__, cls)?.method1("__new__", (cls,))
         })
     }
 
@@ -289,7 +285,7 @@ pub mod new {
         value: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "New.__init__", 81, |_| {
-            slf.setattr("value", value)?;
+            slf.set_attr("value", value)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -451,9 +447,7 @@ pub mod uses {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Uses.__getattr__", 125, |_| {
-            name.call_method0("upper")
-        })
+        rt::frame!(m, "Uses.__getattr__", 125, |_| { name.method0("upper") })
     }
 
     // classes_body.py:128
@@ -466,7 +460,7 @@ pub mod uses {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Uses.__setattr__", 128, |_| {
             rt::super_(__class__, slf)?
-                .getattr("__setattr__")?
+                .attr("__setattr__")?
                 .call1((name, value.mul(2)?))?;
             Ok(rt::none(m.py()))
         })
@@ -530,46 +524,44 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Body")?.getattr("total")?,
-                m.global("Body")?.getattr("i")?,
+                m.global("Body")?.attr("total")?,
+                m.global("Body")?.attr("i")?,
                 m.global("Body")?
-                    .getattr("version")?
+                    .attr("version")?
                     .call1((m.global("b")?,))?,
-                m.global("Body")?.getattr("caught")?,
-                m.global("Body")?.getattr("cleanup")?,
-                m.global("Body")?.getattr("first")?,
+                m.global("Body")?.attr("caught")?,
+                m.global("Body")?.attr("cleanup")?,
+                m.global("Body")?.attr("first")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Body")?.getattr("name_error")?,
-                m.global("Body")?.getattr("squares")?,
-                m.global("Body")?.getattr("x")?,
-                m.global("Body")?.getattr("y")?,
-                m.global("b")?.call_method0("label")?,
-                m.global("Body")?.getattr("used")?,
-                m.global("Body")?.getattr("len")?,
+                m.global("Body")?.attr("name_error")?,
+                m.global("Body")?.attr("squares")?,
+                m.global("Body")?.attr("x")?,
+                m.global("Body")?.attr("y")?,
+                m.global("b")?.method0("label")?,
+                m.global("Body")?.attr("used")?,
+                m.global("Body")?.attr("len")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("Body")?
-                    .getattr("paths")?
-                    .call_method1("join", ("a", "b"))?,
-                m.global("Body")?.call_method1("root", (16,))?,
-                m.global("Body")?.getattr("builtin")?,
+                    .attr("paths")?
+                    .method1("join", ("a", "b"))?,
+                m.global("Body")?.method1("root", (16,))?,
+                m.global("Body")?.attr("builtin")?,
                 rt::builtin(py, "hasattr")?.call1((m.global("Body")?, "err"))?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Body")?
-                    .getattr("label")?
-                    .getattr("__qualname__")?,
-                m.global("Body")?.getattr("__static_attributes__")?,
+                m.global("Body")?.attr("label")?.attr("__qualname__")?,
+                m.global("Body")?.attr("__static_attributes__")?,
             ),
         )?;
         m.set_global(
@@ -584,12 +576,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("Generic")?.get_item(rt::builtin(py, "int")?)?,
-                m.global("Sub")?.getattr("created")?,
+                m.global("Sub")?.attr("created")?,
                 m.global("Generic")?
-                    .getattr("__dict__")?
+                    .attr("__dict__")?
                     .get_item("__class_getitem__")?
                     .get_type()
-                    .getattr("__name__")?,
+                    .attr("__name__")?,
             ),
         )?;
         m.set_global(
@@ -599,12 +591,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("New")?.call1((3,))?.getattr("value")?,
+                m.global("New")?.call1((3,))?.attr("value")?,
                 m.global("New")?
-                    .getattr("__dict__")?
+                    .attr("__dict__")?
                     .get_item("__new__")?
                     .get_type()
-                    .getattr("__name__")?,
+                    .attr("__name__")?,
             ),
         )?;
         // classes_body.py:88, kept as Python: class definition in a function at 89:5
@@ -659,21 +651,21 @@ def failing_body():
             py,
             (
                 m.global("Annotated")?
-                    .getattr("method")?
-                    .getattr("__annotations__")?,
+                    .attr("method")?
+                    .attr("__annotations__")?,
                 m.global("Annotated")?
-                    .getattr("kept")?
-                    .getattr("__annotations__")?,
+                    .attr("kept")?
+                    .attr("__annotations__")?,
             ),
         )?;
         m.set_global("Uses", rt::class!(m, "Uses"(), uses::body, line = 124)?)?;
         m.set_global("u", m.global("Uses")?.call0()?)?;
-        m.global("u")?.setattr("v", 2)?;
+        m.global("u")?.set_attr("v", 2)?;
         rt::builtins::print(
             py,
             (
-                m.global("u")?.getattr("v")?,
-                m.global("u")?.getattr("missing")?,
+                m.global("u")?.attr("v")?,
+                m.global("u")?.attr("missing")?,
                 m.global("u")?.contains("x")?,
                 m.global("u")?.rich_compare(m.global("u")?, CompareOp::Lt)?,
                 rt::builtin(py, "sorted")?

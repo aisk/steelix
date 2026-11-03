@@ -6,22 +6,23 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // except_bad_type.py:6
 pub fn report<'py>(m: &rt::Module<'py>, error: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "report", 6, |_| {
-        let mut tb = error.getattr("__traceback__")?;
-        while !tb.getattr("tb_next")?.is_none() {
-            tb = tb.getattr("tb_next")?;
+        let mut tb = error.attr("__traceback__")?;
+        while !tb.attr("tb_next")?.is_none() {
+            tb = tb.attr("tb_next")?;
             py.check_signals()?;
         }
         rt::builtins::print(
             py,
             (
-                error.get_type().getattr("__name__")?,
-                error.getattr("__context__")?.repr()?,
-                tb.getattr("tb_lineno")?,
+                error.get_type().attr("__name__")?,
+                error.attr("__context__")?.repr()?,
+                tb.attr("tb_lineno")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -71,10 +72,7 @@ pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             rt::frame!(m, "handled_while_testing.<locals>.pick", 30, |_| {
                 rt::builtins::print(
                     py,
-                    (
-                        "handling",
-                        m.global("sys")?.call_method0("exception")?.repr()?,
-                    ),
+                    ("handling", m.global("sys")?.method0("exception")?.repr()?),
                 )?;
                 rt::builtin(py, "ValueError")
             })
@@ -89,7 +87,7 @@ pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             }
             Err(err) => return Err(err),
         }
-        rt::builtins::print(py, ("after", m.global("sys")?.call_method0("exception")?))?;
+        rt::builtins::print(py, ("after", m.global("sys")?.method0("exception")?))?;
         Ok(rt::none(py))
     })
 }
@@ -142,7 +140,7 @@ pub fn class_in_a_local<'py>(
             }
             py.check_signals()?;
         }
-        Ok(PyTuple::new(py, [&caught, &ignored.getattr("__name__")?])?.into_any())
+        Ok(PyTuple::new(py, [&caught, &ignored.attr("__name__")?])?.into_any())
     })
 }
 
@@ -209,7 +207,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Ok(_) => {}
             Err(err)
                 if frame.matches(&err, 1, || {
-                    Ok(if m.global("sys")?.getattr("argv")?.len()? > 5 {
+                    Ok(if m.global("sys")?.attr("argv")?.len()? > 5 {
                         rt::builtin(py, "IndexError")?
                     } else {
                         rt::float(py, 3.5)

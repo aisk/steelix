@@ -524,7 +524,7 @@ class StmtLowering(HandlingLowering):
                     v, o = exprs.in_rust_order(
                         exprs.operands([value, obj]), [1, 0], ["value", "obj"]
                     )
-                    setter = o.method("setattr", rs.StrLit(attr), v.arg())
+                    setter = o.method("set_attr", rs.StrLit(attr), v.arg())
                     return [_try_stmt(setter)]
                 case ast.Tuple(elts) | ast.List(elts) if _same_shape(elts, value):
                     # `a, b = b, a`: no tuple to build and unpack again.
@@ -563,7 +563,7 @@ class StmtLowering(HandlingLowering):
                 return [_try_stmt(o.method("set_item", i.arg(), value.arg()))]
             case ast.Attribute(obj, attr):
                 o = exprs.value(obj)
-                setter = o.method("setattr", rs.StrLit(attr), value.arg())
+                setter = o.method("set_attr", rs.StrLit(attr), value.arg())
                 return [_try_stmt(setter)]
             case ast.Tuple(elts) | ast.List(elts):
                 return self.unpack(stmt, elts, value, declare)
@@ -681,11 +681,11 @@ class StmtLowering(HandlingLowering):
                 return [_try_stmt(o.method("set_item", i.arg(), result))]
             case ast.Attribute(obj, attr):
                 o = exprs.hoist(exprs.value(obj), "target")
-                getter = o.method("getattr", rs.StrLit(attr))
+                getter = o.method("attr", rs.StrLit(attr))
                 current = Value(rs.Try(getter), Kind.OWNED, base=attr)
                 current, rhs = exprs.operands([value], [current])
                 result = rs.Try(_rt(helper, current.ref(), rhs.arg()))
-                return [_try_stmt(o.method("setattr", rs.StrLit(attr), result))]
+                return [_try_stmt(o.method("set_attr", rs.StrLit(attr), result))]
         raise self.ctx.unsupported(type(target).__name__, target)
 
     def delete(self, target: ast.expr) -> list[rs.Stmt]:
@@ -707,7 +707,7 @@ class StmtLowering(HandlingLowering):
                 return [_try_stmt(o.method("del_item", i.arg()))]
             case ast.Attribute(obj, attr):
                 o = exprs.value(obj)
-                return [_try_stmt(o.method("delattr", rs.StrLit(attr)))]
+                return [_try_stmt(o.method("del_attr", rs.StrLit(attr)))]
             case ast.Tuple(elts) | ast.List(elts):
                 out: list[rs.Stmt] = []
                 for elt in elts:

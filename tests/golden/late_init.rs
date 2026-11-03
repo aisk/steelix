@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // late_init.py:18
 pub fn sign<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -90,7 +91,7 @@ pub fn lifetimes<'py>(
             m.global("Tracked")?.call1(("else",))?
         };
         rt::builtins::print(m.py(), ("holding", &held))?;
-        held.getattr("name")
+        held.attr("name")
     })
 }
 
@@ -180,7 +181,7 @@ pub mod tracked {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Tracked.__init__", 7, |_| {
-            slf.setattr("name", name)?;
+            slf.set_attr("name", name)?;
             rt::builtins::print(py, ("new", name))?;
             Ok(rt::none(py))
         })
@@ -193,7 +194,7 @@ pub mod tracked {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Tracked.__del__", 11, |_| {
-            rt::builtins::print(py, ("del", slf.getattr("name")?))?;
+            rt::builtins::print(py, ("del", slf.attr("name")?))?;
             Ok(rt::none(py))
         })
     }
@@ -206,7 +207,7 @@ pub mod tracked {
         rt::frame!(m, "Tracked.__repr__", 14, |_| {
             rt::fstring(
                 m.py(),
-                ("Tracked(", rt::format(&slf.getattr("name")?, "")?, ")"),
+                ("Tracked(", rt::format(&slf.attr("name")?, "")?, ")"),
             )
         })
     }

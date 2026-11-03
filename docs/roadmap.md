@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅。
 
 ## M0 项目骨架 ✅
 
@@ -241,6 +241,20 @@ M9 第一项提前做，并且改成默认行为。
 - [x] 修复：复数字面量（`rt::complex`，用例 `complex_constants`），clippy 的 `collapsible_if`（用例 `nested_if`）和 `module_inception` 在 crate 根上 allow
 - [x] `tests/projects/skime`：原样副本加驱动脚本和 Scheme 程序，和 CPython 比较，不做 golden（生成的 Rust 有 1.5 万行）
 - 发现的主要问题是性能：解释器这类小函数密集的程序比 CPython 慢 6 倍，原因是 Python 调用原生函数的开销（没有 vectorcall）和属性名没有 intern（只改后者就快 1.8 倍）。下一步的建议按优先级排在 `m10-skime.md` 第 10 节
+
+## M11 低成本的性能改进 ✅
+
+M10 发现解释器这类小函数密集的程序比 CPython 慢 6 倍。只做不改变语义、不影响生成代码可读性的改进，复杂的不做。详细的设计在 §6 "调用的开销"，数字在 `m10-skime.md` 第 7 节。
+
+- [x] `Function` 支持 vectorcall（PEP 590），在创建第一个函数时补到类型对象上（PyO3 的 `#[pyclass]` 不能声明）。`__call__` 保留，两条路径共用一个绑定函数，报错文字不变。入口经过 PyO3 的 trampoline（错误、panic、attach 计数），并且自己检查递归深度（CPython 在 vectorcall 之前不检查）
+- [x] 只有位置参数的函数用位置参数调用时不做绑定，直接把参数数组传给函数体，参数少于形参时从调用时的 `__defaults__` 补上
+- [x] `Py_TPFLAGS_METHOD_DESCRIPTOR`：`obj.m()` 不再创建 bound method，取属性 `obj.m` 照样得到 bound method
+- [x] 属性名驻留：生成代码用 `rt::Attributes` 的 `attr`/`set_attr`/`del_attr`/`method0`/`method1` 代替 PyO3 的 `getattr`/`setattr`/`delattr`/`call_method0`/`call_method1`，写法一样短，名字是 `'static` 的字面量，runtime 每个名字只建一次驻留字符串（§4）。`m.global`、`rt::builtin` 的缓存改成按地址索引、读取不加锁的表，`rt::call!` 的关键字参数、`with` 的特殊方法查找、`*args` 展开里的 `list.extend` 也用它
+- [x] 用例 `call_protocols`：各种调用路径（vectorcall、`f.__call__`、`type(f).__call__`、bound method、`classmethod`/`staticmethod`、`super()`、`functools.partial`/`partialmethod`）、快速路径的边界（参数个数不对、调用时改 `__defaults__`、比形参多的 `__defaults__`）、关键字参数和 `**kwargs`、经过 Python 调用的递归、新线程里异常对象的释放时机
+- [x] 测量：skime fib 22（release）从 2.93 s 到 1.10 s（CPython 0.48 s），skime 自己的 108 个测试对 ext 模式的原生包从 0.40 s 到 0.24 s（CPython 0.16 s），单次调用的数字见 `m10-skime.md`
+- 没有做：参数不纯时的方法调用仍然先建 bound method（要在 runtime 里重写 `_PyObject_GetMethod`），`rt::call!` 的关键字参数仍然先建 dict，字符串常量不缓存，全局变量的 dict watcher 缓存（§7）
+
+golden 里属性和方法调用的写法都变了（`slf.getattr("x")?` 变成 `slf.attr("x")?`），rustfmt 合并了一些行，已有用例的 golden 少了约 100 行。
 
 ## 以后再说
 

@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // conditional_defs.py:32
 pub fn top<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -101,9 +102,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     Ok(PyTuple::new(
                         m.py(),
                         [
-                            &m.global("helper")?.getattr("__qualname__")?,
-                            &m.global("helper")?.getattr("__doc__")?,
-                            &m.global("helper")?.getattr("__module__")?,
+                            &m.global("helper")?.attr("__qualname__")?,
+                            &m.global("helper")?.attr("__doc__")?,
+                            &m.global("helper")?.attr("__module__")?,
                         ],
                     )?
                     .into_any())
@@ -132,7 +133,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             (
                 m.global("f")?.call0()?,
                 g(m)?,
-                m.global("f")?.getattr("__qualname__")?,
+                m.global("f")?.attr("__qualname__")?,
             ),
         )?;
         Ok(())

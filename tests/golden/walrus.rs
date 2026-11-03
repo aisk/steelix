@@ -5,6 +5,7 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // walrus.py:5
 pub fn trace<'py>(
@@ -48,7 +49,7 @@ pub fn in_while<'py>(
             if item.is_none() {
                 break;
             }
-            out.getattr("append")?.call1((&item,))?;
+            out.attr("append")?.call1((&item,))?;
             py.check_signals()?;
         }
         Ok(PyTuple::new(py, [&out, &item])?.into_any())
@@ -169,7 +170,7 @@ pub fn maybe_unbound<'py>(
             Err(err) if err.is_instance_of::<PyUnboundLocalError>(py) => {
                 let exc = frame.catch(err);
                 let _handling = rt::Handling::new(&exc);
-                exc.get_type().getattr("__name__")
+                exc.get_type().attr("__name__")
             }
             Err(err) => Err(err),
         }

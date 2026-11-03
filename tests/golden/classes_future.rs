@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod meta {
     use super::*;
@@ -42,7 +43,7 @@ pub mod meta {
                 py.check_signals()?;
             }
             rt::builtins::print(py, (name, list))?;
-            rt::super_(__class__, mcls)?.call_method1("__new__", (mcls, name, bases, ns))
+            rt::super_(__class__, mcls)?.method1("__new__", (mcls, name, bases, ns))
         })
     }
 }
@@ -169,22 +170,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Config")?.getattr("__annotations__")?,
-                m.global("Config")?.getattr("name")?,
-                m.global("Config")?.getattr("ratio")?,
+                m.global("Config")?.attr("__annotations__")?,
+                m.global("Config")?.attr("name")?,
+                m.global("Config")?.attr("ratio")?,
                 m.global("Config")?
-                    .getattr("scaled")?
-                    .getattr("__annotations__")?,
+                    .attr("scaled")?
+                    .attr("__annotations__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (m.global("typing")?
-                .getattr("get_type_hints")?
+                .attr("get_type_hints")?
                 .call1((m.global("Config")?,))?,),
         )?;
         {
-            let dataclass = m.global("dataclasses")?.getattr("dataclass")?;
+            let dataclass = m.global("dataclasses")?.attr("dataclass")?;
             let pair = rt::class!(m, "Pair"(), pair::body, line = 31)?;
             m.set_global("Pair", dataclass.call1((pair,))?)?;
         }
@@ -192,7 +193,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (
                 m.global("Pair")?.call1((1,))?,
-                m.global("Pair")?.getattr("__annotations__")?,
+                m.global("Pair")?.attr("__annotations__")?,
             ),
         )?;
         m.set_global(
@@ -202,10 +203,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("Private")?.getattr("__annotations__")?,
-                m.global("Private")?
-                    .getattr("f")?
-                    .getattr("__annotations__")?,
+                m.global("Private")?.attr("__annotations__")?,
+                m.global("Private")?.attr("f")?.attr("__annotations__")?,
             ),
         )?;
         Ok(())

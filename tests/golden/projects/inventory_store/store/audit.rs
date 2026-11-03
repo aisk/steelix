@@ -5,6 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // store/audit.py:20
 pub fn record<'py>(
@@ -15,15 +16,15 @@ pub fn record<'py>(
     let py = m.py();
     rt::frame!(m, "record", 20, |frame| {
         m.global("LOG")?
-            .getattr("append")?
-            .call1((PyTuple::new(py, [action, &item.getattr("name")?])?,))?;
+            .attr("append")?
+            .call1((PyTuple::new(py, [action, &item.attr("name")?])?,))?;
         if m.global("LOG")?.len()? > 3 {
             m.global("LOG")?.del_item(0)?;
         }
         // The module is complete by now.
         if !m
             .global("inventory")?
-            .getattr("Inventory")?
+            .attr("Inventory")?
             .is_instance(&rt::builtin(py, "type")?)?
         {
             return Err(frame.raise(PyAssertionError::new_err(())));
@@ -58,9 +59,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     py,
                     (
                         "store.audit:",
-                        m.global("err")?.str()?.getattr("replace")?.call1((
+                        m.global("err")?.str()?.attr("replace")?.call1((
                             m.global("__file__")?
-                                .call_method1("rsplit", ("/", 2))?
+                                .method1("rsplit", ("/", 2))?
                                 .get_item(0)?,
                             "<dir>",
                         ))?,
@@ -70,7 +71,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        match (|| m.global("inventory")?.getattr("Inventory"))() {
+        match (|| m.global("inventory")?.attr("Inventory"))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyAttributeError>(py) => {
                 let exception = frame.catch(err);

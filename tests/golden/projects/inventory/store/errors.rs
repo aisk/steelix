@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyImportError;
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 pub mod store_error {
     use super::*;
@@ -43,13 +44,13 @@ pub mod out_of_stock {
         let py = m.py();
         rt::frame!(m, "OutOfStock.__init__", 9, |_| {
             rt::super_(__class__, slf)?
-                .getattr("__init__")?
+                .attr("__init__")?
                 .call1((if false {
                     rt::fstring(py, ("only ", name.repr()?, " left"))?
                 } else {
                     rt::fstring(py, ("not enough ", rt::format(name, "")?))?
                 },))?;
-            slf.setattr("wanted", wanted)?;
+            slf.set_attr("wanted", wanted)?;
             Ok(rt::none(py))
         })
     }

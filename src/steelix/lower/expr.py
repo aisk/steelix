@@ -413,7 +413,7 @@ class ExprLowering(ComprehensionLowering):
                 return self.function_value(expr, lower_nested(self.ctx, expr))
             case ast.Attribute(obj, attr):
                 inner = self.value(obj)
-                call = inner.method("getattr", rs.StrLit(attr))
+                call = inner.method("attr", rs.StrLit(attr))
                 return Value(_try(call), Kind.OWNED)
             case ast.Subscript(obj, index):
                 container, key = self.operands([obj, index])
@@ -894,7 +894,7 @@ class ExprLowering(ComprehensionLowering):
             # `o.m(..)` looks the method up first.
             def method() -> Value:
                 obj = self.value(func.value)
-                getattr_ = obj.method("getattr", rs.StrLit(func.attr))
+                getattr_ = obj.method("attr", rs.StrLit(func.attr))
                 return Value(_try(getattr_), Kind.OWNED, base=func.attr)
 
             first: Operand = method
@@ -919,20 +919,20 @@ class ExprLowering(ComprehensionLowering):
         return Value(_try(macro), Kind.OWNED)
 
     def method_call(self, func: ast.Attribute, args: list[ast.expr]) -> Value:
-        """`o.m(args)`: `call_method1` when that keeps Python's order, which
+        """`o.m(args)`: `method1` when that keeps Python's order, which
         looks the method up before evaluating the arguments."""
         obj = self.value(func.value)
         start = len(self.prelude)
-        getattr_ = obj.method("getattr", rs.StrLit(func.attr))
+        getattr_ = obj.method("attr", rs.StrLit(func.attr))
         method = Value(_try(getattr_), Kind.OWNED, base=func.attr)
         callee, *values = self.operands(list(args), [method])
         if len(self.prelude) == start and all(v.is_pure for v in values):
             name = rs.StrLit(func.attr)
             if values:
                 tuple_ = rs.Tuple(tuple(v.arg() for v in values))
-                call = obj.method("call_method1", name, tuple_)
+                call = obj.method("method1", name, tuple_)
             else:
-                call = obj.method("call_method0", name)
+                call = obj.method("method0", name)
             return Value(_try(call), Kind.OWNED)
         return self.call_value(callee, values)
 

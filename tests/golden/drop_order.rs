@@ -2,6 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // drop_order.py:14
 pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -14,9 +15,9 @@ pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py,
             (
                 "straight",
-                a.getattr("name")?,
-                b.getattr("name")?,
-                c.getattr("name")?,
+                a.attr("name")?,
+                b.attr("name")?,
+                c.attr("name")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -30,7 +31,7 @@ pub fn reassigned<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<B
         let mut x = x.clone();
         let y = m.global("T")?.call1(("y",))?;
         x = m.global("T")?.call1(("x",))?;
-        rt::builtins::print(py, ("reassigned", x.getattr("name")?, y.getattr("name")?))?;
+        rt::builtins::print(py, ("reassigned", x.attr("name")?, y.attr("name")?))?;
         Ok(rt::none(py))
     })
 }
@@ -51,19 +52,14 @@ pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bou
         let b = m.global("T")?.call1(("b",))?;
         let c = if n.gt(2)? {
             m.global("T")?
-                .call1((rt::str(py, "c-").add(a.getattr("name")?)?,))?
+                .call1((rt::str(py, "c-").add(a.attr("name")?)?,))?
         } else {
             rt::builtins::print(py, ("no c yet",))?;
             m.global("T")?.call1(("c-small",))?
         };
         rt::builtins::print(
             py,
-            (
-                "end",
-                a.getattr("name")?,
-                b.getattr("name")?,
-                c.getattr("name")?,
-            ),
+            ("end", a.attr("name")?, b.attr("name")?, c.attr("name")?),
         )?;
         Ok(rt::none(py))
     })
@@ -88,9 +84,9 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Boun
             py,
             (
                 "loop",
-                first.getattr("name")?,
-                rt::local(&last, "last")?.getattr("name")?,
-                after.getattr("name")?,
+                first.attr("name")?,
+                rt::local(&last, "last")?.attr("name")?,
+                after.attr("name")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -115,9 +111,9 @@ pub fn without_else<'py>(
                 py,
                 (
                     "without else",
-                    head.getattr("name")?,
-                    rt::local(&maybe, "maybe")?.getattr("name")?,
-                    tail.getattr("name")?,
+                    head.attr("name")?,
+                    rt::local(&maybe, "maybe")?.attr("name")?,
+                    tail.attr("name")?,
                 ),
             )?;
         }
@@ -144,7 +140,7 @@ pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bo
             Err(err) => return Err(err),
         };
         let extra = m.global("T")?.call1(("extra",))?;
-        rt::builtins::print(py, ("try", value.getattr("name")?, extra.getattr("name")?))?;
+        rt::builtins::print(py, ("try", value.attr("name")?, extra.attr("name")?))?;
         Ok(rt::none(py))
     })
 }
@@ -179,7 +175,7 @@ pub mod t {
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "T.__init__", 7, |_| {
-            slf.setattr("name", name)?;
+            slf.set_attr("name", name)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -191,7 +187,7 @@ pub mod t {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "T.__del__", 10, |_| {
-            rt::builtins::print(py, ("del", slf.getattr("name")?))?;
+            rt::builtins::print(py, ("del", slf.attr("name")?))?;
             Ok(rt::none(py))
         })
     }

@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // literal_defaults.py:4
 pub fn greet<'py>(
@@ -18,7 +19,7 @@ pub fn greet<'py>(
         if sep.is_none() {
             sep = rt::str(py, " ");
         }
-        sep.getattr("join")?
+        sep.attr("join")?
             .call1((PyList::new(py, [&text])?.mul(times)?,))
     })
 }
@@ -45,7 +46,7 @@ pub fn remember<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "remember", 15, |_| {
         // A mutable default is still read from the function object.
-        seen.call_method1("append", (item,))?;
+        seen.method1("append", (item,))?;
         Ok(seen.clone())
     })
 }
@@ -133,9 +134,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("greet")?.getattr("__defaults__")?,
-                m.global("greet")?.getattr("__kwdefaults__")?,
-                m.global("scaled")?.getattr("__defaults__")?,
+                m.global("greet")?.attr("__defaults__")?,
+                m.global("greet")?.attr("__kwdefaults__")?,
+                m.global("scaled")?.attr("__defaults__")?,
             ),
         )?;
         Ok(())

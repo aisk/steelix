@@ -4,19 +4,20 @@ use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use pyo3::types::PySet;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // app.py:44
 pub fn build<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "build", 44, |_| {
         let inventory = m.global("Inventory")?.call0()?;
         inventory
-            .getattr("add")?
+            .attr("add")?
             .call1((m.global("Item")?.call1(("apple", 3, 10))?,))?;
         inventory
-            .getattr("add")?
+            .attr("add")?
             .call1((m.global("Discounted")?.call1(("pear", 10, 4, 25))?,))?;
-        inventory.getattr("add")?.call1((rt::call!(
-            m.global("store")?.getattr("items")?.getattr("Perishable")?,
+        inventory.attr("add")?.call1((rt::call!(
+            m.global("store")?.attr("items")?.attr("Perishable")?,
             "milk",
             2,
             5,
@@ -33,7 +34,7 @@ pub fn shop<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "shop", 52, |frame| {
-        match inventory.call_method1("take", ("pear", 10)) {
+        match inventory.method1("take", ("pear", 10)) {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 52, || m.global("OutOfStock"))? => {
                 let err = frame.catch(err);
@@ -42,16 +43,16 @@ pub fn shop<'py>(
                     py,
                     (
                         "app: caught",
-                        err.get_type().getattr("__module__")?,
-                        err.get_type().getattr("__qualname__")?,
+                        err.get_type().attr("__module__")?,
+                        err.get_type().attr("__qualname__")?,
                         &err,
-                        err.getattr("wanted")?,
+                        err.attr("wanted")?,
                     ),
                 )?;
             }
             Err(err2) => return Err(err2),
         }
-        match inventory.call_method1("take", ("plum", 1)) {
+        match inventory.method1("take", ("plum", 1)) {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 52, || m.global("StoreError"))? => {
                 let err = frame.catch(err);
@@ -60,14 +61,14 @@ pub fn shop<'py>(
                     py,
                     (
                         "app: caught base class",
-                        err.get_type().getattr("__name__")?,
+                        err.get_type().attr("__name__")?,
                         &err,
                     ),
                 )?;
             }
             Err(err2) => return Err(err2),
         }
-        inventory.call_method1("take", ("apple", 4))?;
+        inventory.method1("take", ("apple", 4))?;
         Ok(rt::none(py))
     })
 }
@@ -82,28 +83,28 @@ pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let name = name?;
             plugin = m
                 .global("importlib")?
-                .getattr("import_module")?
+                .attr("import_module")?
                 .call1((rt::str(py, "plugins.").add(&name)?,))?;
             rt::builtins::print(
                 py,
                 (
                     "app: plugin",
-                    plugin.getattr("__name__")?,
-                    plugin.call_method0("run")?,
-                    plugin.getattr("__loader__")?.getattr("name")?,
+                    plugin.attr("__name__")?,
+                    plugin.method0("run")?,
+                    plugin.attr("__loader__")?.attr("name")?,
                 ),
             )?;
             py.check_signals()?;
         }
         let r#static = m
             .global("importlib")?
-            .call_method1("import_module", ("plugins.static",))?;
+            .method1("import_module", ("plugins.static",))?;
         rt::builtins::print(
             py,
             (
                 "app: plugin",
-                r#static.getattr("__name__")?,
-                r#static.call_method0("run")?,
+                r#static.attr("__name__")?,
+                r#static.method0("run")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -118,26 +119,26 @@ pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py,
             (
                 "app: shared state",
-                m.global("config")?.getattr("settings")?,
-                m.global("config")?.call_method0("bump")?,
-                m.global("config")?.call_method0("bump")?,
+                m.global("config")?.attr("settings")?,
+                m.global("config")?.method0("bump")?,
+                m.global("config")?.method0("bump")?,
             ),
         )?;
         m.global("config")?
-            .getattr("settings")?
+            .attr("settings")?
             .set_item("currency", "USD")?;
         rt::builtins::print(
             py,
             (
                 "app: label after change",
                 m.global("store")?
-                    .getattr("items")?
-                    .getattr("label")?
+                    .attr("items")?
+                    .attr("label")?
                     .call1((m.global("Item")?.call1(("fig", 7, 1))?,))?,
             ),
         )?;
         // Replacing a function of another module: its direct callers see it.
-        let original = m.global("store")?.getattr("items")?.getattr("fmt_price")?;
+        let original = m.global("store")?.attr("items")?.attr("fmt_price")?;
         // app.py:79
         fn lambda<'py>(
             m: &rt::Module<'py>,
@@ -149,32 +150,32 @@ pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         let value = rt::function!(m, lambda(price), qualname = "state.<locals>.<lambda>")?;
         m.global("store")?
-            .getattr("items")?
-            .setattr("fmt_price", value)?;
+            .attr("items")?
+            .set_attr("fmt_price", value)?;
         rt::builtins::print(
             py,
             (
                 "app: patched",
                 m.global("store")?
-                    .getattr("items")?
-                    .getattr("label")?
+                    .attr("items")?
+                    .attr("label")?
                     .call1((m.global("Item")?.call1(("fig", 7, 1))?,))?,
             ),
         )?;
         m.global("store")?
-            .getattr("items")?
-            .setattr("fmt_price", &original)?;
+            .attr("items")?
+            .set_attr("fmt_price", &original)?;
         let reloaded = m
             .global("importlib")?
-            .getattr("reload")?
+            .attr("reload")?
             .call1((m.global("config")?,))?;
         rt::builtins::print(
             py,
             (
                 "app: reloaded",
                 reloaded.is(m.global("config")?),
-                m.global("config")?.getattr("counter")?,
-                m.global("config")?.getattr("settings")?,
+                m.global("config")?.attr("counter")?,
+                m.global("config")?.attr("settings")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -191,8 +192,8 @@ pub fn lazy<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py,
             (
                 "app: after lazy import",
-                lazy.getattr("VALUE")?,
-                lazy.getattr("app_is_main")?,
+                lazy.attr("VALUE")?,
+                lazy.attr("app_is_main")?,
             ),
         )?;
         Ok(rt::none(py))
@@ -218,8 +219,8 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py,
             (
                 "app: legacy",
-                legacy.call_method0("where")?,
-                legacy.getattr("__loader__")?.getattr("name")?,
+                legacy.method0("where")?,
+                legacy.attr("__loader__")?.attr("name")?,
             ),
         )?;
         // app.py:104
@@ -231,7 +232,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(module, "main.<locals>.<genexpr>", 104, |_| {
                 for m in modules {
                     let m = m?;
-                    let item = m.call_method1("split", (".",))?.get_item(0)?;
+                    let item = m.method1("split", (".",))?.get_item(0)?;
                     if PySet::new(py, ["store", "plugins", "config", "lazy", "app"])?
                         .contains(&item)?
                     {
@@ -248,18 +249,18 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 "app: modules",
                 rt::builtin(py, "sorted")?.call1((rt::genexpr!(
                     m,
-                    genexpr(m.global("sys")?.getattr("modules")?.try_iter()?),
+                    genexpr(m.global("sys")?.attr("modules")?.try_iter()?),
                     qualname = "main.<locals>.<genexpr>"
                 )?,))?,
             ),
         )?;
         if m.global("sys")?
-            .getattr("argv")?
+            .attr("argv")?
             .get_item(rt::slice(py, 1, py.None())?)?
             .eq(PyList::new(py, ["crash"])?)?
         {
             inventory
-                .getattr("add")?
+                .attr("add")?
                 .call1((m.global("Item")?.call1(("bad", 1, -1))?,))?;
             rt::builtins::print(py, (m.global("render")?.call1((&inventory,))?,))?;
         }
@@ -308,8 +309,8 @@ pub mod discounted {
         percent: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Discounted.__init__", 36, |_| {
-            rt::super_(__class__, slf)?.call_method1("__init__", (name, price, quantity))?;
-            slf.setattr("percent", percent)?;
+            rt::super_(__class__, slf)?.method1("__init__", (name, price, quantity))?;
+            slf.set_attr("percent", percent)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -322,8 +323,8 @@ pub mod discounted {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Discounted.unit_price", 40, |_| {
             rt::super_(__class__, slf)?
-                .call_method0("unit_price")?
-                .mul(rt::int(m.py(), 100).sub(slf.getattr("percent")?)?)?
+                .method0("unit_price")?
+                .mul(rt::int(m.py(), 100).sub(slf.attr("percent")?)?)?
                 .floor_div(100)
         })
     }
@@ -378,9 +379,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     py,
                     (
                         "app: missing name:",
-                        m.global("err")?.str()?.getattr("replace")?.call1((
+                        m.global("err")?.str()?.attr("replace")?.call1((
                             m.global("__file__")?
-                                .call_method1("rsplit", ("/", 1))?
+                                .method1("rsplit", ("/", 1))?
                                 .get_item(0)?,
                             "<dir>",
                         ))?,

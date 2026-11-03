@@ -6,6 +6,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // bool_locals.py:26
 pub fn find<'py>(
@@ -62,7 +63,7 @@ pub fn flags<'py>(
                         rt::format(&rt::bool(py, f), "")?,
                     ),
                 )?,
-                rt::bool(py, g).get_type().getattr("__name__")?,
+                rt::bool(py, g).get_type().attr("__name__")?,
                 rt::bool(py, h).rich_compare(1, CompareOp::Eq)?,
             ),
         )?;
@@ -90,7 +91,7 @@ pub fn not_bools<'py>(m: &rt::Module<'py>, w: &Bound<'py, PyAny>) -> PyResult<Bo
         rt::builtins::print(
             py,
             (if mixed.is_truthy()? {
-                mixed.getattr("name")?
+                mixed.attr("name")?
             } else {
                 mixed.clone()
             },),
@@ -298,7 +299,7 @@ pub mod weird {
                     qualname = "Weird.__contains__"
                 )?,
             )?;
-            ns.set("__hash__", ns.get("object")?.getattr("__hash__")?)?;
+            ns.set("__hash__", ns.get("object")?.attr("__hash__")?)?;
             Ok(())
         })
     }
@@ -310,7 +311,7 @@ pub mod weird {
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Weird.__init__", 7, |_| {
-            slf.setattr("name", name)?;
+            slf.set_attr("name", name)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -325,7 +326,7 @@ pub mod weird {
             rt::fstring(
                 m.py(),
                 (
-                    rt::format(&slf.getattr("name")?, "")?,
+                    rt::format(&slf.attr("name")?, "")?,
                     " == ",
                     rt::format(other, "")?,
                 ),
@@ -340,7 +341,7 @@ pub mod weird {
         other: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Weird.__lt__", 13, |_| {
-            Ok(PyList::new(m.py(), [&slf.getattr("name")?, other])?.into_any())
+            Ok(PyList::new(m.py(), [&slf.attr("name")?, other])?.into_any())
         })
     }
 
@@ -351,7 +352,7 @@ pub mod weird {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Weird.__bool__", 16, |_| {
-            rt::builtins::print(py, ("bool of", slf.getattr("name")?))?;
+            rt::builtins::print(py, ("bool of", slf.attr("name")?))?;
             Ok(rt::bool(py, true))
         })
     }

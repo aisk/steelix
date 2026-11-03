@@ -6,25 +6,26 @@ use pyo3::types::PyList;
 use pyo3::types::PySet;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // comprehensions.py:9
 pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "show", 9, |_| {
         m.global("print")?
-            .call1((m.global("type")?.call1((exc,))?.getattr("__name__")?, exc))?;
+            .call1((m.global("type")?.call1((exc,))?.attr("__name__")?, exc))?;
         for frame_ in m
             .global("traceback")?
-            .getattr("extract_tb")?
-            .call1((exc.getattr("__traceback__")?,))?
+            .attr("extract_tb")?
+            .call1((exc.attr("__traceback__")?,))?
             .try_iter()?
         {
             let frame_ = frame_?;
             m.global("print")?.call1((
                 " ",
-                frame_.getattr("name")?,
-                frame_.getattr("lineno")?,
-                frame_.getattr("line")?,
+                frame_.attr("name")?,
+                frame_.attr("lineno")?,
+                frame_.attr("line")?,
             ))?;
             py.check_signals()?;
         }
@@ -51,7 +52,7 @@ pub fn evens<'py>(m: &rt::Module<'py>, d: &Bound<'py, PyAny>) -> PyResult<Bound<
     let py = m.py();
     rt::frame!(m, "evens", 19, |_| {
         let dict = PyDict::new(py);
-        for item in d.call_method0("items")?.try_iter()? {
+        for item in d.method0("items")?.try_iter()? {
             let [k, v] = rt::unpack(&item?)?;
             if v.rem(2)?.eq(0)? {
                 dict.set_item(&k, &v)?;
@@ -71,7 +72,7 @@ pub fn letters<'py>(m: &rt::Module<'py>, words: &Bound<'py, PyAny>) -> PyResult<
             let w = w?;
             for c in w.try_iter()? {
                 let c = c?;
-                if c.call_method0("isalpha")?.is_truthy()? && c.ne("z")? {
+                if c.method0("isalpha")?.is_truthy()? && c.ne("z")? {
                     set.add(&c)?;
                 }
                 py.check_signals()?;
@@ -144,15 +145,15 @@ pub fn unpacking<'py>(
 pub fn attribute_target<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "attribute_target", 40, |_| {
-        let r#box = m.global("types")?.call_method0("SimpleNamespace")?;
+        let r#box = m.global("types")?.method0("SimpleNamespace")?;
         let list = PyList::empty(py);
         for item in m.global("range")?.call1((3,))?.try_iter()? {
-            r#box.setattr("value", item?)?;
-            list.append(r#box.getattr("value")?)?;
+            r#box.set_attr("value", item?)?;
+            list.append(r#box.attr("value")?)?;
             py.check_signals()?;
         }
         let values = list.into_any();
-        Ok(PyTuple::new(py, [&values, &r#box.getattr("value")?])?.into_any())
+        Ok(PyTuple::new(py, [&values, &r#box.attr("value")?])?.into_any())
     })
 }
 
@@ -593,10 +594,7 @@ pub mod derived {
         let py = m.py();
         rt::frame!(m, "Derived.values", 149, |_| {
             let list = PyList::empty(py);
-            for v in rt::super_(__class__, slf)?
-                .call_method0("items")?
-                .try_iter()?
-            {
+            for v in rt::super_(__class__, slf)?.method0("items")?.try_iter()? {
                 let v = v?;
                 list.append(v.mul(2)?)?;
                 py.check_signals()?;
@@ -604,7 +602,7 @@ pub mod derived {
             let list2 = PyList::empty(py);
             for underscore in rt::str(py, "x").try_iter()? {
                 let underscore = underscore?;
-                list2.append(__class__.get()?.getattr("__name__")?)?;
+                list2.append(__class__.get()?.attr("__name__")?)?;
                 py.check_signals()?;
             }
             list.add(&list2)
@@ -621,7 +619,7 @@ pub mod derived {
             let list = PyList::empty(py);
             for underscore in m.global("range")?.call1((2,))?.try_iter()? {
                 let underscore = underscore?;
-                list.append(slf.call_method0("_Derived__secret")?)?;
+                list.append(slf.method0("_Derived__secret")?)?;
                 py.check_signals()?;
             }
             Ok(list.into_any())
@@ -639,7 +637,7 @@ pub mod derived {
             let list = PyList::empty(py);
             for underscore in rt::str(py, "x").try_iter()? {
                 let underscore = underscore?;
-                list.append(rt::super_(__class__, slf)?.call_method0("items")?)?;
+                list.append(rt::super_(__class__, slf)?.method0("items")?)?;
                 py.check_signals()?;
             }
             Ok(list.into_any())
@@ -777,15 +775,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) => return Err(err),
         }
         m.global("print")?.call1((
-            m.global("Config")?.getattr("doubled")?,
-            m.global("Config")?.getattr("names")?,
-            m.global("Config")?.getattr("size")?,
+            m.global("Config")?.attr("doubled")?,
+            m.global("Config")?.attr("names")?,
+            m.global("Config")?.attr("size")?,
         ))?;
         m.set_global("d", m.global("Derived")?.call0()?)?;
         m.global("print")?.call1((
-            m.global("d")?.call_method0("values")?,
-            m.global("d")?.call_method0("secrets")?,
-            m.global("d")?.call_method0("supers")?,
+            m.global("d")?.method0("values")?,
+            m.global("d")?.method0("secrets")?,
+            m.global("d")?.method0("supers")?,
         ))?;
         let list = PyList::empty(py);
         for n in m.global("range")?.call1((3,))?.try_iter()? {

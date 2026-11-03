@@ -4,6 +4,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // defaults.py:4
 pub fn greet<'py>(
@@ -56,7 +57,7 @@ pub fn append_to<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "append_to", 18, |_| {
         // The default list is created once and shared by every call.
-        bucket.call_method1("append", (item,))?;
+        bucket.method1("append", (item,))?;
         Ok(bucket.clone())
     })
 }
@@ -185,18 +186,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("collect")?.getattr("__defaults__")?,
-                m.global("collect")?.getattr("__kwdefaults__")?,
-                m.global("greet")?.getattr("__kwdefaults__")?,
+                m.global("collect")?.attr("__defaults__")?,
+                m.global("collect")?.attr("__kwdefaults__")?,
+                m.global("greet")?.attr("__kwdefaults__")?,
             ),
         )?;
         // Defaults are read from the function object at call time.
         let value = PyTuple::new(py, ["Howdy"])?;
-        m.global("greet")?.setattr("__defaults__", value)?;
+        m.global("greet")?.set_attr("__defaults__", value)?;
         let value = [("punct", "?!")].into_py_dict(py)?;
-        m.global("greet")?.setattr("__kwdefaults__", value)?;
+        m.global("greet")?.set_attr("__kwdefaults__", value)?;
         let value = PyTuple::new(py, [3])?;
-        m.global("scale")?.setattr("__defaults__", value)?;
+        m.global("scale")?.set_attr("__defaults__", value)?;
         rt::builtins::print(
             py,
             (
@@ -210,15 +211,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 scale(m, &rt::int(py, 2), &m.default("scale", "factor")?)?,
             ),
         )?;
-        m.global("greet")?.setattr("__kwdefaults__", py.None())?;
+        m.global("greet")?.set_attr("__kwdefaults__", py.None())?;
         rt::builtins::print(
             py,
             (
-                m.global("greet")?.getattr("__kwdefaults__")?,
-                m.global("keyword_only")?.getattr("__defaults__")?,
+                m.global("greet")?.attr("__kwdefaults__")?,
+                m.global("keyword_only")?.attr("__defaults__")?,
             ),
         )?;
-        rt::builtins::print(py, (m.global("append_to")?.getattr("__defaults__")?,))?;
+        rt::builtins::print(py, (m.global("append_to")?.attr("__defaults__")?,))?;
         Ok(())
     })
 }

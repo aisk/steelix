@@ -161,8 +161,8 @@ def test_method_lookup_happens_before_arguments() -> None:
             o.m(g())
         """
     )
-    assert 'o.call_method1("m", (x, 1))?;' in out
-    assert 'o.getattr("m")?.call1((g.call0()?,))?;' in out
+    assert 'o.method1("m", (x, 1))?;' in out
+    assert 'o.attr("m")?.call1((g.call0()?,))?;' in out
 
 
 def test_augmented_assignment_evaluates_target_parts_once() -> None:
@@ -177,7 +177,7 @@ def test_augmented_assignment_evaluates_target_parts_once() -> None:
     )
     assert "let index = g.call0()?;" in out
     assert "a.set_item(&index, rt::iadd(&a.get_item(&index)?, v)?)?;" in out
-    assert 'a.setattr("x", rt::isub(&a.getattr("x")?, v)?)?;' in out
+    assert 'a.set_attr("x", rt::isub(&a.attr("x")?, v)?)?;' in out
     assert "n = rt::imul(&n, v)?;" in out
 
 
@@ -269,8 +269,8 @@ def test_local_named_m_keeps_its_name() -> None:
         """
     )
     assert "module: &rt::Module<'py>," in out
-    assert 'let m = module\n            .global("re")?' in out
-    assert 'm.call_method1("group", (0,))' in out
+    assert 'let m = module.global("re")?' in out
+    assert 'm.method1("group", (0,))' in out
 
 
 def test_literal_defaults_are_passed_in_place() -> None:
@@ -400,7 +400,7 @@ def test_module_level_if_keeps_only_unsupported_children() -> None:
             print(ys)
         """
     )
-    assert 'if m.global("sys")?.getattr("argv")?.len()? > 1 {' in out
+    assert 'if m.global("sys")?.attr("argv")?.len()? > 1 {' in out
     assert 'm.set_global("x", 1)?;' in out
     assert 'rt::builtins::print(m.py(), (m.global("ys")?,))?;' in out
     # Indented as in the file.

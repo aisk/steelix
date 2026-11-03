@@ -3,6 +3,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // loops.py:4
 pub fn find<'py>(
@@ -88,7 +89,7 @@ pub fn pairs<'py>(m: &rt::Module<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<
     let py = m.py();
     rt::frame!(m, "pairs", 40, |_| {
         let mut total = rt::int(py, 0);
-        for item in mapping.call_method0("items")?.try_iter()? {
+        for item in mapping.method0("items")?.try_iter()? {
             let [key, value] = rt::unpack(&item?)?;
             rt::builtins::print(py, (&key, &value))?;
             total = total.add(&value)?;

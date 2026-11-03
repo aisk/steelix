@@ -9,6 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // try_except.py:13
 pub fn parse<'py>(m: &rt::Module<'py>, s: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -55,14 +56,14 @@ pub fn describe<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<B
     rt::frame!(m, "describe", 28, |frame| {
         frame.line(29);
         m.global("print")?.call1((
-            m.global("type")?.call1((exc,))?.getattr("__name__")?,
-            exc.getattr("args")?,
+            m.global("type")?.call1((exc,))?.attr("__name__")?,
+            exc.attr("args")?,
             "cause:",
-            m.global("repr")?.call1((exc.getattr("__cause__")?,))?,
+            m.global("repr")?.call1((exc.attr("__cause__")?,))?,
             "context:",
-            m.global("repr")?.call1((exc.getattr("__context__")?,))?,
+            m.global("repr")?.call1((exc.attr("__context__")?,))?,
             "suppress:",
-            exc.getattr("__suppress_context__")?,
+            exc.attr("__suppress_context__")?,
         ))?;
         Ok(rt::none(m.py()))
     })
@@ -129,13 +130,13 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
                     frame.line(52);
                     m.global("print")?.call1((
                         "caught",
-                        m.global("type")?.call1((&e,))?.getattr("__name__")?,
-                        e.getattr("args")?,
+                        m.global("type")?.call1((&e,))?.attr("__name__")?,
+                        e.attr("args")?,
                     ))?;
                     frame.line(53);
                     m.global("print")?.call1((
                         "sys.exception() is e:",
-                        m.global("sys")?.call_method0("exception")?.is(&e),
+                        m.global("sys")?.method0("exception")?.is(&e),
                     ))?;
                     Ok(rt::str(py, "other"))
                 }
@@ -239,7 +240,7 @@ pub fn reraise<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 frame.line(90);
-                e.setattr("args", PyTuple::new(py, ["changed"])?)?;
+                e.set_attr("args", PyTuple::new(py, ["changed"])?)?;
                 frame.line(91);
                 return Err(frame.reraise());
             }
@@ -363,7 +364,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "handled_state", 137, |frame| {
         frame.line(138);
         m.global("print")?
-            .call1(("outside:", m.global("sys")?.call_method0("exception")?))?;
+            .call1(("outside:", m.global("sys")?.method0("exception")?))?;
         frame.line(140);
         match (|| m.global("risky")?.call1(("value",)))() {
             Ok(_) => {}
@@ -373,7 +374,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 m.global("print")?.call1((
                     "inside:",
                     m.global("repr")?
-                        .call1((m.global("sys")?.call_method0("exception")?,))?,
+                        .call1((m.global("sys")?.method0("exception")?,))?,
                 ))?;
                 frame.line(144);
                 match (|| m.global("risky")?.call1(("key",)))() {
@@ -384,7 +385,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                         m.global("print")?.call1((
                             "nested:",
                             m.global("repr")?
-                                .call1((m.global("sys")?.call_method0("exception")?,))?,
+                                .call1((m.global("sys")?.method0("exception")?,))?,
                         ))?;
                     }
                     Err(err) => return Err(err),
@@ -393,14 +394,14 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 m.global("print")?.call1((
                     "back:",
                     m.global("repr")?
-                        .call1((m.global("sys")?.call_method0("exception")?,))?,
+                        .call1((m.global("sys")?.method0("exception")?,))?,
                 ))?;
             }
             Err(err) => return Err(err),
         }
         frame.line(148);
         m.global("print")?
-            .call1(("after:", m.global("sys")?.call_method0("exception")?))?;
+            .call1(("after:", m.global("sys")?.method0("exception")?))?;
         Ok(rt::none(m.py()))
     })
 }
@@ -493,7 +494,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
                     "from handler:",
                     m.global("repr")?.call1((&e,))?,
                     "context:",
-                    m.global("repr")?.call1((e.getattr("__context__")?,))?,
+                    m.global("repr")?.call1((e.attr("__context__")?,))?,
                 ))?;
             }
             Err(err) => return Err(err),
@@ -728,7 +729,7 @@ def name_after_handler():
                 let _handling = rt::Handling::new(&exception);
                 frame.line(252);
                 m.global("print")?
-                    .call1(("reraised", m.global("e")?.getattr("args")?))?;
+                    .call1(("reraised", m.global("e")?.attr("args")?))?;
                 m.unbind_global("e")?;
             }
             Err(err) => return Err(err),
@@ -792,8 +793,8 @@ def name_after_handler():
                     "module level",
                     m.global("type")?
                         .call1((m.global("e")?,))?
-                        .getattr("__name__")?,
-                    m.global("e")?.getattr("args")?,
+                        .attr("__name__")?,
+                    m.global("e")?.attr("args")?,
                 ))?;
                 m.unbind_global("e")?;
             }

@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // module_names.py:4
 pub fn m_<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -69,10 +70,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("f", m.global("m")?)?;
         m.global("print")?.call1((
             m.global("f")?.call1((10,))?,
-            m.global("m")?.getattr("__name__")?,
-            m.global("py")?.getattr("__name__")?,
-            m.global("exec_module")?.getattr("__name__")?,
-            m.global("module")?.getattr("__name__")?,
+            m.global("m")?.attr("__name__")?,
+            m.global("py")?.attr("__name__")?,
+            m.global("exec_module")?.attr("__name__")?,
+            m.global("module")?.attr("__name__")?,
         ))?;
         Ok(())
     })

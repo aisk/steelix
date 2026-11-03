@@ -12,6 +12,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // tracebacks.py:12
 pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -19,8 +20,8 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
     rt::frame!(m, "show", 12, |_| {
         for frame_ in m
             .global("traceback")?
-            .getattr("extract_tb")?
-            .call1((exc.getattr("__traceback__")?,))?
+            .attr("extract_tb")?
+            .call1((exc.attr("__traceback__")?,))?
             .try_iter()?
         {
             let frame_ = frame_?;
@@ -28,9 +29,9 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
                 py,
                 (
                     " ",
-                    frame_.getattr("name")?,
-                    frame_.getattr("lineno")?,
-                    frame_.getattr("line")?,
+                    frame_.attr("name")?,
+                    frame_.attr("lineno")?,
+                    frame_.attr("line")?,
                 ),
             )?;
             py.check_signals()?;
@@ -54,11 +55,7 @@ pub fn no_carets<'py>(
             rt::frame!(m, "no_carets.<locals>.<genexpr>", 19, |_| {
                 for line in iter {
                     let line = line?;
-                    if line
-                        .call_method0("strip")?
-                        .call_method1("strip", ("^~",))?
-                        .ne("")?
-                    {
+                    if line.method0("strip")?.method1("strip", ("^~",))?.ne("")? {
                         return Ok(Some(line));
                     }
                     m.py().check_signals()?;
@@ -66,8 +63,8 @@ pub fn no_carets<'py>(
                 Ok(None)
             })
         }
-        let join = rt::str(m.py(), "\n").getattr("join")?;
-        let iter = text.call_method0("splitlines")?.try_iter()?;
+        let join = rt::str(m.py(), "\n").attr("join")?;
+        let iter = text.method0("splitlines")?.try_iter()?;
         join.call1((rt::genexpr!(
             m,
             genexpr(iter),
@@ -242,9 +239,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("logging", rt::import(m, "logging")?)?;
         m.set_global("sys", rt::import(m, "sys")?)?;
         m.set_global("traceback", rt::import(m, "traceback")?)?;
-        m.set_global("log_output", m.global("io")?.call_method0("StringIO")?)?;
+        m.set_global("log_output", m.global("io")?.method0("StringIO")?)?;
         rt::call!(
-            m.global("logging")?.getattr("basicConfig")?,
+            m.global("logging")?.attr("basicConfig")?,
             stream = m.global("log_output")?,
             format = "%(levelname)s %(message)s"
         )?;
@@ -280,23 +277,16 @@ def kept_middle(values, key):
                 m.set_global("e", &exception)?;
                 let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
-                m.set_global("out", m.global("io")?.call_method0("StringIO")?)?;
+                m.set_global("out", m.global("io")?.method0("StringIO")?)?;
                 rt::call!(
-                    m.global("traceback")?.getattr("print_exc")?,
+                    m.global("traceback")?.attr("print_exc")?,
                     file = m.global("out")?
                 )?;
+                rt::builtins::print(py, (no_carets(m, &m.global("out")?.method0("getvalue")?)?,))?;
+                m.global("logging")?.method1("exception", ("logged",))?;
                 rt::builtins::print(
                     py,
-                    (no_carets(m, &m.global("out")?.call_method0("getvalue")?)?,),
-                )?;
-                m.global("logging")?
-                    .call_method1("exception", ("logged",))?;
-                rt::builtins::print(
-                    py,
-                    (no_carets(
-                        m,
-                        &m.global("log_output")?.call_method0("getvalue")?,
-                    )?,),
+                    (no_carets(m, &m.global("log_output")?.method0("getvalue")?)?,),
                 )?;
                 m.unbind_global("e")?;
             }
@@ -338,15 +328,15 @@ def kept_middle(values, key):
                     let exception = frame.catch(err);
                     m.set_global("e", &exception)?;
                     let _handling = rt::Handling::new(&exception);
-                    m.set_global("out", m.global("io")?.call_method0("StringIO")?)?;
+                    m.set_global("out", m.global("io")?.method0("StringIO")?)?;
                     rt::call!(
-                        m.global("traceback")?.getattr("print_exception")?,
+                        m.global("traceback")?.attr("print_exception")?,
                         m.global("e")?,
                         file = m.global("out")?
                     )?;
                     rt::builtins::print(
                         py,
-                        (no_carets(m, &m.global("out")?.call_method0("getvalue")?)?,),
+                        (no_carets(m, &m.global("out")?.method0("getvalue")?)?,),
                     )?;
                     m.unbind_global("e")?;
                 }

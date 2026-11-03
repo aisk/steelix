@@ -3,6 +3,7 @@ use pyo3::types::IntoPyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // app.py:23
 /// Which functions came from `_json`.
@@ -12,24 +13,24 @@ pub fn accelerated<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             (
                 "scanner",
                 m.global("scanner")?
-                    .getattr("make_scanner")?
-                    .is(m.global("scanner")?.getattr("c_make_scanner")?),
+                    .attr("make_scanner")?
+                    .is(m.global("scanner")?.attr("c_make_scanner")?),
             ),
             (
                 "scanstring",
                 m.global("decoder")?
-                    .getattr("scanstring")?
-                    .is(m.global("decoder")?.getattr("c_scanstring")?),
+                    .attr("scanstring")?
+                    .is(m.global("decoder")?.attr("c_scanstring")?),
             ),
             (
                 "encode_basestring_ascii",
                 m.global("encoder")?
-                    .getattr("encode_basestring_ascii")?
-                    .is(m.global("encoder")?.getattr("c_encode_basestring_ascii")?),
+                    .attr("encode_basestring_ascii")?
+                    .is(m.global("encoder")?.attr("c_encode_basestring_ascii")?),
             ),
             (
                 "make_encoder",
-                !m.global("encoder")?.getattr("c_make_encoder")?.is_none(),
+                !m.global("encoder")?.attr("c_make_encoder")?.is_none(),
             ),
         ]
         .into_py_dict(m.py())?
@@ -43,27 +44,27 @@ pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "roundtrips", 35, |_| {
         let value = m
             .global("json")?
-            .getattr("loads")?
+            .attr("loads")?
             .call1((m.global("DOC")?,))?;
         m.global("print")?.call1((&value,))?;
         m.global("print")?
-            .call1((m.global("json")?.call_method1("dumps", (&value,))?,))?;
+            .call1((m.global("json")?.method1("dumps", (&value,))?,))?;
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("dumps")?,
+            m.global("json")?.attr("dumps")?,
             &value,
             sort_keys = true,
             ensure_ascii = false
         )?,))?;
         // `indent` uses the pure-Python encoder `_make_iterencode`.
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("dumps")?,
+            m.global("json")?.attr("dumps")?,
             &value,
             indent = 2,
             sort_keys = true,
             separators = PyTuple::new(py, [",", ": "])?
         )?,))?;
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("dumps")?,
+            m.global("json")?.attr("dumps")?,
             PyList::new(
                 py,
                 [
@@ -76,24 +77,24 @@ pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             indent = "\t"
         )?,))?;
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("loads")?,
+            m.global("json")?.attr("loads")?,
             m.global("DOC")?,
             object_pairs_hook = m.global("OrderedDict")?
         )?,))?;
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("loads")?,
+            m.global("json")?.attr("loads")?,
             "[1.10, 2]",
             parse_float = m.global("Decimal")?,
             parse_int = m.global("str")?
         )?,))?;
         m.global("print")?.call1((m
             .global("json")?
-            .call_method1("loads", ("{\"k\": NaN, \"j\": -Infinity}",))?,))?;
+            .method1("loads", ("{\"k\": NaN, \"j\": -Infinity}",))?,))?;
         m.global("print")?.call1((
             m.global("json")?
-                .getattr("dumps")?
+                .attr("dumps")?
                 .call1((m.global("float")?.call1(("inf",))?,))?,
-            m.global("json")?.getattr("dumps")?.call1(([
+            m.global("json")?.attr("dumps")?.call1(([
                 (&rt::int(py, 1), 2),
                 (&rt::none(py), 3),
                 (&rt::float(py, 2.5), 4),
@@ -102,7 +103,7 @@ pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             .into_py_dict(py)?,))?,
         ))?;
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("dumps")?,
+            m.global("json")?.attr("dumps")?,
             [
                 ("z", &rt::int(py, 1)),
                 ("y", PyList::new(py, [1, 2])?.as_any())
@@ -120,31 +121,27 @@ pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "pure_python", 50, |frame| {
-        let dec = m.global("json")?.call_method0("JSONDecoder")?;
-        dec.setattr(
-            "parse_string",
-            m.global("decoder")?.getattr("py_scanstring")?,
-        )?;
-        dec.setattr(
+        let dec = m.global("json")?.method0("JSONDecoder")?;
+        dec.set_attr("parse_string", m.global("decoder")?.attr("py_scanstring")?)?;
+        dec.set_attr(
             "scan_once",
-            m.global("scanner")?
-                .call_method1("py_make_scanner", (&dec,))?,
+            m.global("scanner")?.method1("py_make_scanner", (&dec,))?,
         )?;
         m.global("print")?
-            .call1((dec.getattr("decode")?.call1((m.global("DOC")?,))?,))?;
+            .call1((dec.attr("decode")?.call1((m.global("DOC")?,))?,))?;
         m.global("print")?.call1((m
             .global("decoder")?
-            .call_method1("py_scanstring", ("\"abc\\n\\u00e9\" tail", 1))?,))?;
+            .method1("py_scanstring", ("\"abc\\n\\u00e9\" tail", 1))?,))?;
         m.global("print")?.call1((m
             .global("encoder")?
-            .call_method1("py_encode_basestring_ascii", ("café 😀 \n",))?,))?;
+            .method1("py_encode_basestring_ascii", ("café 😀 \n",))?,))?;
         m.global("print")?.call1((m
             .global("encoder")?
-            .call_method1("py_encode_basestring", ("café \n",))?,))?;
-        let enc = rt::call!(m.global("json")?.getattr("JSONEncoder")?, sort_keys = true)?;
+            .method1("py_encode_basestring", ("café \n",))?,))?;
+        let enc = rt::call!(m.global("json")?.attr("JSONEncoder")?, sort_keys = true)?;
         m.global("print")?
-            .call1((rt::str(py, "").getattr("join")?.call1((rt::call!(
-                enc.getattr("iterencode")?,
+            .call1((rt::str(py, "").attr("join")?.call1((rt::call!(
+                enc.attr("iterencode")?,
                 [
                     ("b", PyList::new(py, [1, 2])?.as_any()),
                     ("a", &rt::none(py))
@@ -152,19 +149,19 @@ pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 .into_py_dict(py)?,
                 _one_shot = false
             )?,))?,))?;
-        match dec.call_method1("decode", ("{\"a\": [1, 2,]}",)) {
+        match dec.method1("decode", ("{\"a\": [1, 2,]}",)) {
             Ok(_) => {}
             Err(err)
-                if frame.matches(&err, 50, || m.global("json")?.getattr("JSONDecodeError"))? =>
+                if frame.matches(&err, 50, || m.global("json")?.attr("JSONDecodeError"))? =>
             {
                 let err = frame.catch(err);
                 let _handling = rt::Handling::new(&err);
                 m.global("print")?.call1((
                     "pure:",
                     &err,
-                    err.getattr("pos")?,
-                    err.getattr("lineno")?,
-                    err.getattr("colno")?,
+                    err.attr("pos")?,
+                    err.attr("lineno")?,
+                    err.attr("colno")?,
                 ))?;
             }
             Err(err2) => return Err(err2),
@@ -184,21 +181,20 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .try_iter()?
         {
             let text = text?;
-            match (|| m.global("json")?.call_method1("loads", (&text,)))() {
+            match (|| m.global("json")?.method1("loads", (&text,)))() {
                 Ok(_) => {}
                 Err(err)
-                    if frame
-                        .matches(&err, 80, || m.global("json")?.getattr("JSONDecodeError"))? =>
+                    if frame.matches(&err, 80, || m.global("json")?.attr("JSONDecodeError"))? =>
                 {
                     let err = frame.catch(err);
                     let _handling = rt::Handling::new(&err);
                     m.global("print")?.call1((
                         m.global("repr")?.call1((&text,))?,
                         "->",
-                        err.getattr("msg")?,
-                        err.getattr("pos")?,
-                        err.getattr("lineno")?,
-                        err.getattr("colno")?,
+                        err.attr("msg")?,
+                        err.attr("pos")?,
+                        err.attr("lineno")?,
+                        err.attr("colno")?,
                     ))?;
                 }
                 Err(err2) => return Err(err2),
@@ -207,7 +203,7 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         match (|| {
             m.global("json")?
-                .getattr("dumps")?
+                .attr("dumps")?
                 .call1(([("p", &m.global("object")?.call0()?)].into_py_dict(py)?,))
         })() {
             Ok(_) => {}
@@ -215,13 +211,13 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 let err = frame.catch(err);
                 let _handling = rt::Handling::new(&err);
                 m.global("print")?
-                    .call1(("TypeError:", &err, err.getattr("__notes__")?))?;
+                    .call1(("TypeError:", &err, err.attr("__notes__")?))?;
             }
             Err(err2) => return Err(err2),
         }
         match (|| {
             rt::call!(
-                m.global("json")?.getattr("dumps")?,
+                m.global("json")?.attr("dumps")?,
                 PyList::new(py, [&m.global("float")?.call1(("nan",))?])?,
                 allow_nan = false
             )
@@ -235,8 +231,8 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err2) => return Err(err2),
         }
         let circular = PyList::empty(py).into_any();
-        circular.call_method1("append", (&circular,))?;
-        match (|| m.global("json")?.call_method1("dumps", (&circular,)))() {
+        circular.method1("append", (&circular,))?;
+        match (|| m.global("json")?.method1("dumps", (&circular,)))() {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 80, || m.global("ValueError"))? => {
                 let err = frame.catch(err);
@@ -246,12 +242,12 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err2) => return Err(err2),
         }
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("dumps")?,
+            m.global("json")?.attr("dumps")?,
             PyList::new(py, [&m.global("Point")?.call1((1, 2))?])?,
             cls = m.global("PointEncoder")?
         )?,))?;
         m.global("print")?.call1((rt::call!(
-            m.global("json")?.getattr("dumps")?,
+            m.global("json")?.attr("dumps")?,
             m.global("Point")?.call1((3, 4))?,
             default = m.global("vars")?,
             indent = 0
@@ -269,14 +265,12 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         m.global("pure_python")?.call0()?;
         m.global("errors")?.call0()?;
         m.global("print")?.call1((
-            m.global("json")?.getattr("decoder")?.getattr("__name__")?,
+            m.global("json")?.attr("decoder")?.attr("__name__")?,
+            m.global("json")?.attr("decoder")?.attr("__package__")?,
             m.global("json")?
-                .getattr("decoder")?
-                .getattr("__package__")?,
-            m.global("json")?
-                .getattr("scanner")?
-                .getattr("__spec__")?
-                .getattr("name")?,
+                .attr("scanner")?
+                .attr("__spec__")?
+                .attr("name")?,
         ))?;
         Ok(rt::none(m.py()))
     })
@@ -309,8 +303,8 @@ pub mod point {
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Point.__init__", 68, |_| {
-            slf.setattr("x", x)?;
-            slf.setattr("y", y)?;
+            slf.set_attr("x", x)?;
+            slf.set_attr("y", y)?;
             Ok(rt::none(m.py()))
         })
     }
@@ -348,11 +342,11 @@ pub mod point_encoder {
                 .call1((o, m.global("Point")?))?
                 .is_truthy()?
             {
-                return Ok([("x", &o.getattr("x")?), ("y", &o.getattr("y")?)]
+                return Ok([("x", &o.attr("x")?), ("y", &o.attr("y")?)]
                     .into_py_dict(m.py())?
                     .into_any());
             }
-            rt::super_(__class__, slf)?.call_method1("default", (o,))
+            rt::super_(__class__, slf)?.method1("default", (o,))
         })
     }
 }
@@ -394,7 +388,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "PointEncoder",
             rt::class!(
                 m,
-                "PointEncoder"(m.global("json")?.getattr("JSONEncoder")?),
+                "PointEncoder"(m.global("json")?.attr("JSONEncoder")?),
                 point_encoder::body,
                 line = 73
             )?,
@@ -403,24 +397,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, main())?;
         if m.global("__name__")?.eq("__main__")? {
             if m.global("sys")?
-                .getattr("argv")?
+                .attr("argv")?
                 .get_item(rt::slice(py, 1, 2)?)?
                 .eq(PyList::new(py, ["tool"])?)?
             {
                 m.set_global("json", rt::import(m, "json.tool")?)?;
                 let value = PyList::empty(py);
                 m.global("sys")?
-                    .getattr("argv")?
+                    .attr("argv")?
                     .set_item(rt::slice(py, 1, 2)?, value)?;
-                m.global("json")?.getattr("tool")?.call_method0("main")?;
+                m.global("json")?.attr("tool")?.method0("main")?;
             } else if m
                 .global("sys")?
-                .getattr("argv")?
+                .attr("argv")?
                 .get_item(rt::slice(py, 1, 2)?)?
                 .eq(PyList::new(py, ["crash"])?)?
             {
                 m.global("json")?
-                    .call_method1("loads", ("{\"ok\": [1, 2, ]}",))?;
+                    .method1("loads", ("{\"ok\": [1, 2, ]}",))?;
             } else {
                 m.global("main")?.call0()?;
             }

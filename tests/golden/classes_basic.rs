@@ -6,6 +6,7 @@ use pyo3::types::PyList;
 use pyo3::types::PySet;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 /// A 2D vector.
 pub mod vector {
@@ -82,7 +83,7 @@ pub mod vector {
                 ns.set("label", decorator.call1((function,))?)?;
             }
             {
-                let decorator = ns.get("label")?.getattr("setter")?;
+                let decorator = ns.get("label")?.attr("setter")?;
                 let function = rt::function!(
                     ns,
                     label_(slf as "self", value),
@@ -91,7 +92,7 @@ pub mod vector {
                 ns.set("label", decorator.call1((function,))?)?;
             }
             {
-                let decorator = ns.get("label")?.getattr("deleter")?;
+                let decorator = ns.get("label")?.attr("deleter")?;
                 let function =
                     rt::function!(ns, label__(slf as "self"), qualname = "Vector.label")?;
                 ns.set("label", decorator.call1((function,))?)?;
@@ -146,11 +147,11 @@ pub mod vector {
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.__init__", 12, |_| {
-            slf.setattr("x", x)?;
-            slf.setattr("y", y)?;
+            slf.set_attr("x", x)?;
+            slf.set_attr("y", y)?;
             {
                 let Vector = m.global("Vector")?;
-                Vector.setattr("instances", rt::iadd(&Vector.getattr("instances")?, 1)?)?;
+                Vector.set_attr("instances", rt::iadd(&Vector.attr("instances")?, 1)?)?;
             }
             Ok(rt::none(m.py()))
         })
@@ -166,9 +167,9 @@ pub mod vector {
                 m.py(),
                 (
                     "Vector(",
-                    rt::format(&slf.getattr("x")?, "")?,
+                    rt::format(&slf.attr("x")?, "")?,
                     ", ",
-                    rt::format(&slf.getattr("y")?, "")?,
+                    rt::format(&slf.attr("y")?, "")?,
                     ")",
                 ),
             )
@@ -186,8 +187,8 @@ pub mod vector {
             if !other.is_instance(&m.global("Vector")?)? {
                 return rt::builtin(py, "NotImplemented");
             }
-            PyTuple::new(py, [&slf.getattr("x")?, &slf.getattr("y")?])?.rich_compare(
-                PyTuple::new(py, [&other.getattr("x")?, &other.getattr("y")?])?,
+            PyTuple::new(py, [&slf.attr("x")?, &slf.attr("y")?])?.rich_compare(
+                PyTuple::new(py, [&other.attr("x")?, &other.attr("y")?])?,
                 CompareOp::Eq,
             )
         })
@@ -200,8 +201,7 @@ pub mod vector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Vector.__hash__", 25, |_| {
-            rt::builtin(py, "hash")?
-                .call1((PyTuple::new(py, [&slf.getattr("x")?, &slf.getattr("y")?])?,))
+            rt::builtin(py, "hash")?.call1((PyTuple::new(py, [&slf.attr("x")?, &slf.attr("y")?])?,))
         })
     }
 
@@ -213,8 +213,8 @@ pub mod vector {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.__add__", 28, |_| {
             m.global("Vector")?.call1((
-                slf.getattr("x")?.add(other.getattr("x")?)?,
-                slf.getattr("y")?.add(other.getattr("y")?)?,
+                slf.attr("x")?.add(other.attr("x")?)?,
+                slf.attr("y")?.add(other.attr("y")?)?,
             ))
         })
     }
@@ -228,8 +228,8 @@ pub mod vector {
             // The global `scale`, not the class attribute: class scope is not
             // visible in methods.
             m.global("Vector")?.call1((
-                slf.getattr("x")?.mul(m.global("scale")?)?,
-                slf.getattr("y")?.mul(m.global("scale")?)?,
+                slf.attr("x")?.mul(m.global("scale")?)?,
+                slf.attr("y")?.mul(m.global("scale")?)?,
             ))
         })
     }
@@ -241,8 +241,8 @@ pub mod vector {
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.class_scaled", 36, |_| {
             m.global("Vector")?.call1((
-                slf.getattr("x")?.mul(slf.getattr("scale")?)?,
-                slf.getattr("y")?.mul(slf.get_type().getattr("scale")?)?,
+                slf.attr("x")?.mul(slf.attr("scale")?)?,
+                slf.attr("y")?.mul(slf.get_type().attr("scale")?)?,
             ))
         })
     }
@@ -254,16 +254,16 @@ pub mod vector {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::frame!(m, "Vector.length", 39, |_| {
-            slf.getattr("x")?
+            slf.attr("x")?
                 .pow(2, py.None())?
-                .add(slf.getattr("y")?.pow(2, py.None())?)?
+                .add(slf.attr("y")?.pow(2, py.None())?)?
                 .pow(0.5, py.None())
         })
     }
 
     // classes_basic.py:44
     pub fn label<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Vector.label", 43, |_| { slf.getattr("_label") })
+        rt::frame!(m, "Vector.label", 43, |_| { slf.attr("_label") })
     }
 
     // classes_basic.py:48
@@ -275,7 +275,7 @@ pub mod vector {
         let py = m.py();
         rt::frame!(m, "Vector.label", 47, |_| {
             rt::builtins::print(py, ("setting label", value))?;
-            slf.setattr("_label", value)?;
+            slf.set_attr("_label", value)?;
             Ok(rt::none(py))
         })
     }
@@ -288,7 +288,7 @@ pub mod vector {
         let py = m.py();
         rt::frame!(m, "Vector.label", 52, |_| {
             rt::builtins::print(py, ("deleting label",))?;
-            slf.delattr("_label")?;
+            slf.del_attr("_label")?;
             Ok(rt::none(py))
         })
     }
@@ -305,9 +305,9 @@ pub mod vector {
         b: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.dot", 61, |_| {
-            a.getattr("x")?
-                .mul(b.getattr("x")?)?
-                .add(a.getattr("y")?.mul(b.getattr("y")?)?)
+            a.attr("x")?
+                .mul(b.attr("x")?)?
+                .add(a.attr("y")?.mul(b.attr("y")?)?)
         })
     }
 
@@ -325,8 +325,7 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.__iter__", 68, |_| {
-            let yield_values =
-                PyList::new(m.py(), [&slf.getattr("x")?, &slf.getattr("y")?])?.into_any();
+            let yield_values = PyList::new(m.py(), [&slf.attr("x")?, &slf.attr("y")?])?.into_any();
             Ok(yield_values.try_iter()?.into_any())
         })
     }
@@ -338,7 +337,7 @@ pub mod vector {
         index: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.__getitem__", 72, |_| {
-            PyTuple::new(m.py(), [&slf.getattr("x")?, &slf.getattr("y")?])?
+            PyTuple::new(m.py(), [&slf.attr("x")?, &slf.attr("y")?])?
                 .as_any()
                 .get_item(index)
         })
@@ -350,10 +349,10 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Vector.__bool__", 75, |_| {
-            let x = slf.getattr("x")?;
+            let x = slf.attr("x")?;
             Ok(rt::bool(
                 m.py(),
-                (if x.is_truthy()? { x } else { slf.getattr("y")? }).is_truthy()?,
+                (if x.is_truthy()? { x } else { slf.attr("y")? }).is_truthy()?,
             ))
         })
     }
@@ -402,7 +401,7 @@ pub mod counter {
         by: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Counter.increment", 101, |_| {
-            slf.setattr("count", rt::iadd(&slf.getattr("count")?, by)?)?;
+            slf.set_attr("count", rt::iadd(&slf.attr("count")?, by)?)?;
             Ok(slf.clone())
         })
     }
@@ -425,7 +424,7 @@ pub mod counter {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::frame!(m, "Counter.__str__", 108, |_| {
-            rt::str(m.py(), "Counter(%d)").rem(slf.getattr("count")?)
+            rt::str(m.py(), "Counter(%d)").rem(slf.attr("count")?)
         })
     }
 }
@@ -496,18 +495,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("v")?.getattr("length")?,
-                m.global("v")?.call_method0("scaled")?,
-                m.global("v")?.call_method0("class_scaled")?,
-                m.global("Vector")?.call_method0("zero")?,
+                m.global("v")?.attr("length")?,
+                m.global("v")?.method0("scaled")?,
+                m.global("v")?.method0("class_scaled")?,
+                m.global("Vector")?.method0("zero")?,
                 m.global("Vector")?
-                    .getattr("dot")?
+                    .attr("dot")?
                     .call1((m.global("v")?, m.global("w")?))?,
             ),
         )?;
-        m.global("v")?.setattr("label", "a")?;
-        rt::builtins::print(py, (m.global("v")?.getattr("label")?,))?;
-        m.global("v")?.delattr("label")?;
+        m.global("v")?.set_attr("label", "a")?;
+        rt::builtins::print(py, (m.global("v")?.attr("label")?,))?;
+        m.global("v")?.del_attr("label")?;
         rt::builtins::print(
             py,
             (
@@ -516,53 +515,47 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 rt::builtin(py, "list")?.call1((m.global("v")?,))?,
                 m.global("v")?.get_item(1)?,
                 m.global("v")?.is_truthy()?,
-                m.global("Vector")?.call_method0("zero")?.is_truthy()?,
+                m.global("Vector")?.method0("zero")?.is_truthy()?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Vector")?.getattr("instances")?,
-                m.global("Vector")?.getattr("__doc__")?,
-                m.global("Vector")?.getattr("__name__")?,
-                m.global("Vector")?.getattr("__qualname__")?,
-                m.global("Vector")?.getattr("__module__")?,
+                m.global("Vector")?.attr("instances")?,
+                m.global("Vector")?.attr("__doc__")?,
+                m.global("Vector")?.attr("__name__")?,
+                m.global("Vector")?.attr("__qualname__")?,
+                m.global("Vector")?.attr("__module__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Vector")?
-                    .getattr("__init__")?
-                    .getattr("__qualname__")?,
-                m.global("Vector")?
-                    .getattr("__init__")?
-                    .getattr("__name__")?,
-                m.global("Vector")?
-                    .getattr("__init__")?
-                    .getattr("__defaults__")?,
+                m.global("Vector")?.attr("__init__")?.attr("__qualname__")?,
+                m.global("Vector")?.attr("__init__")?.attr("__name__")?,
+                m.global("Vector")?.attr("__init__")?.attr("__defaults__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("Vector")?
-                    .getattr("__dict__")?
+                    .attr("__dict__")?
                     .get_item("zero")?
                     .get_type()
-                    .getattr("__name__")?,
+                    .attr("__name__")?,
                 m.global("Vector")?
-                    .getattr("__dict__")?
+                    .attr("__dict__")?
                     .get_item("dot")?
                     .get_type()
-                    .getattr("__name__")?,
+                    .attr("__name__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("Vector")?.getattr("__static_attributes__")?,
-                m.global("Vector")?.getattr("__firstlineno__")?,
+                m.global("Vector")?.attr("__static_attributes__")?,
+                m.global("Vector")?.attr("__firstlineno__")?,
             ),
         )?;
         // classes_basic.py:92
@@ -573,7 +566,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             rt::frame!(m, "<genexpr>", 92, |_| {
                 for k in __dict__ {
                     let k = k?;
-                    if !k.call_method1("startswith", ("__",))?.is_truthy()? {
+                    if !k.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(k));
                     }
                     m.py().check_signals()?;
@@ -585,24 +578,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             py,
             (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
                 m,
-                genexpr(m.global("Vector")?.getattr("__dict__")?.try_iter()?)
+                genexpr(m.global("Vector")?.attr("__dict__")?.try_iter()?)
             )?,))?,),
         )?;
         rt::builtins::print(
             py,
             (
-                m.global("v")?.getattr("__dict__")?,
+                m.global("v")?.attr("__dict__")?,
                 rt::builtin(py, "vars")?.call1((m.global("w")?,))?,
             ),
         )?;
-        m.set_global("bound", m.global("v")?.getattr("scaled")?)?;
+        m.set_global("bound", m.global("v")?.attr("scaled")?)?;
         rt::builtins::print(
             py,
             (
-                m.global("bound")?.getattr("__self__")?.is(m.global("v")?),
+                m.global("bound")?.attr("__self__")?.is(m.global("v")?),
                 m.global("bound")?
-                    .getattr("__func__")?
-                    .is(m.global("Vector")?.getattr("scaled")?),
+                    .attr("__func__")?
+                    .is(m.global("Vector")?.attr("scaled")?),
                 m.global("bound")?.call0()?,
             ),
         )?;
@@ -614,15 +607,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "c",
             m.global("Counter")?
                 .call0()?
-                .call_method0("increment")?
-                .call_method1("increment", (5,))?,
+                .method0("increment")?
+                .method1("increment", (5,))?,
         )?;
         rt::builtins::print(
             py,
             (
                 m.global("c")?,
-                m.global("Counter")?.getattr("count")?,
-                m.global("c")?.getattr("count")?,
+                m.global("Counter")?.attr("count")?,
+                m.global("c")?.attr("count")?,
                 rt::call!(m.global("c")?, 1, 2, k = 3)?,
                 m.global("c")?.str()?,
                 m.global("c")?
@@ -632,15 +625,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         m.set_global("Empty", rt::class!(m, "Empty"(), empty::body, line = 116)?)?;
         m.set_global("e", m.global("Empty")?.call0()?)?;
-        m.global("e")?.setattr("attr", 1)?;
+        m.global("e")?.set_attr("attr", 1)?;
         rt::builtins::print(
             py,
             (
-                m.global("e")?.get_type().getattr("__name__")?,
-                m.global("e")?.getattr("attr")?,
-                m.global("Empty")?.getattr("__doc__")?,
-                m.global("Empty")?.getattr("__bases__")?,
-                m.global("Empty")?.getattr("__static_attributes__")?,
+                m.global("e")?.get_type().attr("__name__")?,
+                m.global("e")?.attr("attr")?,
+                m.global("Empty")?.attr("__doc__")?,
+                m.global("Empty")?.attr("__bases__")?,
+                m.global("Empty")?.attr("__static_attributes__")?,
             ),
         )?;
         Ok(())

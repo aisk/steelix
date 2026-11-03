@@ -318,7 +318,7 @@ class ComprehensionLowering:
             case ast.Attribute(obj, attr):
                 with self.fresh() as prelude:
                     o = self.value(obj)
-                    call = o.method("setattr", rs.StrLit(attr), value.arg())
+                    call = o.method("set_attr", rs.StrLit(attr), value.arg())
                 return [*prelude, rs.ExprStmt(rs.Try(call))]
             case ast.Subscript(obj, index):
                 with self.fresh() as prelude:

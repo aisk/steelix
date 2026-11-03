@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // builtin_names.py:9
 pub fn show<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -18,7 +19,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // like `LOAD_GLOBAL` does, not among the attributes of the module object:
         // `__annotations__` is an attribute of every module but not a builtin.
         m.set_global("builtins", rt::import(m, "builtins")?)?;
-        m.global("builtins")?.setattr("answer", 42)?;
+        m.global("builtins")?.set_attr("answer", 42)?;
         rt::def!(m, show())?;
         show(m)?;
         Ok(())

@@ -7,12 +7,13 @@
 
 use pyo3::prelude::*;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // frames_logging.py:15
 pub fn step<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "step", 15, |_| {
         m.global("logging")?
-            .call_method1("warning", ("native step %d", n))?;
+            .method1("warning", ("native step %d", n))?;
         n.add(1)
     })
 }
@@ -34,12 +35,9 @@ pub fn show_warning<'py>(
             (rt::fstring(
                 py,
                 (
-                    rt::format(&category.getattr("__name__")?, "")?,
+                    rt::format(&category.attr("__name__")?, "")?,
                     " ",
-                    rt::format(
-                        &filename.call_method1("rsplit", ("/", 1))?.get_item(-1)?,
-                        "",
-                    )?,
+                    rt::format(&filename.method1("rsplit", ("/", 1))?.get_item(-1)?, "")?,
                     ":",
                     rt::format(lineno, "")?,
                     ": ",
@@ -57,7 +55,7 @@ pub fn warn_native<'py>(
     message: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "warn_native", 35, |_| {
-        m.global("warnings")?.call_method1("warn", (message,))?;
+        m.global("warnings")?.method1("warn", (message,))?;
         Ok(rt::none(m.py()))
     })
 }
@@ -74,8 +72,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("sys", rt::import(m, "sys")?)?;
         m.set_global("warnings", rt::import(m, "warnings")?)?;
         rt::call!(
-            m.global("logging")?.getattr("basicConfig")?,
-            stream = m.global("sys")?.getattr("stdout")?,
+            m.global("logging")?.attr("basicConfig")?,
+            stream = m.global("sys")?.attr("stdout")?,
             format = "%(levelname)s %(filename)s:%(lineno)d %(funcName)s: %(message)s"
         )?;
         rt::def!(m, step(n))?;
@@ -104,9 +102,8 @@ def kept_step(n):
         )?;
         let show_warning2 = m.global("show_warning")?;
         m.global("warnings")?
-            .setattr("showwarning", show_warning2)?;
-        m.global("warnings")?
-            .call_method1("simplefilter", ("always",))?;
+            .set_attr("showwarning", show_warning2)?;
+        m.global("warnings")?.method1("simplefilter", ("always",))?;
         rt::def!(m, warn_native(message))?;
         // frames_logging.py:39, kept as Python: match statement at 40:5
         rt::exec_python!(

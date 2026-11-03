@@ -3,6 +3,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // decorators.py:6
 pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -15,7 +16,7 @@ pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bo
             r#fn: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(m, "trace.<locals>.decorate", 9, |_| {
-                rt::builtins::print(m.py(), ("apply", label, "to", r#fn.getattr("__name__")?))?;
+                rt::builtins::print(m.py(), ("apply", label, "to", r#fn.attr("__name__")?))?;
                 // decorators.py:13
                 fn wrapper<'py>(
                     m: &rt::Module<'py>,
@@ -33,7 +34,7 @@ pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bo
                     })
                 }
                 let wrapper = {
-                    let decorator = m.global("functools")?.call_method1("wraps", (r#fn,))?;
+                    let decorator = m.global("functools")?.method1("wraps", (r#fn,))?;
                     let function = rt::function!(
                         m,
                         wrapper[label, r#fn](*args, **kwargs),
@@ -80,8 +81,8 @@ pub fn greet<'py>(
 pub fn register<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "register", 36, |_| {
         m.global("registry")?
-            .getattr("append")?
-            .call1((r#fn.getattr("__name__")?,))?;
+            .attr("append")?
+            .call1((r#fn.attr("__name__")?,))?;
         Ok(r#fn.clone())
     })
 }
@@ -154,7 +155,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         {
             let decorator = rt::call!(
-                m.global("functools")?.getattr("lru_cache")?,
+                m.global("functools")?.attr("lru_cache")?,
                 maxsize = py.None()
             )?;
             let function = rt::function!(m, fib(n))?;
@@ -170,28 +171,24 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(
             py,
             (
-                m.global("greet")?.getattr("__name__")?,
-                m.global("greet")?.getattr("__qualname__")?,
-                m.global("greet")?.getattr("__doc__")?,
-                m.global("greet")?
-                    .getattr("__wrapped__")?
-                    .getattr("__name__")?,
+                m.global("greet")?.attr("__name__")?,
+                m.global("greet")?.attr("__qualname__")?,
+                m.global("greet")?.attr("__doc__")?,
+                m.global("greet")?.attr("__wrapped__")?.attr("__name__")?,
             ),
         )?;
         rt::builtins::print(
             py,
             (m.global("greet")?
-                .getattr("__wrapped__")?
-                .call_method1("__wrapped__", ("x", "?"))?,),
+                .attr("__wrapped__")?
+                .method1("__wrapped__", ("x", "?"))?,),
         )?;
         rt::builtins::print(py, (m.global("registry")?, m.global("second")?.call0()?))?;
         rt::builtins::print(
             py,
             (
                 m.global("fib")?.call1((80,))?,
-                m.global("fib")?
-                    .call_method0("cache_info")?
-                    .getattr("hits")?,
+                m.global("fib")?.method0("cache_info")?.attr("hits")?,
             ),
         )?;
         rt::builtins::print(py, (m.global("gone")?,))?;

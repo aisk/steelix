@@ -5,6 +5,7 @@ use pyo3::types::PyList;
 use pyo3::types::PySet;
 use pyo3::types::PyTuple;
 use steelix_runtime as rt;
+use steelix_runtime::Attributes;
 
 // displays.py:6
 pub fn build<'py>(
@@ -88,7 +89,7 @@ pub fn subscripts<'py>(
         let table = [("k", 1)].into_py_dict(py)?.into_any();
         table.set_item("k", table.get_item("k")?.add(1)?)?;
         table.set_item("new", PyList::empty(py))?;
-        table.get_item("new")?.call_method1("append", (3,))?;
+        table.get_item("new")?.method1("append", (3,))?;
         table.del_item("k")?;
         rt::builtins::print(py, (&table,))?;
         let grid = PyDict::new(py).into_any();
@@ -102,20 +103,18 @@ pub fn subscripts<'py>(
 pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "attributes", 36, |_| {
-        let ns = m.global("types")?.call_method0("SimpleNamespace")?;
-        ns.setattr("x", 1)?;
-        ns.setattr("y", ns.getattr("x")?.add(1)?)?;
-        ns.setattr("x", ns.getattr("y")?.mul(10)?)?;
-        rt::builtins::print(py, (ns.getattr("x")?, ns.getattr("y")?))?;
-        ns.delattr("y")?;
+        let ns = m.global("types")?.method0("SimpleNamespace")?;
+        ns.set_attr("x", 1)?;
+        ns.set_attr("y", ns.attr("x")?.add(1)?)?;
+        ns.set_attr("x", ns.attr("y")?.mul(10)?)?;
+        rt::builtins::print(py, (ns.attr("x")?, ns.attr("y")?))?;
+        ns.del_attr("y")?;
         rt::builtins::print(py, (rt::builtin(py, "hasattr")?.call1((&ns, "y"))?, &ns))?;
         rt::builtins::print(
             py,
             (
-                rt::str(py, "a b").call_method0("split")?,
-                rt::str(py, "abc")
-                    .call_method0("upper")?
-                    .call_method0("lower")?,
+                rt::str(py, "a b").method0("split")?,
+                rt::str(py, "abc").method0("upper")?.method0("lower")?,
             ),
         )?;
         Ok(rt::none(py))
