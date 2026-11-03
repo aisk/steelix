@@ -175,7 +175,7 @@ impl Generator {
             *self.state() = State::Closed;
             drop(iter);
         }
-        result.map_err(|err| stop_iteration_to_runtime_error(py, err))
+        result.map_err(|err| stop_iteration_to_runtime_error(py, err, "generator"))
     }
 }
 
@@ -235,6 +235,7 @@ impl Generator {
         Err(stop_iteration_to_runtime_error(
             py,
             PyErr::from_value(exception),
+            "generator",
         ))
     }
 
@@ -355,12 +356,14 @@ fn already_executing() -> PyErr {
 /// PEP 479: a `StopIteration` leaving the body of a generator would look
 /// like its end to the caller, so CPython replaces it by a `RuntimeError`
 /// whose cause it is.
-fn stop_iteration_to_runtime_error(py: Python<'_>, err: PyErr) -> PyErr {
+/// Also for native coroutines and generator functions, whose noun the
+/// message uses.
+pub(crate) fn stop_iteration_to_runtime_error(py: Python<'_>, err: PyErr, noun: &str) -> PyErr {
     if !err.is_instance_of::<PyStopIteration>(py) {
         return err;
     }
     let cause = err.into_value(py);
-    let error = PyRuntimeError::new_err("generator raised StopIteration");
+    let error = PyRuntimeError::new_err(format!("{noun} raised StopIteration"));
     let value = error.value(py);
     // SAFETY: exception instances. `PyException_SetContext` steals a
     // reference; `PyException_SetCause` steals one and sets
@@ -374,7 +377,7 @@ fn stop_iteration_to_runtime_error(py: Python<'_>, err: PyErr) -> PyErr {
 
 /// The exception `throw(typ, val, tb)` raises, checked and normalized like
 /// CPython's `_gen_throw`.
-fn thrown<'py>(
+pub(crate) fn thrown<'py>(
     typ: &Bound<'py, PyAny>,
     val: Option<&Bound<'py, PyAny>>,
     tb: Option<&Bound<'py, PyAny>>,

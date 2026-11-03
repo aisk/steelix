@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12（计划）。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M9a ✅ → M7 ✅ → M7a ✅ → M9 ✅ → M10 ✅ → M11 ✅ → M11a ✅ → M11b ✅ → M12（计划）→ M13 PoC ✅（lowering 计划中）。
 
 ## M0 项目骨架 ✅
 
@@ -295,6 +295,26 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 - [ ] ext 模式下 `python -m pkg`（M6 遗留）
 - [ ] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程
 
+## M13 协程和生成器（PoC）
+
+用 Rust 稳定版的 `async` 当状态机实现 Python 的协程和生成器函数，不用执行器，进展只来自 Python 调用 `send`/`throw`/`close`，生成的代码保持直线（§8 "generator 函数"的第 4 种做法和"协程和生成器"）。PoC 只做 runtime 和手写的"生成代码"，lowering 在后面。
+
+- [x] runtime：`rt::Coroutine`（`coroutine`）和生成器对象，`send`/`throw`/`close`、`__await__`（`coroutine_wrapper`）、`__iter__`/`__next__`，CPython 的报错文字（重入、重用、未开始时 `send` 非 None、PEP 479、ignored GeneratorExit），`close()` 的返回值（3.13）
+- [x] `rt::await_`、`rt::yield_`、`rt::yield_from`：PEP 492 取 awaitable 的迭代器，PEP 380 的 `send`/`throw`/`close` 委托，通过 waker 找到这一次 poll 的通道
+- [x] `rt::def!(m, async f(..))`、`rt::def!(m, gen f(..))`，函数对象的 `__code__` 带 `CO_COROUTINE`/`CO_GENERATOR`，协程的名字取自调用时的函数对象
+- [x] `rt::frame!` 接受 `async` 闭包，未开始时 `throw` 的异常在帧里抛出；`frame.with_async`；协程自己的异常状态（`sys.exception()` 跨过暂停）
+- [x] 终结：补上 `tp_finalize` 和先调用终结器的 `tp_dealloc`，释放时 `close()`，从没开始的协程发出 `never awaited` 警告，出错经过 `sys.unraisablehook`
+- [x] `tests/test_poc_async.py`：asyncio（`sleep`、直接 await 原生 future、经过函数对象、await Python 协程、`gather`、取消时 `finally` 里再 await、经过原生和 Python 协程的取消、traceback）、手动驱动（`send`/`throw`/`close`、ignored GeneratorExit、重入、重用、PEP 479、await 非 awaitable、never awaited、`del` 和 GC 时的终结顺序）、生成器（迭代、`send`、`throw`、`close`、`yield from` 委托、`with` 里的生成器、递归的 `Box::pin`）、`inspect`/`asyncio` 的判断、不用 asyncio 的 trampoline。和 CPython 的差异记在 §12
+- [ ] lowering：`async def` 和含 `yield` 的函数生成 `async fn`，`try` 的闭包换成 `async` 块，`with` 换成 `frame.with_async`，golden 和 `tests/cases/` 的用例
+- [ ] 原生 `async def` 之间满足直接调用条件的 `await f(x)` 直接 await，递归的加 `Box::pin`，`RecursionGuard` 只包住每一次 poll
+- [ ] `async with`、`async for` 的 helper
+- [ ] 嵌套的 `async def`、生成器和 lambda 的捕获（宏已支持，没有测试）
+- [ ] 让 GC 看到暂停的协程持有的参数（§12 的循环引用）
+- [ ] 改写后的代码 await Rust 生态 future 的桥接 helper（只在需要时）
+- 保留为 Python：异步生成器、异步推导式
+
+runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_` 等），下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
+
 ## 发布
 
 - [x] PyPI 发布 steelix 0.1.0，git tag `v0.1.0`
@@ -303,4 +323,6 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 
 ## 以后再说
 
-基于类型注解的 typed lowering（`int` → `i64` 等）和符合条件的类自动升级为 `#[pyclass]`（M9 原来的计划，不做的原因是注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就要同时生成两套代码路径，见 §1、§10）、generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）
+generator 和 async/await 移到了 M13。
+
+基于类型注解的 typed lowering（`int` → `i64` 等）和符合条件的类自动升级为 `#[pyclass]`（M9 原来的计划，不做的原因是注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就要同时生成两套代码路径，见 §1、§10）、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）

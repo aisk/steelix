@@ -18,7 +18,7 @@
 
 - 性能优化，类型推导出原生类型。按类型注解生成原生类型（`int` 变成 `i64` 等）也不做：注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就得同时生成两套代码路径。唯一的例外是 Python 语义保证只会是 `bool` 的局部变量（§5），它不依赖注解
 - 100% 语义兼容。允许有文档化的差异（见第 12 节）
-- generator、async/await、match、metaclass 自定义、`exec`/`eval` 等复杂特性的原生转换。用到它们的代码通过混合模式保留为 Python 源码照常运行（第 13 节）
+- match、metaclass 自定义、`exec`/`eval` 等复杂特性的原生转换。用到它们的代码通过混合模式保留为 Python 源码照常运行（第 13 节）。generator 和 async/await 原来也在这里，M13 找到了可读的做法（§8 "协程和生成器"），runtime 的 PoC 已经完成，lowering 还没有做
 
 ## 2. 总体流水线
 
@@ -278,7 +278,7 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 - vectorcall 的入口经过 PyO3 自己包装 fastcall 函数用的 trampoline（`pyo3::impl_`，随 PyO3 的版本固定）。它把错误和 panic 变成异常，并且告诉 PyO3 当前线程已经 attach。只用 `Python::assume_attached` 不够：在 Python 自己创建的线程里调用原生函数时 PyO3 不知道已经 attach，函数里释放的 `Py<T>`（例如处理完的异常）会推迟到以后才 decref，`__del__` 的时机就和 CPython 不同（`tests/cases/call_protocols.py` 最后一段检查这一点）
 - CPython 在 `tp_call` 之前检查递归深度，vectorcall 之前不检查，所以入口自己调用 `Py_EnterRecursiveCall`，消息和以前一样
 - **驻留的名字。** `rt::Attributes`（第 4 节）、`m.global`、`rt::builtin` 和 `rt::call!` 的关键字参数都只接受 `'static` 的名字，按字符串字面量的地址和长度找到驻留的 Python 字符串。PyO3 从 `&str` 每次新建字符串，CPython 再算哈希，而且属性缓存只认驻留的名字，这一项在 skime 上就快了一倍。查找用一张 4096 项、按地址索引的表，读取不加锁（attach 的线程轮流运行，写入只在第一次），几个位置都被别的名字占了时退回一张加锁的 `HashMap`（M11a 之前是每个线程一张，每个线程都要为同一个名字泄漏一份）。和 `pyo3::intern!` 一样，这些字符串不释放
-  - 不加锁的读取只在有 GIL 时正确：写入一个位置的几个字段之间不会有别的线程运行。free-threaded 的 Python（3.14t）没有这个保证，`Function` 的元信息和 `Generator` 的状态也是按有 GIL 设计的，所以 runtime 在 free-threaded 的构建上直接编译失败（`build.rs` 用 `pyo3-build-config` 得到 `Py_GIL_DISABLED`，`lib.rs` 里 `compile_error!` 指向这一节），而不是生成运行时才出错的代码
+  - 不加锁的读取只在有 GIL 时正确：写入一个位置的几个字段之间不会有别的线程运行。free-threaded 的 Python（3.14t）没有这个保证，`Function` 的元信息、`Generator` 的状态和协程的 future（§8）也是按有 GIL 设计的，所以 runtime 在 free-threaded 的构建上直接编译失败（`build.rs` 用 `pyo3-build-config` 得到 `Py_GIL_DISABLED`，`lib.rs` 里 `compile_error!` 指向这一节），而不是生成运行时才出错的代码
 
 在 skime 上（release，fib 22）从 2.93 s 降到 1.10 s，CPython 是 0.48 s。只换 runtime、生成代码不变时是 2.11 s。各项的数字见 `m10-skime.md` 第 7 节。
 
@@ -694,20 +694,67 @@ for x in xs.try_iter()? {
 - 把生成器对象做成 `unsendable` 的 pyclass：在别的线程上使用会 panic，而 CPython 的生成器可以跨线程传递；用 `Mutex` 就够了
 - `list(genexp)`、`"".join(genexp)` 等特化成推导式或直接循环：见上，语义不完全一样，收益只是少创建一个对象
 
-### generator 函数（M8 调研，未实现）
+### generator 函数（M8 调研，M13 改了结论）
 
-含 `yield`、`yield from` 的函数仍然整个保留为 Python。M8 之后它们是剩下的主要障碍（`coverage.md`）：
+含 `yield`、`yield from` 的函数现在仍然整个保留为 Python。M8 之后它们是剩下的主要障碍（`coverage.md`）：
 
 - 标准库 154 个模块里只因为 `yield`/`yield from` 保留的函数有 129 个（全部 6466 个函数的 2.0%），都支持的话原生函数从 96.4% 到 98.4%。6 个工具里剩下的 11 个保留函数全是 generator，支持后是 100%
 - 标准库这些模块里共有 134 个 generator 函数（含嵌套的）。没有一个用到 `yield` 表达式的值（`x = yield`，即 `send()` 驱动的协程写法）；24 个的 `yield` 在 `try` 里，4 个在 `with` 里，29 个用了 `yield from`。`yield` 不在 `try`/`with` 里、也没有 `yield from` 的有 86 个。6 个工具里分别是 11、0、2、0、2、7
 
-三种做法
+M8 考虑过三种做法，M13 加了第四种
 
 1. **状态机**：和生成器表达式的 step 一样，每次 `next()` 调用一个 Rust fn，但函数体要能从任意一个 `yield` 之后继续。局部变量要搬进生成器对象里（`st.total` 而不是 `total`），函数体按 `yield` 切成几段，循环里的 `yield` 要把循环改写成显式的状态转移（`match st.state { .. }`），`try`/`finally`、`with` 跨过 `yield` 时还要记住待执行的清理，`close()` 要在暂停的 `yield` 处抛 `GeneratorExit` 并执行 `finally`，`yield from` 要转发 `send`/`throw`/`close`。Rust 稳定版没有 generator（`gen` 块和 `Coroutine` 只在 nightly），状态机得自己生成。语义可以做到和 CPython 一致，可读性代价最大：生成的代码不再和 Python 逐句对应，也很难手工改写，而可读性是 steelix 的第一目标
 2. **另一个栈上运行**：函数体照常生成直线代码，`yield` 写成 `co.yield_(value)?`，`send`/`throw`/`close` 就是带值或带异常恢复执行，代码最好读。用 OS 线程实现时每次切换都要交出、取回 GIL（每个元素微秒级），生成器的代码在另一个线程上运行，线程局部的状态（`contextvars`、`decimal` 的上下文、`threading.local`）和 CPython 不同，traceback 也要跨线程拼起来；用有栈协程（`corosensei` 一类）在同一个线程里切换栈，则会让 CPython 按线程记录的 C 栈边界检查（3.12 起的栈保护）失效，greenlet 能做是因为它针对每个 CPython 版本处理解释器内部状态。两种都要引入 unsafe 的依赖，正确性风险大
-3. **保留为 Python**（现在的做法）：没有代价，`send`/`throw`/`close` 和帧都是 CPython 自己的，只是这 2% 的函数不能逐步改写成 Rust
+3. **保留为 Python**（到 M12 为止的做法）：没有代价，`send`/`throw`/`close` 和帧都是 CPython 自己的，只是这 2% 的函数不能逐步改写成 Rust
+4. **用 Rust 稳定版的 `async` 当状态机**（M13）：函数体写成 `async fn`，每个 `yield` 是 `rt::yield_(&x).await?`，状态机由 rustc 生成，就是做法 1 想要的东西，但生成的代码和做法 2 一样是直线代码，和 Python 逐句对应。不需要执行器（executor），也不需要另一个栈：`send`/`throw`/`close` 各 poll 一次 future，`Poll::Pending` 只表示"有一个值要交给调用方"。`try`/`finally`、`with` 跨过 `yield` 时的清理就是 Rust 的控制流本身，`close()` 在暂停的地方抛 `GeneratorExit`，`finally` 照常执行。unsafe 只有 runtime 里集中的几处（下一节），没有栈切换，也不碰解释器的内部状态
 
-结论：暂时保留为 Python，不单独开里程碑。如果以后要做，建议只做状态机的一个子集，作为可选的里程碑排在 M9 之后：`yield` 是语句（值不用），不在 `try`/`with` 里，没有 `yield from`（标准库 134 个里的 86 个），局部变量放进一个状态结构，循环里的 `yield` 用 step 的 `return` 加恢复点实现。其余的仍然保留为 Python。做之前应该先用真实应用确认这些函数值得改写成原生代码，因为 generator 通常是薄的迭代逻辑，用户最终手写 Rust 时多半会改成 `Iterator`，生成的状态机不一定是好的起点
+M8 的结论是暂时保留为 Python，理由是做法 1 的可读性代价和做法 2 的正确性风险。做法 4 两样都没有，而且同一套机制也能做 `async def`（下一节），所以结论改为：生成器函数和协程都按做法 4 原生转换，M13 先在 runtime 里做 PoC，lowering 在 PoC 之后（roadmap M13）。上面"用户最终多半会改成 `Iterator`"的顾虑仍然成立，但原生的生成器至少让周围的函数可以照常改写，生成器本身的改写方式见下一节
+
+### 协程和生成器（M13）
+
+M13 的 PoC 只做了 runtime 和手写的"生成代码"，lowering 还没有做。下面标了"已验证"的部分有 `tests/test_poc_async.py` 的差分测试（`tests/poc_async/coroutines.py` 和手写的 `src/coroutines.rs`，和 CPython 比较输出），标了"计划"的还没有实现。
+
+生成的代码，以 `async def` 为例（已验证）：
+
+```rust
+// async def fetch(session, url):
+//     resp = await session.get(url)
+//     return await resp.text()
+pub async fn fetch<'py>(
+    m: &rt::Module<'py>,
+    session: &Bound<'py, PyAny>,
+    url: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "fetch", 1, async |_| {
+        let resp = rt::await_(session.method1("get", (url,))?).await?;
+        rt::await_(resp.method0("text")?).await
+    })
+}
+rt::def!(m, async fetch(session, url))?;
+```
+
+生成器函数一样，`yield x` 是 `rt::yield_(&x).await?`，`x = yield` 的值就是它的结果，`yield from it` 是 `rt::yield_from(it).await?`，定义写成 `rt::def!(m, gen count_up(n))?`（`gen` 是 2024 edition 为 `gen` 块保留的关键字，宏里可以直接用）。
+
+- **签名和普通函数一样**，参数是 `&rt::Module`、`&Bound`，返回 `PyResult<Bound>`，只是多了 `async`。调用会创建 future，future 比调用活得久，所以 `rt::def!` 存的闭包拥有参数，在一个 `async move` 块里用引用调用这个 `async fn`（自引用的 future 是 `async` 块允许的）。直接调用因此和同步函数一样写：`add_later(m, &x, &rt::int(py, 1)).await?`
+- **没有执行器。** `rt::Coroutine`（Python 里的类型名是 `coroutine`）和生成器的对象各自持有一个 `Pin<Box<dyn Future>>`。`send(v)` 把 `v` 放进这一次 poll 的通道（`Channel`，在 `send` 的栈上），poll 一次：future 返回 `Pending` 时把通道里待交出的值返回给 Python，`Ready(Ok(r))` 抛 `StopIteration(r)`，`Ready(Err(e))` 抛 `e`。`throw(e)` 一样，只是放进通道的是异常。waker 什么都不做，它的数据指针是通道的地址，`rt::await_` 这些 future 通过它找到通道（再和线程局部的"当前通道"比较，不是当前这一次 poll 的就不用）。所以进展只来自 Python 调用 `send`/`throw`/`close`，驱动它的可以是 asyncio，也可以是任何手写的 trampoline（已验证，测试里有一个不用 asyncio 的循环）
+- **`rt::await_(x)`** 是手写的 future，按 PEP 492 取 `x.__await__()`（CPython 的协程和 `types.coroutine` 的生成器直接用，`'int' object can't be awaited`、`__await__() returned non-iterator of type 'int'` 等文字和 3.14 一样），然后按 PEP 380 委托：通道里的值用 `PyIter_Send` 转给它，异常转给它的 `throw`，`GeneratorExit` 先 `close()` 它再在本地抛出（`_gen_throw` 的规则），它 yield 的值放进通道并返回 `Pending`，`StopIteration(r)` 变成 `Ready(r)`。`rt::yield_from` 是同一个 future，只是取 `iter(x)`，并且和 CPython 一样拒绝协程对象。`rt::yield_(v)` 第一次 poll 把 `v` 放进通道返回 `Pending`，第二次返回送进来的值或抛出送进来的异常（都已验证）
+- **对象的行为和 CPython 一样**（已验证）：没开始时只能 `send(None)`，重入时 `ValueError: coroutine already executing`，结束后再用 `RuntimeError: cannot reuse already awaited coroutine`（生成器是 `StopIteration`），函数体里的 `StopIteration` 变成 `RuntimeError: coroutine raised StopIteration`（PEP 479），没开始就 `throw` 时异常在第一条语句之前抛出（traceback 里有这个函数的 `def` 行），`close()` 在暂停处抛 `GeneratorExit`、`finally` 照常执行，捕获后又暂停的抛 `RuntimeError: coroutine ignored GeneratorExit`，捕获后 `return` 的值是 `close()` 的结果（3.13）。`__await__` 返回 `coroutine_wrapper` 那样的迭代器。`cr_running`、`cr_suspended`、`gi_running`、`gi_suspended`、可写的 `__name__`/`__qualname__`（调用时取自函数对象）、`repr`。`StopAsyncIteration` 的转换只属于异步生成器，协程没有
+- **释放时的行为**（已验证）：开始了没结束的协程和生成器在释放时 `close()`，`finally` 的输出顺序和 CPython 一样（`del` 时、`gc.collect()` 回收循环时），出错时经过 `sys.unraisablehook`，消息是 CPython 的 `Exception ignored while closing generator <..>`；从没开始的协程发出 `RuntimeWarning: coroutine '..' was never awaited`（经过 `warnings._warn_unawaited_coroutine`，位置也一样）。CPython 在 `tp_finalize` 里做这些，PyO3 的类不能声明它，PyO3 的 `tp_dealloc` 也不调用终结器，所以和 M11 的 vectorcall 一样，在创建第一个对象时补上类型对象的 `tp_finalize`，并把 `tp_dealloc` 换成先调用 `PyObject_CallFinalizerFromDealloc` 再调用 PyO3 原来的那个
+- **`asyncio` 接受它们**（已验证）：`collections.abc.Coroutine` 的 `__subclasshook__` 按方法认出 `rt::Coroutine`，所以 `asyncio.iscoroutine` 为 True，`create_task`、`gather`、取消都能用。函数对象的 `__code__` 带 `CO_COROUTINE`（生成器是 `CO_GENERATOR`），`inspect.iscoroutinefunction`、`inspect.isgeneratorfunction` 为 True。`inspect.iscoroutine` 为 False（§12）
+- **帧**（已验证）：`rt::frame!` 的闭包可以是 `async` 闭包（Rust 1.85 起稳定），宏替它 `.await`。帧和函数体一样长寿，跨过多次暂停的异常只有一项，行号的 marker 照常工作，经过 `await` 往外传的异常的 traceback 和 CPython 一样（测试比较了帧的名字和行号）。`try`/`except` 和 `try`/`finally` 的 `try` 部分从同步代码的立即调用的闭包 `(|| { .. })()` 换成 `async { .. }.await`，`with` 的函数体会暂停时用 `frame.with_async(&manager, async |value| { .. }).await?`
+- **正在处理的异常**（已验证）：CPython 的生成器有自己的异常状态（`gi_exc_state`），在 `except` 里暂停时 `sys.exception()` 不会泄漏给调用方，恢复后又回来，自己没有时看到调用方的。runtime 在 poll 前后做同样的保存和恢复，`rt::Handling` 在协程里记住"之前的异常是调用方的"，结束时恢复成那一次 poll 的调用方的异常，而不是它创建时的
+- **直接 await 和递归**：两个原生的 `async def` 之间满足第 7 节直接调用条件的 `await f(x)` 直接 await Rust 的 future，没有 Python 对象（已验证）；其余的经过函数对象和 `rt::await_`。递归的 `async fn` 要 `Box::pin(countdown(m, &n.sub(1)?)).await?`（已验证），lowering 按调用图给递归的直接 await 加上 `Box::pin`（计划）。同步函数的直接递归用的 `RecursionGuard` 不能跨过 `.await` 持有（暂停期间它还算在线程的深度里），要换成只包住每一次 poll 的形式（计划）
+- **以后用 helper 做的**（计划）：`async with`（`__aenter__`/`__aexit__`）和 `async for`（`__aiter__`/`__anext__`、`StopAsyncIteration`）写成 `frame.async_with(..)`、`rt::async_for` 一类的 helper，函数体同样是 `async` 闭包。lambda 和嵌套的 `async def` 捕获变量的写法和普通函数一样，宏已经支持，但还没有测试
+- **先保留为 Python 的**（计划）：异步生成器（`async def` 里有 `yield`，需要 `asend`/`athrow`/`aclose` 和 `sys.set_asyncgen_hooks`）、异步推导式、生成器里的 `await`（`types.coroutine`）
+- **改写时**（§15）：生成器函数通常会改写成 Rust 的 `Iterator`，适配层把它包成 Python 的迭代器即可，不需要这里的机制。改写过的协程如果 await 了 Rust 生态的 future（例如 tokio 的），那个 future 返回 `Pending` 之后不会被唤醒（waker 什么都不做），runtime 会报 `RuntimeError: coroutine '..' awaited a Rust future that is not driven by Python`。需要的话可以加一个桥接的 helper，用 asyncio 的 future 当 waker：Rust future 返回 `Pending` 时交出一个 asyncio future，waker 被调用时（可能在别的线程）用 `call_soon_threadsafe` 完成它。只有手工改写的代码需要，生成的代码不会用到
+
+**生命周期和 unsafe。** future 存在 Python 对象里，必须是 `'static`，而生成的代码用的是 `Bound<'py, ..>`。runtime 在创建协程时用 `Python::assume_attached()` 得到 `Python<'static>`，把模块、闭包和参数重新绑定到这个 token，再调用存下来的 `for<'py> fn(..)`，也就是用 `'py = 'static` 实例化函数体。这是唯一的一处，理由是：future 只在 `send`/`throw`/`close` 和终结器里 poll，只在这些地方、对象释放或被 GC 清理时 drop，都是 attach 的线程，free-threaded 的构建本来就编译不过（§6），所以 attach 就是持有 GIL；函数体对所有 `'py` 都成立，不能把这个 token 或对象存到 future 以外的地方，对象离开 future 时是 `Py<PyAny>`（交出的值）或重新绑定到调用方的 token（结果）。其余的 unsafe 也都集中在 `coroutine.rs`，各有 SAFETY 注释：future 的 `Send`（它在对象的 `Mutex` 后面，poll 时取出，只在 attach 的线程上使用，和 CPython 一样可以在别的线程上恢复）、waker（函数不使用数据指针）、通过 waker 找到通道（先和线程局部的当前通道比较）、`tp_finalize`/`tp_dealloc` 的替换、`PyIter_Send` 和 `PyErr_FormatUnraisable` 的 ffi。
+
+否决的方案
+
+- PyO3 的 `experimental-async`：waker 绑定 asyncio，`throw` 直接丢掉 future（`finally` 不执行），也不能委托给 Python 的 awaitable
+- 第一个参数传一个 `co` 对象让函数体 `co.yield_(..)`：通道通过 waker 找到，生成代码里不需要多一个参数
+- 参数按值传（`session: Bound<'py, PyAny>`）：直接调用时到处是 `.clone()`，和同步函数的写法也不一样
 
 ## 9. 异常（M4）
 
@@ -1113,6 +1160,11 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 - 其余省略的参数从 globals 里当前的函数对象读取。如果别的模块把这个名字换成了别的对象（monkeypatch，或者 `sys.modules[__name__].f = g`），直接调用照常执行原来的 Rust 函数，读默认值时抛 `TypeError: f() was replaced by <function g at 0x..>, but transpiled code calls the original directly and can not take the default of its parameter 'b' from the replacement`。CPython 会调用替换后的函数，要做到一样，直接调用就得在每次调用前检查 globals，失去了直接调用的意义，所以只保证报错清楚。M3c 之前这里会 panic默认值被删掉（`__defaults__ = None`）后直接调用缺参数时，`TypeError` 只列出第一个缺少的参数，其余参数也已经求值
 - 模块级的重复定义（同名的第二个及以后的顶层 `def`）保留为 Python（§13）。模块级复合语句里的 `def`（`if` 里的条件定义、循环和 `try` 里的定义，M8）是 `exec_module` 里的 fn item，执行到 `def` 时绑定到 globals，调用一律经过 globals
 - 生成器表达式的对象（§8）不是 `types.GeneratorType`，而是 runtime 的 `generator` 类：`collections.abc.Generator`、`Iterator` 的 `isinstance` 为 True，`inspect.isgenerator(g)` 和 `isinstance(g, types.GeneratorType)` 为 False。`gi_frame`、`gi_code`、`gi_yieldfrom` 是 `None`，所以 `inspect.getgeneratorstate` 对还没开始的生成器返回 `GEN_CLOSED`（CPython 是 `GEN_CREATED`），开始之后的状态一致。`throw()` 抛出的异常的 traceback 里没有 `<genexpr>` 那一帧
+- 原生的协程和生成器函数（§8 "协程和生成器"，M13 PoC，`tests/test_poc_async.py` 检查前两条）
+  - 协程是 runtime 的 `coroutine` 类型，不是 `types.CoroutineType`：`asyncio.iscoroutine`、`isinstance(c, collections.abc.Coroutine)` 为 True，`inspect.iscoroutine(c)` 为 False，生成器同理（`inspect.isgenerator` 为 False）。`cr_frame`、`cr_code`、`cr_await`、`cr_origin`（生成器的 `gi_frame`、`gi_code`、`gi_yieldfrom`）都是 `None`，所以 `inspect.getcoroutinestate` 对没开始的协程返回 `CORO_CLOSED`，`sys.set_coroutine_origin_tracking_depth` 不起作用，按 `cr_await` 链打印任务栈的工具（`asyncio` 的 `Task.print_stack`、`python -m asyncio ps`）看不到原生协程里面。Cython 的协程有同样的限制
+  - 暂停的协程和生成器持有的对象（参数和局部变量，都在 Rust 的 future 里）对 GC 不可见，经过它们的循环引用不会被回收，`finally` 也不会执行，直到循环被别的方式打断。CPython 会回收并 `close()` 它们。asyncio 里常见的 `self._task = create_task(self._run())` 在任务一直暂停又被丢弃时就是这样的循环。可以改进的方向是让对象自己持有参数并让 GC 看到它们，future 只借用，但局部变量仍然看不到
+  - 一个 `except` 块跨过暂停、并且其间调用方正在处理的异常恰好就是这个块的异常对象时，恢复后 `sys.exception()` 看到的是之后调用方的异常（`rt::Handling` 按地址区分"自己的"和"调用方的"）
+  - 生成器里的 `RecursionGuard`、改写后的代码里 await 的 Rust future（例如 tokio 的）见 §8
 - 模块级只有一个参数的 `exec(src)`、`eval(src)` 在原生代码里显式传入模块的 globals（`exec(src, globals())`），和 CPython 在模块级的行为一样。函数里的要读写局部变量，所在的函数保留为 Python
 - 模块级不带参数的 `globals()`、`locals()`、`vars()` 都是模块的 globals 字典，`dir()` 是排好序的名字列表（`m.dir()?`），和 CPython 一样。函数里不带参数的 `locals()`、`vars()`、`dir()` 要读局部变量，所在的函数保留为 Python
 - 项目（§7，M6）的差异
@@ -1306,6 +1358,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式和 `--traceback-lines` 转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
 - **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。`skime`（M10）是一个 Scheme 实现（MIT 许可，约 4800 行）的原样副本加驱动脚本 `app.py`，把 `programs/` 下的 Scheme 程序喂给它的 REPL 或用嵌入 API 加载，覆盖尾递归、call/cc、宏、向量和字符串，以及从 VM 深处抛出的未捕获异常。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，M7 起 `main.rs` 里没有绝对路径，不用替换；skime 的有 1.5 万行，不做 golden），默认输出和 `--traceback-lines` 的输出都要求编译没有警告、clippy 干净，后者在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
 - **分发**（M7，`tests/test_dist.py`）：`tests/dist_apps/hello` 用到 json、`subprocess.run([sys.executable, "-c", ..])` 和一个第三方包，`tests/dist_apps/mp` 用 spawn 和 forkserver 的 `Pool.map`（模块级的原生函数、`__main__` 里定义的类的实例、在 worker 里抛异常）和 `ProcessPoolExecutor`。构建用的 venv 是 `target/e2e/dist-venv`，用 `python -m venv --without-pip` 创建，`site-packages` 里直接写入一个本地包 `greeting`（加上 dist-info），不需要网络，路径固定，cargo 缓存的依赖在两次测试之间仍然有效。`steelix build` 的结果在 `bwrap` 里运行：只挂载 `/usr`（和 `/lib`、`/bin` 等指向它的链接）、`/etc/ld.so.cache`、`/proc`、`/dev`、空的 `/tmp`，分发目录只读地挂在无关的 `/opt/program`，环境变量只有 `PATH`，看不到 `$HOME`、uv 的 Python、仓库和 venv（测试本身检查这一点）。在里面运行 hello（有源文件和 `--no-sources` 两种，比较输出和 traceback 的帧，有源文件时才有源码行）、json 项目的脚本和 `-m json`（`--no-sources`，和 CPython 比较 stdout、退出码和最后一行 stderr）、mp（`--no-sources`，和 CPython 的输出完全相同，worker 里也调用项目的包 `mptools` 的函数；另外以 `-m mptools.cli` 构建，`src/` 里没有 `mptools` 目录，spawn 和 forkserver 的子进程仍然能 import 转换过的子模块）、`tests/dist_apps/pkgapp`（`--no-sources`，包里的数据文件经过 `importlib.resources` 和 `pkgutil.get_data`，附带的解释器在项目目录里运行 `-m pkg.cli`，在别的目录里 import 不到项目模块，构建时对没有复制的顶层模块 `dyn.py` 给出警告）。M7a 加了几个回归测试：程序收到 multiprocessing 子进程的命令行时和 CPython 一样把它当作参数（分发和开发构建都测），分发在 bwrap 外面用假的 `HOME`（里面有 `usercustomize.py`）和 `PYTHONPATH` 等变量运行，输出不变，`STEELIX_PYTHON_ENV=1` 时生效，标准库和 site-packages 的 `.pyc` 头部是 unchecked-hash。另外检查程序里没有构建机器的路径、`--archive` 解压后的布局和链接，以及开发构建的 mp 在源文件删掉之后仍然正确。没有 `bwrap` 时这些测试跳过。dist 的组装、`project_files`（包里的数据文件）、没有复制的顶层模块的警告、`compile_tree`（`.pyc` 的校验方式、编译不过的文件、`compileall` 失败）、`inspect_python`（包括没有 `METADATA` 的 `.dist-info` 和 `include-system-site-packages = true` 的 venv）、rustflags 有单元测试，runtime 识别 multiprocessing 命令行和开发构建子进程标记的 Rust 单元测试也由 pytest 运行。ext 模式的测试另外用 `python -m store.__main__` 检查 `NativeLoader.get_code`
+- **协程和生成器的 PoC**（M13，`tests/test_poc_async.py`）：`tests/poc_async/coroutines.py` 里的协程和生成器函数在 `src/coroutines.rs` 里按以后生成的样子手写成原生代码（`rt::def!(m, async ..)`、`rt::def!(m, gen ..)`），驱动它们的代码保留为 Python（`rt::exec_python!`）。crate 由 `emit_crate` 生成后换上这个文件，要求 clippy 干净，输出、stderr（没被 await 的协程的警告）和退出码和 CPython 运行同一份源码相同，文档化的差异（§12）在测试里逐行列出
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
 - **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
@@ -1410,6 +1463,7 @@ pub fn percentile<'py>(
 - monkeypatch：原生函数内部不再经过 Python，替换它读的全局变量（`mock.patch("app.LIMIT")`）或它调用的函数都对它不起作用。替换函数本身的效果不变，只影响经过 Python 的调用（第 12 节）
 - 异常：原生函数里没有 Python 异常，失败用 `Option`/`Result` 表示，由适配层转回去。约定是适配层抛出和原来的 Python 代码相同类型的异常，调用方（生成的代码或者保留的 Python 代码）的 `except` 才能照常接住；确实要改变行为时要有意识地决定并写明。例子里的 `parse_line` 遇到不是数字的大小或时间时返回 `Err(native::NotANumber(text))`，适配层把它转成和 `int()` 一样的 `ValueError`（`invalid literal for int() with base 10: '12x'`），生成的 `load` 照常用 `except ValueError` 把这一行当成格式错误。panic 经过 PyO3 会变成 `PanicException`，不要用它表达预期中的错误
 - 数值语义：Python 的 int 没有上限，换成 `u64`/`usize` 后溢出在 debug 构建里 panic，在 release 构建里回绕。浮点运算的顺序变了，结果可能在最后一位上不同
+- 异步：改写过的协程只能 await Python 的 awaitable 和原生协程的 future。Rust 生态的 future（tokio 等）返回 `Pending` 之后不会被唤醒，因为驱动协程的是 Python 的 `send`，waker 什么都不做（§8 "协程和生成器"）。要用它们需要一个用 asyncio 的 future 当 waker 的桥接 helper，还没有做
 - 重新生成：改写过的模块文件从此由人维护，不能再用 steelix 覆盖。Python 源码有变化时，重新生成到别的目录，再把没有改写过的函数手工合并过来
 
 ## 16. 待定问题

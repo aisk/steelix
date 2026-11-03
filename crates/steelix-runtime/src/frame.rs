@@ -174,6 +174,15 @@ impl<'py> Scope<'py> for Module<'py> {
     }
 }
 
+impl<'py, S: Scope<'py>> Scope<'py> for &S {
+    fn globals(&self) -> &Bound<'py, PyDict> {
+        S::globals(self)
+    }
+    fn class_namespace(&self) -> Option<&Bound<'py, PyAny>> {
+        S::class_namespace(self)
+    }
+}
+
 impl<'py> Scope<'py> for crate::Namespace<'py> {
     fn globals(&self) -> &Bound<'py, PyDict> {
         self.module().globals()
@@ -190,18 +199,42 @@ pub fn run<'py, T>(
     code: &'static Code,
     body: impl FnOnce(&Frame<'py>) -> PyResult<T>,
 ) -> PyResult<T> {
-    let frame = Frame {
-        globals: scope.globals().clone(),
-        class_namespace: scope.class_namespace().cloned(),
-        code,
-        line: Cell::new(code.first_line),
-        object: RefCell::new(None),
-        entered: Cell::new(Entered::NONE),
-    };
+    let frame = Frame::new(scope, code);
     body(&frame).map_err(|err| PyErr::from_value(frame.catch(err)))
 }
 
+/// Runs the body of a native coroutine or generator in a traceback frame:
+/// [`frame!`](crate::frame) with an `async` closure.
+///
+/// The frame lives as long as the body, across its suspensions, so an
+/// exception gets one entry for it however often the body was resumed. An
+/// exception thrown in before the body started is raised here, before the
+/// first statement, like CPython does.
+pub async fn run_async<'py, T>(
+    scope: &impl Scope<'py>,
+    code: &'static Code,
+    body: impl AsyncFnOnce(&Frame<'py>) -> PyResult<T>,
+) -> PyResult<T> {
+    let frame = Frame::new(scope, code);
+    let result = match crate::coroutine::thrown_at_start().await {
+        Some(err) => Err(err),
+        None => body(&frame).await,
+    };
+    result.map_err(|err| PyErr::from_value(frame.catch(err)))
+}
+
 impl<'py> Frame<'py> {
+    fn new(scope: &impl Scope<'py>, code: &'static Code) -> Self {
+        Frame {
+            globals: scope.globals().clone(),
+            class_namespace: scope.class_namespace().cloned(),
+            code,
+            line: Cell::new(code.first_line),
+            object: RefCell::new(None),
+            entered: Cell::new(Entered::NONE),
+        }
+    }
+
     pub fn py(&self) -> Python<'py> {
         self.globals.py()
     }
@@ -400,6 +433,50 @@ impl<'py> Frame<'py> {
         }
     }
 
+    /// [`Frame::with`] for a `with` statement in a coroutine or generator
+    /// whose body awaits or yields: the body is an `async` closure.
+    ///
+    /// ```ignore
+    /// frame.with_async(&lock, async |_| {
+    ///     rt::yield_(&item).await?;
+    ///     Ok(())
+    /// })
+    /// .await?;
+    /// ```
+    pub async fn with_async<T: Default>(
+        &self,
+        manager: &Bound<'py, PyAny>,
+        body: impl AsyncFnOnce(&Bound<'py, PyAny>) -> PyResult<T>,
+    ) -> PyResult<T> {
+        let py = self.py();
+        let line = self.line.get();
+        let exit = special_method(manager, "__exit__")?;
+        let enter = special_method(manager, "__enter__")?;
+        let value = enter.call0()?;
+        let result = body(&value).await;
+        match result {
+            Ok(result) => {
+                self.line(line);
+                exit.call1((py.None(), py.None(), py.None()))?;
+                Ok(result)
+            }
+            Err(err) => {
+                let exception = self.catch(err);
+                self.line(line);
+                let _handling = Handling::new(&exception);
+                let traceback = exception.getattr("__traceback__")?;
+                let suppress = exit
+                    .call1((exception.get_type(), &exception, traceback))?
+                    .is_truthy()?;
+                if suppress {
+                    Ok(T::default())
+                } else {
+                    Err(self.reraise_exception(exception))
+                }
+            }
+        }
+    }
+
     /// Adds this frame's traceback entry at the current line to `exception`.
     ///
     /// Adding the entry can only fail when Python itself is in trouble (no
@@ -515,9 +592,21 @@ pub enum Flow<'py> {
 /// `sys.exception()` returns it, and exceptions raised meanwhile get it as
 /// `__context__`. Restores the previous one when dropped, on every way out
 /// of the block (`?`, `return`, `break`, a panic).
+///
+/// In the body of a native coroutine or generator the block may span
+/// suspensions, and the caller may be handling a different exception at
+/// each resumption. A previous exception that was the caller's then stands
+/// for "the caller's", whatever it is when the block ends, like the
+/// exception state of a CPython generator falls back to its caller's. A
+/// body dropped outside its own poll (a suspended generator that is
+/// deallocated) restores nothing: the thread's state is not its own.
 pub struct Handling<'py> {
     py: Python<'py>,
     previous: Option<Bound<'py, PyAny>>,
+    /// The coroutine whose poll created the guard (null outside one), and
+    /// whether `previous` was its caller's exception.
+    coroutine: *const (),
+    inherited: bool,
 }
 
 impl<'py> Handling<'py> {
@@ -526,22 +615,49 @@ impl<'py> Handling<'py> {
         // SAFETY: attached to the interpreter. `PyErr_GetHandledException`
         // returns a new reference or NULL; `PyErr_SetHandledException` takes
         // its own reference.
-        unsafe {
+        let previous = unsafe {
             let previous = Bound::from_owned_ptr_or_opt(py, ffi::PyErr_GetHandledException());
             ffi::PyErr_SetHandledException(exception.as_ptr());
-            Self { py, previous }
+            previous
+        };
+        let (coroutine, inherited) = match crate::coroutine::polling() {
+            Some((coroutine, caller)) => {
+                let previous = previous
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), Bound::as_ptr);
+                (coroutine, previous == caller)
+            }
+            None => (std::ptr::null(), false),
+        };
+        Self {
+            py,
+            previous,
+            coroutine,
+            inherited,
         }
     }
 }
 
 impl Drop for Handling<'_> {
     fn drop(&mut self) {
-        let previous = self
+        let _ = self.py;
+        let mut previous = self
             .previous
             .as_ref()
             .map_or(std::ptr::null_mut(), Bound::as_ptr);
-        let _ = self.py;
-        // SAFETY: attached (we hold `Bound`s); NULL clears it.
+        if !self.coroutine.is_null() {
+            match crate::coroutine::polling() {
+                Some((coroutine, caller)) if coroutine == self.coroutine => {
+                    if self.inherited {
+                        previous = caller;
+                    }
+                }
+                _ => return,
+            }
+        }
+        // SAFETY: attached (we hold `Bound`s); `previous` is NULL, an object
+        // we hold, or the caller's exception, which the running poll keeps
+        // alive. NULL clears it.
         unsafe { ffi::PyErr_SetHandledException(previous) };
     }
 }
@@ -673,7 +789,7 @@ fn special_method<'py>(
     Err(crate::raised(PyTypeError::new_err(message)))
 }
 
-fn lookup_special<'py>(
+pub(crate) fn lookup_special<'py>(
     object: &Bound<'py, PyAny>,
     name: &'static str,
 ) -> PyResult<Option<Bound<'py, PyAny>>> {
@@ -725,8 +841,22 @@ fn traceback_type(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// for the module body) and the line of its `def`. A class body passes its
 /// namespace instead of the module, its `__qualname__` and the line of its
 /// first decorator (or `class`).
+///
+/// In the body of a native coroutine or generator (an `async fn`) the
+/// closure is `async`, and the macro awaits it:
+///
+/// ```ignore
+/// rt::frame!(m, "fetch", 1, async |_| {
+///     let resp = rt::await_(session.method1("get", (&url,))?).await?;
+///     rt::await_(resp.method0("text")?).await
+/// })
+/// ```
 #[macro_export]
 macro_rules! frame {
+    ($module:expr, $qualname:literal, $line:literal, async $($body:tt)+) => {{
+        static CODE: $crate::frame::Code = $crate::frame::Code::new($qualname, $line);
+        $crate::frame::run_async(&$module, &CODE, async $($body)+).await
+    }};
     ($module:expr, $qualname:literal, $line:literal, $body:expr $(,)?) => {{
         static CODE: $crate::frame::Code = $crate::frame::Code::new($qualname, $line);
         $crate::frame::run($module, &CODE, $body)

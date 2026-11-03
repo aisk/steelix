@@ -35,6 +35,8 @@ mod cell;
 #[doc(hidden)]
 pub mod class;
 #[doc(hidden)]
+pub mod coroutine;
+#[doc(hidden)]
 pub mod display;
 #[doc(hidden)]
 pub mod function;
@@ -62,6 +64,7 @@ pub use frame::{Flow, Frame, Handling, IntoException};
 pub use attr::Attributes;
 pub use cell::Cell;
 pub use class::{Namespace, super_};
+pub use coroutine::{Coroutine, await_, yield_, yield_from};
 pub use function::{Body, Function, FunctionDef, Signature};
 pub use generator::{Generator, next};
 pub use import::{import, import_from, import_module, import_names};
@@ -472,18 +475,28 @@ macro_rules! function {
     (@dotted $h:tt [$($d:tt)*] [$($p:ident)*] $($rest:tt)*) => {
         $crate::function!(@decorators $h [$($d)* {name $($p)*}] $($rest)*)
     };
-    (@decorators ($mode:ident, $definer:expr) [$($d:tt)*]
+    // --- what kind of function: `async def`, a generator, or plain ---
+    (@decorators $h:tt [$($d:tt)*] async $($rest:tt)*) => {
+        $crate::function!(@signature $h [$($d)*] coroutine $($rest)*)
+    };
+    (@decorators $h:tt [$($d:tt)*] gen $($rest:tt)*) => {
+        $crate::function!(@signature $h [$($d)*] generator $($rest)*)
+    };
+    (@decorators $h:tt [$($d:tt)*] $($rest:tt)*) => {
+        $crate::function!(@signature $h [$($d)*] function $($rest)*)
+    };
+    (@signature ($mode:ident, $definer:expr) [$($d:tt)*] $kind:ident
         $f:ident $(as $n:literal)? $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)?
         $(, $key:ident = $value:literal)* $(,)?) => {{
         let definer = $definer;
         $crate::function!(@$mode definer
-            ($f, [$($n)?], [$($($caps)*)?], [$($params)*], [$($ret)?], [$($key = $value),*])
+            ($kind, $f, [$($n)?], [$($($caps)*)?], [$($params)*], [$($ret)?], [$($key = $value),*])
             $($d)*)
     }};
     (@value $definer:ident $sig:tt $($d:tt)*) => {
         $crate::function!(@decorate $definer $sig $($d)*)
     };
-    (@bind $definer:ident ($f:ident, $n:tt, $caps:tt, $params:tt, $ret:tt, $opts:tt) $($d:tt)*) => {
+    (@bind $definer:ident ($kind:ident, $f:ident, $n:tt, $caps:tt, $params:tt, $ret:tt, $opts:tt) $($d:tt)*) => {
         $crate::function::Definer::bind(
             $definer,
             $crate::function::def_name(
@@ -491,7 +504,7 @@ macro_rules! function {
                 $crate::function!(@opt qualname $opts),
                 stringify!($f),
             ),
-            $crate::function!(@decorate $definer ($f, $n, $caps, $params, $ret, $opts) $($d)*)?,
+            $crate::function!(@decorate $definer ($kind, $f, $n, $caps, $params, $ret, $opts) $($d)*)?,
         )
     };
     // Evaluates the first decorator, then (recursively) the others and the
@@ -502,8 +515,8 @@ macro_rules! function {
         let function = $crate::function!(@decorate $definer $sig $($rest)*)?;
         decorator.call1((function,))
     }};
-    (@decorate $definer:ident ($f:ident, $n:tt, [$($caps:tt)*], [$($params:tt)*], $ret:tt, $opts:tt)) => {
-        $crate::function!(@caps ($definer, $f, $n, [$($params)*], $ret, $opts) [] $($caps)*)
+    (@decorate $definer:ident ($kind:ident, $f:ident, $n:tt, [$($caps:tt)*], [$($params:tt)*], $ret:tt, $opts:tt)) => {
+        $crate::function!(@caps ($definer, $kind, $f, $n, [$($params)*], $ret, $opts) [] $($caps)*)
     };
     (@decorator $definer:ident expr $e:expr) => { $e };
     (@decorator $definer:ident name $first:ident $($attr:ident)*) => {{
@@ -517,8 +530,8 @@ macro_rules! function {
     (@caps $h:tt [$($c:tt)*] $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
         $crate::function!(@caps $h [$($c)* {value $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
     };
-    (@caps ($module:expr, $f:ident, $fname:tt, [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
-        $crate::function!(@params ($module, $f, $fname, [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
+    (@caps ($module:expr, $kind:ident, $f:ident, $fname:tt, [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
+        $crate::function!(@params ($module, $kind, $f, $fname, [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
     };
     // --- parameters, sorted into positional-only, positional, `*args`,
     // keyword-only and `**kwargs` ---
@@ -554,7 +567,7 @@ macro_rules! function {
         $crate::function!(@build $h [$($po)*] [$($p)*] [$($v)*] [$($k)*] [$($vk)*])
     };
     // --- the function object ---
-    (@build ($module:expr, $f:ident, $fname:tt, [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
+    (@build ($module:expr, $kind:ident, $f:ident, $fname:tt, [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
         [$({$po:ident, $pon:expr, [$($pod:expr)?], [$($poa:literal)?]})*]
         [$({$p:ident, $pn:expr, [$($pd:expr)?], [$($pa:literal)?]})*]
         [$({$v:ident, $vn:expr, [], [$($va:literal)?]})?]
@@ -585,20 +598,8 @@ macro_rules! function {
         ];
         let closure = ::std::vec![$($crate::function!(@capture $ck $c),)*];
         static CLOSURE_NAMES: &[&str] = &[$($cn),*];
-        let body: $crate::Body = |module, closure, args| {
-            // Named before the parameters, which may shadow the function.
-            let target = $f;
-            let [$($c),*] = closure else {
-                unreachable!("the closure has one cell per captured variable")
-            };
-            $($crate::function!(@captured $ck $c, $cn);)*
-            let [$($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?] = args else {
-                unreachable!("`Function` binds one value per parameter")
-            };
-            $(let $v = $crate::function::as_tuple($v);)?
-            $(let $vk = $crate::function::as_dict($vk);)?
-            $crate::function!(@call target(module; $($c),*; $($po,)* $($p,)* $($v,)? $($k,)* $($vk,)?))
-        };
+        let body = $crate::function!(@body $kind, $f, [$({$ck $c, $cn})*],
+            [$($po)* $($p)*], [$($v)?], [$($k)*], [$($vk)?]);
         $crate::Function::create(module, $crate::FunctionDef {
             name: $crate::function!(@pyname $fname [$($key = $value),*]),
             qualname: $crate::function!(@opt qualname [$($key = $value),*]),
@@ -615,6 +616,56 @@ macro_rules! function {
             body,
         })
     }};
+    // --- the body: a closure that hands the bound arguments to the Rust fn ---
+    (@body function, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*],
+        [$($p:ident)*], [$($v:ident)?], [$($k:ident)*], [$($vk:ident)?]) => {
+        $crate::function::Kind::Function(|module, closure, args| {
+            // Named before the parameters, which may shadow the function.
+            let target = $f;
+            let [$($c),*] = closure else {
+                unreachable!("the closure has one cell per captured variable")
+            };
+            $($crate::function!(@captured $ck $c, $cn);)*
+            let [$($p,)* $($v,)? $($k,)* $($vk,)?] = args else {
+                unreachable!("`Function` binds one value per parameter")
+            };
+            $(let $v = $crate::function::as_tuple($v);)?
+            $(let $vk = $crate::function::as_dict($vk);)?
+            $crate::function!(@call target(module; $($c),*; $($p,)* $($v,)? $($k,)* $($vk,)?))
+        })
+    };
+    // A coroutine or generator: the Rust fn is an `async fn`, and the
+    // closure returns a future that owns the arguments and awaits it.
+    (@body $kind:ident, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*],
+        [$($p:ident)*], [$($v:ident)?], [$($k:ident)*], [$($vk:ident)?]) => {
+        $crate::function!(@kind $kind)(|module, closure, args| {
+            let target = $f;
+            let mut closure = closure.into_iter();
+            $(let $c = closure.next().expect("the closure has one cell per captured variable");)*
+            $($crate::function!(@captured_owned $ck $c, $cn);)*
+            let mut args = args.into_iter();
+            $(let $p = args.next().expect("`Function` binds one value per parameter");)*
+            $(let $v = $crate::function::into_tuple(args.next().expect("`*args` is bound"));)?
+            $(let $k = args.next().expect("`Function` binds one value per parameter");)*
+            $(let $vk = $crate::function::into_dict(args.next().expect("`**kwargs` is bound"));)?
+            let future: $crate::coroutine::BodyFuture<'_> = ::std::boxed::Box::pin(async move {
+                $crate::function!(@call_async target(module; $($c),*; $($p,)* $($v,)? $($k,)* $($vk,)?))
+                    .await
+            });
+            ::std::result::Result::Ok(future)
+        })
+    };
+    (@kind coroutine) => { $crate::function::Kind::Coroutine };
+    (@kind generator) => { $crate::function::Kind::Generator };
+    (@captured_owned value $c:ident, $cn:expr) => {
+        let $c = $crate::function::cell_contents(&$c, $cn)?;
+    };
+    (@captured_owned cell $c:ident, $cn:expr) => {
+        let $c = $crate::Cell::free(&$c, $cn);
+    };
+    (@call_async $f:ident($module:ident; $($c:ident),*; $($p:ident,)*)) => {
+        $f(&$module, $(&$c,)* $(&$p),*)
+    };
     (@name $id:ident) => { stringify!($id) };
     (@name $id:ident $n:literal) => { $n };
     (@capture value $c:ident) => { $crate::function::capture(&$c)? };

@@ -74,6 +74,17 @@ pub type Body = for<'py> fn(
     &[Bound<'py, PyAny>],
 ) -> PyResult<Bound<'py, PyAny>>;
 
+/// What a call of the function runs.
+pub enum Kind {
+    /// A plain function: the body runs right away.
+    Function(Body),
+    /// `async def`: the call returns a coroutine, which runs the body when
+    /// it is awaited (design §8).
+    Coroutine(crate::coroutine::AsyncBody),
+    /// A function with `yield`: the call returns a generator.
+    Generator(crate::coroutine::AsyncBody),
+}
+
 /// Everything `function!` knows about a `def` or `lambda` when it executes.
 pub struct FunctionDef<'py> {
     /// The Python name, when it is not the last part of `qualname`.
@@ -101,7 +112,7 @@ pub struct FunctionDef<'py> {
     /// method's qualified name is `<class>.<name>` unless `qualname` says
     /// otherwise.
     pub class_qualname: Option<&'static str>,
-    pub body: Body,
+    pub body: Kind,
 }
 
 /// The `__name__` of a function created by `function!`: `name`, or the last
@@ -196,7 +207,7 @@ pub struct Function {
     /// function a direct call was compiled against from a replacement.
     def_name: &'static str,
     signature: &'static Signature,
-    body: Body,
+    body: Kind,
     globals: Py<PyDict>,
     closure: Option<Py<PyTuple>>,
     closure_names: &'static [&'static str],
@@ -368,7 +379,7 @@ impl Function {
         // a function with positional parameters only.
         if kwnames.is_empty() && sig.is_positional() {
             if args.len() == sig.positional {
-                return (self.body)(&module, closure, args);
+                return self.run(&module, closure, args);
             }
             if args.len() < sig.positional
                 && let Some(defaults) = self.defaults(py)
@@ -377,11 +388,33 @@ impl Function {
                 // The missing ones are the last parameters, whose defaults
                 // are the last ones.
                 let bound = [args, &defaults.as_slice()[first..]].concat();
-                return (self.body)(&module, closure, &bound);
+                return self.run(&module, closure, &bound);
             }
         }
         let bound = self.bind(py, args, kwnames, kwvalues)?;
-        (self.body)(&module, closure, &bound)
+        self.run(&module, closure, &bound)
+    }
+
+    /// Runs the body with the bound arguments, or creates the coroutine or
+    /// generator that will run it. Like CPython, its names are the
+    /// function's names at the time of the call.
+    fn run<'py>(
+        &self,
+        module: &Module<'py>,
+        closure: &[Bound<'py, PyAny>],
+        args: &[Bound<'py, PyAny>],
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let (body, generator) = match self.body {
+            Kind::Function(body) => return body(module, closure, args),
+            Kind::Coroutine(body) => (body, false),
+            Kind::Generator(body) => (body, true),
+        };
+        let py = module.py();
+        let (name, qualname) = {
+            let meta = self.meta();
+            (meta.name.clone_ref(py), meta.qualname.clone_ref(py))
+        };
+        crate::coroutine::create(module, closure, args, body, generator, name, qualname)
     }
 
     /// Binds call arguments to parameters like CPython's `initialize_locals`,
@@ -941,6 +974,13 @@ impl Function {
         if this.closure.is_some() {
             flags |= 0x10;
         }
+        // CO_GENERATOR, CO_COROUTINE: `inspect.isgeneratorfunction` and
+        // `inspect.iscoroutinefunction` read them.
+        match this.body {
+            Kind::Function(_) => {}
+            Kind::Generator(_) => flags |= 0x20,
+            Kind::Coroutine(_) => flags |= 0x80,
+        }
         let changes = PyDict::new(py);
         changes.set_item("co_name", name)?;
         changes.set_item("co_qualname", qualname)?;
@@ -1145,6 +1185,21 @@ pub fn as_tuple<'a, 'py>(value: &'a Bound<'py, PyAny>) -> &'a Bound<'py, PyTuple
 pub fn as_dict<'a, 'py>(value: &'a Bound<'py, PyAny>) -> &'a Bound<'py, PyDict> {
     value
         .cast()
+        .expect("`Function` passes `**kwargs` as a dict")
+}
+
+/// [`as_tuple`] for a coroutine or generator, which owns its arguments.
+#[doc(hidden)]
+pub fn into_tuple(value: Bound<'_, PyAny>) -> Bound<'_, PyTuple> {
+    value
+        .cast_into()
+        .expect("`Function` passes `*args` as a tuple")
+}
+
+#[doc(hidden)]
+pub fn into_dict(value: Bound<'_, PyAny>) -> Bound<'_, PyDict> {
+    value
+        .cast_into()
         .expect("`Function` passes `**kwargs` as a dict")
 }
 
