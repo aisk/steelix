@@ -4,7 +4,7 @@ steelix transpiles Python into Rust code that calls libpython through [PyO3](htt
 
 It is meant to help move Python projects to Rust. You transpile the project once and get a Rust program that behaves like the original. Semantics and error messages stay the same, the standard library and third party packages are still imported from Python, and tracebacks still point at the Python source. You can deploy that program right away, then replace its functions with ordinary Rust one at a time, keeping it working after every step.
 
-The generated code is written to be read and edited by people. It is plain PyO3 plus a small runtime crate.
+It is a bit like [Nuitka](https://nuitka.net), but the output is Rust instead of C, and the goal is readability rather than speed. Nuitka's C is meant for a compiler; steelix's Rust is meant to be read and edited by people, and becomes the starting point of the port. It is plain PyO3 plus a small runtime crate.
 
 ## Example
 
