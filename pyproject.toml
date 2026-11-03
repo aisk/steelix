@@ -3,6 +3,8 @@ name = "steelix"
 version = "0.1.0"
 description = "Transpile Python into readable Rust code built on PyO3"
 readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
     { name = "An Long", email = "aisk1988@gmail.com" }
 ]
