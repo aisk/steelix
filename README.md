@@ -97,15 +97,26 @@ pub mod item {
 
 `cargo build` in `out/` produces an executable that embeds libpython and prints `6`, like `python inventory.py`. The class is a real Python class, `load` is a real Python function (`inspect.signature`, pickling and monkeypatching still work), and the generator expression is evaluated lazily as in CPython.
 
-## Usage
+## Installation
 
-steelix needs Python 3.14 and a Rust toolchain. With [uv](https://docs.astral.sh/uv/):
+steelix needs Python 3.14 and a Rust toolchain.
 
 ```sh
-uv run steelix transpile app.py -o out/        # a crate for app.py and the project modules it imports
-uv run steelix transpile -m pkg --root src/ -o out/   # the same for `python -m pkg`
-uv run steelix build app.py                    # transpile, build and assemble a relocatable dist/app/
-uv run steelix coverage app.py                 # how much of the code becomes Rust
+pip install steelix
+# or
+uv tool install steelix
+```
+
+The generated crates depend on the `steelix-runtime` crate from crates.io. Until it is published there, clone this repository and pass `--runtime-path path/to/steelix/crates/steelix-runtime` to `steelix transpile` and `steelix build`.
+
+## Usage
+
+
+```sh
+steelix transpile app.py -o out/               # a crate for app.py and the project modules it imports
+steelix transpile -m pkg --root src/ -o out/   # the same for `python -m pkg`
+steelix build app.py                           # transpile, build and assemble a relocatable dist/app/
+steelix coverage app.py                        # how much of the code becomes Rust
 ```
 
 When building a generated crate yourself, point PyO3 at the interpreter whose packages the program uses: `PYO3_PYTHON=/path/to/venv/bin/python cargo build`.

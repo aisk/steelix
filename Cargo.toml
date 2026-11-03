@@ -5,6 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 edition = "2024"
 license = "BSD-3-Clause"
+repository = "https://github.com/aisk/steelix"
 
 [workspace.dependencies]
 pyo3 = "0.30"

@@ -1298,7 +1298,8 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
-- 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
+- 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：在源码 checkout 里运行时（测试和开发）用 path 依赖，指向仓库里的 `crates/steelix-runtime`；从 PyPI 安装的 steelix 找不到这个目录，写成 crates.io 上的版本 `"0.1"`（`emit/crate.py` 的 `RUNTIME_VERSION`）。`--runtime-path` 可以显式指定。所以 runtime 必须和 PyPI 上的 steelix 同步发布到 crates.io，版本的前两位一致；0.1.0 发布时 runtime 还没有发布，从 PyPI 安装的用户要用 `--runtime-path`
+- **发版**：PyPI 上的 `steelix` 和 crates.io 上的 `steelix-runtime` 一起发布，git tag 用 `v` 前缀（`v0.1.0`）。改了 runtime 的公开接口（生成代码用到的部分）时提升 `RUNTIME_VERSION`
 - 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
 - **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
 
@@ -1403,4 +1404,4 @@ pub fn percentile<'py>(
 
 1. 参数传递用 `&Bound` 还是 `Bound`。初版用 `&Bound`，如果生成的 clone 太多再调整
 2. ABI 策略：按版本编译还是 abi3。runtime 里的 ffi 调用尽量限制在 limited API 内，保留 abi3 的可能
-3. free-threaded（3.14t）是否支持，暂不考虑
+3. free-threaded（3.14t）：不支持，runtime 的名字表等依赖 GIL，在 `Py_GIL_DISABLED` 下直接编译报错（M11a，§6）

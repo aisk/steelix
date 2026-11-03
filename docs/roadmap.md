@@ -279,6 +279,12 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 - [ ] ext 模式下 `python -m pkg`（M6 遗留）
 - [ ] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程
 
+## 发布
+
+- [x] PyPI 发布 steelix 0.1.0，git tag `v0.1.0`
+- [ ] `steelix-runtime` 发布到 crates.io（`cargo publish -p steelix-runtime`，dry-run 已通过）。没发布之前，从 PyPI 安装的 steelix 生成的 crate 无法构建，要用 `--runtime-path`（README 有说明）
+- [ ] 以后每次发版：PyPI 和 crates.io 同步，`RUNTIME_VERSION` 与 runtime 的版本一致（design §14）
+
 ## 以后再说
 
 基于类型注解的 typed lowering（`int` → `i64` 等）和符合条件的类自动升级为 `#[pyclass]`（M9 原来的计划，不做的原因是注解在运行时不强制，`def f(x: float)` 用 `3` 调用时结果必须是 int，要保持语义就要同时生成两套代码路径，见 §1、§10）、generator、async/await、match、自定义 metaclass、`exec`/`eval`、多继承的边角情况、abi3、free-threaded、`--dynamic-globals`、Windows/macOS 上的 bin 模式、重新生成后与手工改写的代码合并（预期用法是生成一次后直接部署和改写，有需求再做，可以在每个生成函数前后加标记，由工具只替换未改写的函数）
