@@ -1237,7 +1237,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：测试里用 path 依赖，发布后用固定版本
 - 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
-- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，`uv python install 3.14.9`、Rust stable，`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
+- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
 
 ## 15. 把函数改写成原生 Rust（M3b）
 

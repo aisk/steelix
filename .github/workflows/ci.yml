@@ -19,8 +19,11 @@ jobs:
       - name: Install Python
         run: uv python install 3.14.9
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned so new clippy lints do not turn CI red unannounced; bump
+      # together with the toolchain used for development.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.95.0"
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
