@@ -231,7 +231,7 @@ M9 第一项提前做，并且改成默认行为。
 
 ## M10 真实项目验证 ✅
 
-用 skime（用户自己的 Scheme 实现，24 个模块，4582 行）完整走了一遍，详细记录和建议见 `m10-skime.md`。
+用 skime（一个用 Python 写的 Scheme 实现，24 个模块，4582 行）完整走了一遍，详细记录和建议见 `m10-skime.md`。
 
 - [x] 转换：不需要任何参数，函数 373/374 原生（剩下一个 generator），行 99.9%
 - [x] 和 CPython 比较：8 个 Scheme 程序（REPL）输出、退出码相同，`--traceback-lines` 下完整 traceback 相同

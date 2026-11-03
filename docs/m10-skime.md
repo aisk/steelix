@@ -1,6 +1,6 @@
 # M10 真实项目验证：skime
 
-用 [skime](https://github.com/aisk/skime)（用户自己的 Scheme 实现，MIT 许可，版本 0.3.1）完整走了一遍 steelix 的流程：转换、和 CPython 比较、用项目自己的测试套件测原生代码、`steelix build` 部署、按 §15 手工改写两处。skime 是包 `skime`，24 个模块，转换的部分有 4582 行 Python（包里另有开发工具 `iset_gen.py`，没有被 import，不转换），包括编译器（`compiler/`）、宏展开（`macro.py`）、字节码 VM（`vm.py`、`insns.py`、`ctx.py`）和 140 个左右的原语（`prim.py`），没有第三方依赖。CLI 是 `python -m skime` 进入的 REPL，从 stdin 一行读一个表达式。
+用 [skime](https://github.com/aisk/skime)（一个用 Python 写的 Scheme 实现，MIT 许可，版本 0.3.1）完整走了一遍 steelix 的流程：转换、和 CPython 比较、用项目自己的测试套件测原生代码、`steelix build` 部署、按 §15 手工改写两处。skime 是包 `skime`，24 个模块，转换的部分有 4582 行 Python（包里另有开发工具 `iset_gen.py`，没有被 import，不转换），包括编译器（`compiler/`）、宏展开（`macro.py`）、字节码 VM（`vm.py`、`insns.py`、`ctx.py`）和 140 个左右的原语（`prim.py`），没有第三方依赖。CLI 是 `python -m skime` 进入的 REPL，从 stdin 一行读一个表达式。
 
 所有工作都在 skime 的副本上进行，`~/skime` 没有改动。
 
