@@ -2,7 +2,7 @@
 
 每个里程碑结束时都应该有能跑通的端到端用例。任务粒度大约是一次会话能完成的量，完成后勾选并在 `tests/cases/` 留下对应用例。设计依据见 `design.md`，括号里是对应章节。
 
-接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 → M7 → M9。M6 多模块应用视真实应用的需要可以提前。
+接下来的执行顺序（根据 `coverage.md` 的数据和 M3c 之后的 review）：M3d ✅ → M4 ✅ → M5 ✅ → M8 ✅ → M8a ✅ → M6 ✅ → M7 → M9。
 
 ## M0 项目骨架 ✅
 
@@ -154,11 +154,20 @@
 - [x] walrus 局部变量第一次在顶层 `if` 条件里绑定时 clippy 报 `needless_late_init`：在那里 `let`（§5）。cargo 测试层对所有 golden 跑 clippy（§14）
 - [x] §15 类改写补充：类属性用 `#[classattr]`，没有可变状态的类用 `frozen`，`native.rs` 放在 `src/<module>/` 下，元组之类的属性要明确 Python 侧的形状
 
-## M6 多模块应用
+## M6 多模块应用 ✅
 
-- [ ] 输入为应用目录（入口脚本加项目内模块和包）时生成一个 crate，每个 Python 模块一个 Rust mod
-- [ ] 包初始化安装 meta path finder，子模块惰性执行（§7）
-- [ ] 项目内模块之间的引用、相对 import
+- [x] 输入为入口脚本（或 `-m 包`）时，静态找出它 import 的项目内模块和包，连同入口生成一个 crate，每个 Python 模块一个 Rust mod，按包嵌套（`src/pkg/mod.rs`、`src/pkg/sub.rs`），名字不是 Rust 标识符时改名（§7）
+- [x] runtime 里的 meta path finder 和每个模块一个 loader，子模块在第一次 import 时执行；`__file__`、`__spec__`、`__path__`、`__cached__` 等和从源码 import 一样，import 出错的 traceback 去掉 importlib 的帧（§7）
+- [x] 项目内模块之间的引用、相对 import；`from x import y` 失败时的文字和 CPython 一样（循环 import、遮蔽标准库）
+- [x] 入口模块被按名字 import 时是第二个模块对象；`python -m pkg`（`pkg/__main__.py`）的等价运行方式（§11）
+- [x] `--include`（动态 import 的模块、目录）和 `--exclude`，没有转换的项目模块照常从源码 import，报告里列出原因
+- [x] 跨模块的调用经过模块属性，不做跨模块的直接调用；识别项目内别的模块对函数的替换，被替换的函数不直接调用（§7）
+- [x] 覆盖率报告按模块加项目合计（§13）
+- [x] ext 模式：有项目模块时安装 finder；`--mode ext -m pkg` 生成包形式的扩展模块（§11）
+- [x] 测试：多模块测试应用 `tests/projects/inventory`、标准库 `json` 包（也以 `python -m json` 运行），golden、clippy、与 CPython 比较完整 traceback 的 e2e
+- [x] 发现的问题：Python 参数 `_m` 和上下文参数 `m` 触发 clippy 的 `duplicate_underscore_argument`，这时上下文参数改叫 `module`；类的 mod 和所在模块同名（`module_inception`）时加 `_`；crate 根上 allow `too_many_arguments` 和 `doc_lazy_continuation`（§14）
+- [ ] ext 模式下 `python -m pkg`：`NativeLoader` 需要 `get_code`
+- [ ] 命名空间包（没有 `__init__.py` 的目录）里的模块现在不转换
 
 ## M7 分发
 

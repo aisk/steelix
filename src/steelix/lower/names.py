@@ -12,6 +12,7 @@ The mapping is deterministic so that regenerating code gives the same names:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 RUST_KEYWORDS = frozenset(
@@ -84,11 +85,24 @@ class Renamer:
 
 
 def context_name(taken: Iterable[str]) -> str:
-    """The name of the context parameter of a fn whose other locals are `taken`."""
+    """The name of the context parameter of a fn whose other locals are
+    `taken`. A local `_m` takes `m` as well: clippy objects to parameters
+    that only differ in a leading underscore."""
     taken = set(taken)
+    taken |= {name.removeprefix("_") for name in taken}
     if CONTEXT not in taken:
         return CONTEXT
     name = CONTEXT_FALLBACK
     while name in taken:
         name += "_"
     return name
+
+
+def module_ident(name: str) -> str:
+    """A Rust identifier for the last component of a module name, which
+    need not be a Python identifier when it is a script name or imported
+    with `importlib` (`my-tool`)."""
+    ident = re.sub(r"\W", "_", name.rpartition(".")[2])
+    if not ident.isidentifier():
+        ident = "m_" + ident
+    return rust_ident(ident)

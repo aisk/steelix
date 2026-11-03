@@ -199,3 +199,28 @@ def merge(reports: list[dict]) -> list[dict]:
         totals.items(), key=lambda item: (-item[1]["functions"], -item[1]["only"], item[0])
     )
     return [{"feature": feature, **counts} for feature, counts in ranked]
+
+
+def project_summary(reports: list[Coverage]) -> str:
+    """The total line of several modules' coverage and the features ranked
+    over all of them."""
+    functions = [r.count("function") for r in reports]
+    statements = [r.count("statement") for r in reports]
+    lines_total = sum(r.lines_total for r in reports)
+    lines_native = lines_total - sum(r.lines_python for r in reports)
+    out = [
+        f"all {len(reports)} modules: native"
+        f" {_ratio(sum(f[0] for f in functions), sum(f[1] for f in functions))} functions,"
+        f" {_ratio(sum(s[0] for s in statements), sum(s[1] for s in statements))}"
+        f" module statements, {_ratio(lines_native, lines_total)} lines"
+    ]
+    features = merge([r.to_json() for r in reports])
+    if features:
+        width = max(len(f["feature"]) for f in features)
+        out.append(f"  {'kept as Python by':<{width}}  functions  only  statements  occurrences")
+        for f in features:
+            out.append(
+                f"  {f['feature']:<{width}}  {f['functions']:>9}  {f['only']:>4}"
+                f"  {f['statements']:>10}  {f['occurrences']:>11}"
+            )
+    return "\n".join(out)

@@ -72,6 +72,10 @@ class ModuleBindings:
     patches_itself: bool = False
     """The module may bind its globals through its own module object
     (`setattr(sys.modules[__name__], ..)`) or with `exec` / `eval`."""
+    patched: frozenset[str] = frozenset()
+    """Functions that other modules of the project may replace
+    (`helpers.f = ..`, `mock.patch("helpers.f")`): calls of them go through
+    globals."""
 
     @property
     def dynamic(self) -> bool:
@@ -88,6 +92,8 @@ class ModuleBindings:
         """
         if self.dynamic or self.counts[name] != 1 or name not in self.defs:
             return None
+        if name in self.patched:
+            return None
         fn = self.defs[name][0]
         return None if fn.decorator_list else fn
 
@@ -96,11 +102,20 @@ class ModuleBindings:
 
 
 def analyze_module_bindings(
-    module: ast.Module, python: Collection[ast.stmt] = ()
+    module: ast.Module,
+    python: Collection[ast.stmt] = (),
+    *,
+    own_names: Collection[str] = ("__main__",),
+    patched: Collection[str] | None = (),
 ) -> ModuleBindings:
     """Bindings of the module globals. A `def` among the statements `python`
     that are kept as Python source is not a target of direct calls: it has
-    no Rust function, so calls go through globals."""
+    no Rust function, so calls go through globals.
+
+    `own_names` are the names the module runs under (`__main__` for the
+    script, its import name), which `sys.modules[..]` may name it by.
+    `patched` are the functions that other modules of the project may
+    replace, `None` if they may bind any global of the module."""
     counts: Counter[str] = Counter()
     defs: dict[str, tuple[ast.FunctionDef, int]] = {}
     star_import = False
@@ -157,10 +172,17 @@ def analyze_module_bindings(
 
     namespace_access = _uses_namespace_builtins(module, set())
     writes_defaults = _writes_defaults(module)
-    patches_itself = _patches_itself(module, {s.name for s in module.body if _is_def(s)})
+    def_names = {s.name for s in module.body if _is_def(s)}
+    patches_itself = patched is None or _patches_itself(module, def_names, own_names)
 
     return ModuleBindings(
-        counts, defs, star_import, namespace_access, writes_defaults, patches_itself
+        counts,
+        defs,
+        star_import,
+        namespace_access,
+        writes_defaults,
+        patches_itself,
+        frozenset(patched or ()),
     )
 
 
@@ -168,15 +190,16 @@ def _is_def(stmt: ast.stmt) -> bool:
     return isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
 
 
-def _patches_itself(module: ast.Module, def_names: set[str]) -> bool:
+def _patches_itself(module: ast.Module, def_names: set[str], own_names: Collection[str]) -> bool:
     """Whether code anywhere in the module (native or kept as Python) may
     bind its globals behind the analysis' back. Conservative, and only for
     the usual spellings (design §12 lists what is not detected):
 
     * `setattr` / `delattr`, an attribute assignment or deletion, `.__dict__`
       or `vars(..)` on the module object: `sys.modules[__name__]`,
-      `sys.modules["__main__"]` (or `.get(..)`), an imported `__main__`, or a
-      name assigned one of those
+      `sys.modules["__main__"]` (or `.get(..)`, and the module's import name
+      instead of `__main__`), an imported `__main__` (or the module imported
+      by its own name), or a name assigned one of those
     * `setattr` / `delattr` with a string literal naming a module level `def`
     * `exec` / `eval` without an explicit namespace (`globals()` is caught as
       namespace access)
@@ -184,15 +207,17 @@ def _patches_itself(module: ast.Module, def_names: set[str]) -> bool:
     refs: set[str] = set()
     for node in ast.walk(module):
         if isinstance(node, ast.Import):
-            refs.update(
-                alias.asname or alias.name for alias in node.names if alias.name == "__main__"
-            )
+            for alias in node.names:
+                # `import pkg.mod` binds `pkg`, `import pkg.mod as me` the module.
+                if alias.name in own_names and (alias.asname or "." not in alias.name):
+                    refs.add(alias.asname or alias.name)
     # Names assigned the module object, also through other such names.
     while True:
         found = {
             target.id
             for node in ast.walk(module)
-            if isinstance(node, ast.Assign | ast.NamedExpr) and _is_module_object(node.value, refs)
+            if isinstance(node, ast.Assign | ast.NamedExpr)
+            and _is_module_object(node.value, refs, own_names)
             for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
             if isinstance(target, ast.Name)
         }
@@ -203,7 +228,7 @@ def _patches_itself(module: ast.Module, def_names: set[str]) -> bool:
     for node in ast.walk(module):
         match node:
             case ast.Call(ast.Name("setattr" | "delattr"), [obj, *rest]):
-                if _is_module_object(obj, refs):
+                if _is_module_object(obj, refs, own_names):
                     return True
                 match rest:
                     case [ast.Constant(str() as name), *_] if name in def_names:
@@ -211,24 +236,26 @@ def _patches_itself(module: ast.Module, def_names: set[str]) -> bool:
             case ast.Call(ast.Name("exec" | "eval"), args, keywords):
                 if len(args) < 2 and not any(k.arg == "globals" for k in keywords):
                     return True
-            case ast.Call(ast.Name("vars"), [obj]) if _is_module_object(obj, refs):
+            case ast.Call(ast.Name("vars"), [obj]) if _is_module_object(obj, refs, own_names):
                 return True
-            case ast.Attribute(obj, _, ast.Store() | ast.Del()) if _is_module_object(obj, refs):
+            case ast.Attribute(obj, _, ast.Store() | ast.Del()) if _is_module_object(
+                obj, refs, own_names
+            ):
                 return True
-            case ast.Attribute(obj, "__dict__") if _is_module_object(obj, refs):
+            case ast.Attribute(obj, "__dict__") if _is_module_object(obj, refs, own_names):
                 return True
     return False
 
 
-def _is_module_object(expr: ast.expr, refs: set[str]) -> bool:
+def _is_module_object(expr: ast.expr, refs: set[str], own_names: Collection[str]) -> bool:
     """Whether `expr` is a usual spelling of the module's own module object."""
     match expr:
         case ast.Name(name):
             return name in refs
         case ast.Subscript(modules, key) if _is_sys_modules(modules):
-            return _is_own_name(key)
+            return _is_own_name(key, own_names)
         case ast.Call(ast.Attribute(modules, "get"), [key, *_]) if _is_sys_modules(modules):
-            return _is_own_name(key)
+            return _is_own_name(key, own_names)
     return False
 
 
@@ -241,11 +268,11 @@ def _is_sys_modules(expr: ast.expr) -> bool:
     )
 
 
-def _is_own_name(expr: ast.expr) -> bool:
+def _is_own_name(expr: ast.expr, own_names: Collection[str]) -> bool:
     return (
         isinstance(expr, ast.Name)
         and expr.id == "__name__"
-        or (isinstance(expr, ast.Constant) and expr.value == "__main__")
+        or (isinstance(expr, ast.Constant) and expr.value in own_names)
     )
 
 

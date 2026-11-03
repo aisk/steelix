@@ -42,7 +42,6 @@ def test_renamer_avoids_reserved_and_existing_names() -> None:
         ),
         ("x: int = 1\n", "annotated assignment at module level", 1, 1),
         ("def f(a):\n    a.b: int\n", "annotated assignment", 2, 5),
-        ("from . import x\n", "relative import", 1, 1),
         ("from os import *\n", "star import", 1, 1),
         ("async def f():\n    pass\n", "async function", 1, 1),
         ("match x:\n    case 1:\n        pass\n", "match statement", 1, 1),

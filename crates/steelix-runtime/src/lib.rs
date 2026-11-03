@@ -31,6 +31,7 @@ pub mod function;
 #[doc(hidden)]
 pub mod generator;
 mod import;
+mod importer;
 mod module;
 mod ops;
 #[doc(hidden)]
@@ -51,6 +52,9 @@ pub use class::{Namespace, super_};
 pub use function::{Body, Function, FunctionDef, Signature};
 pub use generator::{Generator, next};
 pub use import::{import, import_from, import_module, import_names};
+pub use importer::{
+    ExecModule, NativeImporter, NativeLoader, NativeModule, init_extension, install_importer,
+};
 pub use module::Module;
 pub use ops::{
     iadd, iand, ifloordiv, ilshift, imatmul, imod, imul, ior, ipow, irshift, isub, itruediv, ixor,

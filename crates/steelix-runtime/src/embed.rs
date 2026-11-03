@@ -13,8 +13,8 @@ use pyo3::ffi;
 use pyo3::panic::PanicException;
 use pyo3::prelude::*;
 
-/// The `exec_module` function generated for a Python module.
-pub type ExecModule = fn(&crate::Module<'_>) -> PyResult<()>;
+pub use crate::importer::ExecModule;
+use crate::importer::{NativeImporter, NativeLoader, NativeModule};
 
 /// The Python script a program was transpiled from, as `python app.py` would
 /// see it.
@@ -45,15 +45,103 @@ pub struct Script {
 /// an uncaught Python exception, as PyO3's `PanicException`, and also exits
 /// with 1 instead of Rust's usual 101.
 pub fn run_main(executable: &str, script: &Script, exec_module: ExecModule) -> ExitCode {
+    run(executable, script, |main| {
+        prepare_main(main, script)?;
+        exec_module(&crate::Module::new(main))
+    })
+}
+
+/// Like [`run_main`], for a script that imports other modules of its
+/// project: `modules` lists them with their generated code, which
+/// `import` runs instead of their Python source (design §7). The script's
+/// own module may be one of them, for `import app` from inside the program,
+/// which creates a second module object like CPython does.
+pub fn run_project(
+    executable: &str,
+    script: &Script,
+    modules: &'static [NativeModule],
+    exec_module: ExecModule,
+) -> ExitCode {
+    run(executable, script, |main| {
+        prepare_main(main, script)?;
+        crate::install_importer(main.py(), script.dir, modules)?;
+        exec_module(&crate::Module::new(main))
+    })
+}
+
+/// Like `python -m name` run in the project directory `script.dir`: imports
+/// the parent packages of the module `name` (for `python -m pkg`, `name` is
+/// `pkg.__main__`), then runs the module's generated code as `__main__`
+/// with the module's spec, like `runpy` does. `name` is one of `modules`.
+/// `script.argv0` is the module's source file.
+pub fn run_module(
+    executable: &str,
+    script: &Script,
+    modules: &'static [NativeModule],
+    name: &str,
+) -> ExitCode {
+    run(executable, script, |main| {
+        let py = main.py();
+        py.import("sys")?
+            .getattr("path")?
+            .call_method1("insert", (0, script.dir))?;
+        let importer = crate::install_importer(py, script.dir, modules)?;
+        run_module_as_main(main, &importer, name)
+    })
+}
+
+/// `runpy._run_module_as_main` for a transpiled module.
+fn run_module_as_main(
+    main: &Bound<'_, PyModule>,
+    importer: &Bound<'_, NativeImporter>,
+    name: &str,
+) -> PyResult<()> {
+    let py = main.py();
+    if let Some((package, _)) = name.rsplit_once('.') {
+        py.import(package)?;
+        let existing = py
+            .import("sys")?
+            .getattr("modules")?
+            .call_method1("get", (name,))?;
+        if !existing.is_none() && !existing.hasattr("__path__")? {
+            let message = format!(
+                "'{name}' found in sys.modules after import of package '{package}', but prior \
+                 to execution of '{name}'; this may result in unpredictable behaviour"
+            );
+            let warning = py
+                .get_type::<pyo3::exceptions::PyRuntimeWarning>()
+                .call1((message,))?;
+            py.import("warnings")?.call_method1("warn", (warning,))?;
+        }
+    }
+    let Some(spec) = importer.get().find_spec(py, name, None, None)? else {
+        return Err(pyo3::exceptions::PyImportError::new_err(format!(
+            "No module named '{name}'"
+        )));
+    };
+    let globals = main.dict();
+    globals.set_item("__file__", spec.getattr("origin")?)?;
+    globals.set_item("__cached__", spec.getattr("cached")?)?;
+    globals.set_item("__doc__", py.None())?;
+    globals.set_item("__loader__", spec.getattr("loader")?)?;
+    globals.set_item("__package__", spec.getattr("parent")?)?;
+    globals.set_item("__spec__", &spec)?;
+    let loader = spec.getattr("loader")?.cast_into::<NativeLoader>()?;
+    loader.get().exec_native(main)
+}
+
+/// Initializes Python, runs `body` with the `__main__` module and shuts the
+/// interpreter down again, with the exit code CPython would use.
+fn run(
+    executable: &str,
+    script: &Script,
+    body: impl FnOnce(&Bound<'_, PyModule>) -> PyResult<()>,
+) -> ExitCode {
     // SAFETY: called once, before anything else touches the interpreter.
     unsafe { initialize(executable, script) };
     let mut interrupted = false;
     let failed = Python::attach(|py| {
-        let run = || {
-            let main = py.import("__main__")?;
-            prepare_main(&main, script)?;
-            exec_module(&crate::Module::new(&main))
-        };
+        let run = || body(&py.import("__main__")?);
         let result = panic::catch_unwind(AssertUnwindSafe(run))
             .unwrap_or_else(|payload| Err(panic_error(payload)));
         flush_io(py);

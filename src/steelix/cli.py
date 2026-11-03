@@ -12,8 +12,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="steelix", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    transpile = sub.add_parser("transpile", help="transpile Python source into a Rust crate")
-    transpile.add_argument("input", type=Path, help="Python file")
+    transpile = sub.add_parser(
+        "transpile",
+        help="transpile a Python program (the script and its project's modules) into a Rust crate",
+    )
+    transpile.add_argument(
+        "input",
+        type=Path,
+        nargs="?",
+        help="the entry script; the modules it imports from its directory are transpiled too",
+    )
+    transpile.add_argument(
+        "-m",
+        dest="module",
+        metavar="MODULE",
+        default=None,
+        help="run the module (a package runs its __main__) like `python -m MODULE`, "
+        "from the --root directory; in ext mode, the module to build",
+    )
+    transpile.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="project directory for -m (default: the current directory)",
+    )
+    transpile.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        metavar="MODULE|PATH",
+        help="also transpile this project module, file or directory (for imports the "
+        "static analysis can not see); repeatable",
+    )
+    transpile.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help="leave this module (and its submodules) as Python source; repeatable",
+    )
     transpile.add_argument(
         "-o", "--output", type=Path, required=True, help="output crate directory"
     )
@@ -109,12 +146,18 @@ def coverage(args: argparse.Namespace) -> int:
 
 
 def transpile(args: argparse.Namespace) -> int:
-    from steelix.coverage import measure
-    from steelix.emit.crate import CrateOptions, Mode, default_runtime_path, emit_crate
-    from steelix.frontend.parse import parse_file
+    from steelix.coverage import measure, project_summary
+    from steelix.emit.crate import CrateOptions, Mode, default_runtime_path, emit_project
+    from steelix.project import ProjectError, find_project
 
-    if args.input.is_dir():
-        print("steelix: packages are not supported yet, pass a single .py file", file=sys.stderr)
+    if (args.input is None) == (args.module is None):
+        print("steelix: give either an entry script or -m MODULE", file=sys.stderr)
+        return 2
+    if args.input is not None and args.input.is_dir():
+        print(
+            "steelix: pass the entry script, or -m PACKAGE to run a package like `python -m`",
+            file=sys.stderr,
+        )
         return 2
     runtime = args.runtime_path or default_runtime_path()
     options = CrateOptions(
@@ -123,17 +166,54 @@ def transpile(args: argparse.Namespace) -> int:
         fallback=args.fallback,
     )
     try:
-        parsed = parse_file(args.input)
-        lowered = emit_crate(parsed, args.output, options)
-    except UnsupportedError as err:
+        project = find_project(
+            args.input,
+            module=args.module,
+            root=args.root,
+            include=args.include,
+            exclude=args.exclude,
+            run_main=options.mode is Mode.BIN,
+        )
+        lowered = emit_project(project, args.output, options)
+    except ProjectError as err:
+        print(f"steelix: {err}", file=sys.stderr)
+        return 2
+    except (UnsupportedError, SyntaxError, UnicodeDecodeError, OSError) as err:
         print(f"steelix: {err}", file=sys.stderr)
         return 1
-    except SyntaxError as err:
-        print(f"steelix: {err}", file=sys.stderr)
-        return 1
-    coverage = measure(parsed.tree, lowered.plan, parsed.filename)
+    reports = [
+        measure(project.parsed[source.relpath].tree, module.plan, source.relpath)
+        for source, module in zip(project.sources(), lowered, strict=True)
+    ]
     if not args.quiet:
-        print(coverage.summary(verbose=args.verbose), file=sys.stderr)
+        if len(reports) > 1:
+            names = ", ".join(project.modules)
+            print(f"project {project.root}: transpiled modules {names}", file=sys.stderr)
+        for note in project.notes:
+            print(f"  {note}", file=sys.stderr)
+        for report in reports:
+            print(report.summary(verbose=args.verbose), file=sys.stderr)
+        if len(reports) > 1:
+            print(project_summary(reports), file=sys.stderr)
     if args.report is not None:
-        args.report.write_text(json.dumps(coverage.to_json(), indent=2) + "\n")
+        if len(reports) == 1:
+            data = reports[0].to_json()
+        else:
+            data = project_report(reports)
+        args.report.write_text(json.dumps(data, indent=2) + "\n")
     return 0
+
+
+def project_report(reports: list) -> dict:
+    """The JSON report of a project: each module's, and the totals."""
+    from steelix.coverage import merge
+
+    modules = [r.to_json() for r in reports]
+    total = {
+        key: {
+            "native": sum(m[key]["native"] for m in modules),
+            "total": sum(m[key]["total"] for m in modules),
+        }
+        for key in ("functions", "statements", "lines")
+    }
+    return {"modules": modules, "total": total, "features": merge(modules)}

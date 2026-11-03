@@ -38,7 +38,7 @@ from steelix.lower.function import (
     in_frame,
     lower_function,
 )
-from steelix.lower.names import CONTEXT, MODULE_RESERVED, Renamer
+from steelix.lower.names import CONTEXT, MODULE_RESERVED, Renamer, module_ident
 from steelix.lower.stmt import StmtLowering
 from steelix.rustast import nodes as rs
 
@@ -51,9 +51,32 @@ class LoweredModule:
     """The statements kept as Python source."""
 
 
-def lower_module(parsed: ParsedModule, *, fallback: bool = True) -> LoweredModule:
+@dataclass(frozen=True)
+class ModuleRole:
+    """How a module is used in its program, which the analysis of a single
+    module can not see."""
+
+    own_names: tuple[str, ...] = ("__main__",)
+    """The names the module runs under: `__main__` for the script, its
+    import name for a module of a project (both for a script that is also
+    imported by name)."""
+    patched: frozenset[str] | None = frozenset()
+    """Functions other modules of the project may replace, `None` if they
+    may bind any of its globals (design §7)."""
+    submodules: tuple[str, ...] = ()
+    """The Rust modules of a package's submodules, declared in its file."""
+    rust_name: str | None = None
+    """The module's own Rust name, which its class modules avoid (clippy's
+    `module_inception`). Defaults to the one of its Python name."""
+
+
+def lower_module(
+    parsed: ParsedModule, *, fallback: bool = True, role: ModuleRole | None = None
+) -> LoweredModule:
     """Lower `parsed`. Without `fallback`, the first unsupported construct
-    raises `UnsupportedError` instead of being kept as Python."""
+    raises `UnsupportedError` instead of being kept as Python. `role`
+    defaults to a script run as `__main__`."""
+    role = role or ModuleRole()
     tree = parsed.tree
     desugar(tree)
     plan = FallbackPlan()
@@ -67,7 +90,7 @@ def lower_module(parsed: ParsedModule, *, fallback: bool = True) -> LoweredModul
     attributes = static_attributes(parsed.source, parsed.filename)
     while True:
         try:
-            return _lower(parsed, plan, attributes)
+            return _lower(parsed, plan, attributes, role)
         except UnsupportedError as err:
             # Found while lowering rather than by the subset check: keep the
             # statement as Python and start over, since keeping it changes
@@ -93,11 +116,12 @@ def _lower(
     parsed: ParsedModule,
     plan: FallbackPlan,
     attributes: dict[tuple[str, int], tuple[str, ...]],
+    role: ModuleRole,
 ) -> LoweredModule:
     tree = parsed.tree
     python = plan.python
     scopes = analyze_scopes(tree, parsed.source, parsed.filename, python)
-    bindings = analyze_module_bindings(tree, python)
+    bindings = analyze_module_bindings(tree, python, own_names=role.own_names, patched=role.patched)
     callgraph = build_call_graph(tree, bindings, scopes)
     defs = [s for s in tree.body if isinstance(s, ast.FunctionDef) and s not in python]
     fn_names = Renamer([d.name for d in defs], MODULE_RESERVED)
@@ -116,6 +140,11 @@ def _lower(
         source_lines=source_lines(parsed.source),
         leading_comments=_leading_comments(tree, parsed, plan),
         static_attributes=attributes,
+        # Class modules avoid the submodules and the module's own name.
+        mod_names={
+            *role.submodules,
+            (role.rust_name or module_ident(parsed.name)).removeprefix("r#"),
+        },
     )
 
     items: list[rs.Item] = []
@@ -129,7 +158,11 @@ def _lower(
     uses = ["pyo3::prelude::*"]
     uses += sorted(module.uses)
     uses.append("steelix_runtime as rt")
-    file = rs.File([rs.Use(u) for u in uses] + items, inner_doc=_python_summary(parsed, tree, plan))
+    submodules: list[rs.Item] = [rs.ModDecl(name, public=True) for name in role.submodules]
+    file = rs.File(
+        submodules + [rs.Use(u) for u in uses] + items,
+        inner_doc=_python_summary(parsed, tree, plan),
+    )
     return LoweredModule(parsed.name, file, plan)
 
 

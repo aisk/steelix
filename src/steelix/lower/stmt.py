@@ -203,9 +203,9 @@ class StmtLowering(HandlingLowering):
                 return self.jump("continue")
             case ast.Import(names):
                 return [s for alias in names for s in self.import_(stmt, alias)]
-            case ast.ImportFrom(module, names):
-                assert module is not None
-                return self.import_from(stmt, module, names)
+            case ast.ImportFrom(module, names, level):
+                # A relative import keeps its dots: `from ..util import x`.
+                return self.import_from(stmt, "." * level + (module or ""), names)
             case ast.Assert(test, msg):
                 return [self.assert_stmt(test, msg)]
             case ast.FunctionDef():
@@ -703,7 +703,7 @@ class StmtLowering(HandlingLowering):
     def import_from(
         self, stmt: ast.ImportFrom, module: str, names: list[ast.alias]
     ) -> list[rs.Stmt]:
-        temp = self.ctx.temp(module.rsplit(".", 1)[-1])
+        temp = self.ctx.temp(module.rsplit(".", 1)[-1] or "package")
         self.ctx.pinned.add(temp)  # `sys.modules` keeps the module
         fromlist = rs.Ref(rs.Array(tuple(rs.StrLit(a.name) for a in names)))
         load = _rt("import_names", rs.Path(self.ctx.context()), rs.StrLit(module), fromlist)

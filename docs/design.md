@@ -41,7 +41,7 @@ Rust AST（rustast/nodes.py）
   │  rustast/printer.py    渲染成源码，再强制过一遍 rustfmt
   ▼
 .rs 源码
-  │  emit/*                生成 Cargo.toml、lib.rs、每个 Python 模块一个 Rust mod
+  │  emit/*                生成 Cargo.toml、main.rs/lib.rs、每个 Python 模块一个 Rust mod
   ▼
 Cargo crate
 ```
@@ -71,6 +71,7 @@ steelix/
 ├── src/steelix/
 │   ├── cli.py                 命令行入口 `steelix transpile`
 │   ├── coverage.py            转换覆盖率报告
+│   ├── project.py             找出项目里的模块（§7）
 │   ├── diagnostics.py         诊断信息、源码位置、UnsupportedError
 │   ├── frontend/              解析、作用域分析、绑定分析
 │   ├── lower/                 Python AST → Rust AST
@@ -82,7 +83,8 @@ steelix/
 └── tests/
     ├── cases/                 端到端用例（*.py），同时作为 golden 输入
     ├── apps/                  从标准库复制的真实命令行工具（混合模式）
-    ├── golden/                期望生成的 .rs（快照测试）
+    ├── projects/              多模块的程序（M6）：测试应用和标准库 json 包的副本
+    ├── golden/                期望生成的 .rs（快照测试），projects/ 下是项目的整个 src/
     └── test_*.py
 ```
 
@@ -322,9 +324,8 @@ Python 注释保留为 `//` 注释，放在它所属的语句前面：单独一�
 
 ## 7. 模块、全局变量与 import
 
-- 一个 Python 项目生成一个 crate，每个 Python 模块对应一个 Rust `mod`，模块间可以循环引用
-- PyO3 0.30 使用多阶段初始化，执行顶层代码时模块已在 `sys.modules` 里，循环 import 能正常工作
-- 包只导出一个 `PyInit_*`。包初始化时安装一个 meta path finder，子模块在被 import 时才执行，保持 Python 的惰性 import 顺序和副作用
+- 一个 Python 项目生成一个 crate，每个 Python 模块对应一个 Rust `mod`，模块间可以循环引用（M6，见下面的"项目"）
+- 项目里的模块由 runtime 的 meta path finder 在第一次 import 时执行，保持 Python 的惰性 import 顺序和副作用。模块对象、`sys.modules` 和循环 import 都交给 importlib 处理，和从源码 import 一样
 - **全局变量不用进程级 static 保存模块对象**，因为 `importlib.reload` 或删除 `sys.modules` 后重新 import 会产生新的模块对象。globals 由 `Function` 持有，包装成模块上下文 `rt::Module` 显式传给每个函数体。以后需要按模块保存的状态（例如混合模式里编译好的 Python 代码）也放在这里
 - **只绑定一次的全局名字仍然每次查 globals**（M3b 评估过）。`import os`、`LIMIT = 10` 这类名字在模块里只绑定一次（`ModuleBindings` 能数出来），可以考虑在函数里缓存它们的值，但没有这样做
   - 主要原因是缓存在可读性上没有收益：有了模块上下文，`m.global("LIMIT")?` 已经和 Python 的写法一一对应，缓存只会让生成代码多出缓存槽。函数被改写成原生 Rust 时，常量自然变成 Rust 的 `const`（第 15 节）
@@ -338,8 +339,8 @@ Python 注释保留为 `//` 注释，放在它所属的语句前面：单独一�
   - 第二个参数是字符串字面量、并且是模块里某个 `def` 的名字的 `setattr`/`delattr`，不管第一个参数是什么
   - 只有一个参数的 `exec`/`eval`（`globals()` 作命名空间时已经按 `globals()` 处理）
   - 识别不到的写法见第 12 节
-- 直接调用无法感知其他模块的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。应用场景里别的模块很少 patch 应用自身的函数，所以影响不大。以后如有需要再提供 `--dynamic-globals` 选项让所有全局调用都走动态查找
-- 应用场景下 `importlib.reload` 也很少见，不用 static 保存模块对象主要是为了让同一份生成代码既能作为 `__main__` 运行，也能被别的模块按真实名字 import
+- 直接调用无法感知项目以外的模块做的 `mock.patch("mod.fn")`，这是有意保留的语义差异（第 12 节）。项目内模块之间的替换按常见写法识别（下面的"项目"）。应用场景里别的模块很少 patch 应用自身的函数，所以影响不大。以后如有需要再提供 `--dynamic-globals` 选项让所有全局调用都走动态查找
+- 应用场景下 `importlib.reload` 也很少见，不用 static 保存模块对象主要是为了让同一份生成代码既能作为 `__main__` 运行，也能被别的模块按真实名字 import（M6 的项目里确实会这样）
 - 函数里用 `global` 声明的名字照常走 globals 字典：读 `m.global("x")?`，写 `m.set_global("x", ..)?`，删 `m.del_global("x")?`（不存在时抛 `NameError`）
 - globals 里没有的名字和 `LOAD_GLOBAL` 一样到 `builtins` 模块的命名空间（它的 dict）里找（`rt::builtin`），不是读 `builtins` 模块对象的属性。M3d 之前用的是 `getattr`，`__annotations__`、`__dict__` 这类每个模块对象都有的属性会被当成 builtin 读到，CPython 是 `NameError`
 
@@ -361,7 +362,60 @@ m.set_global("parse", rt::import_from(&json, "loads")?)?;
 - 没有用 `py.import`：`PyImport_Import` 返回最内层的子模块而不是顶层包，也没有 `fromlist` 语义（`from pkg import submodule` 需要它导入子模块）
 - `rt::import_from` 与 `IMPORT_FROM` 一样先 `getattr`，失败时回退到 `sys.modules["pkg.name"]`（循环 import），再失败时抛文字一致的 `ImportError`，并设置 `name`、`path`、`name_from`
 - 函数内的 import 绑定局部变量
-- 相对 import 和 `from x import *` 暂不支持（M6）
+- 相对 import（M6）照 Python 的写法保留前面的点：`from . import x` 是 `rt::import_names(m, ".", &["x"])`，`from ..util import f` 是 `rt::import_names(m, "..util", &["f"])`。runtime 数出点的个数作为 `__import__` 的 `level`，相对于哪个包由 globals 里的 `__package__`/`__spec__` 决定，所以 "attempted relative import with no known parent package" 等错误都由 importlib 自己给出
+- `rt::import_from` 失败时的文字照搬 CPython 的 `_PyEval_ImportFrom`：模块的 `__spec__._initializing` 为真时是 "cannot import name 'x' from partially initialized module 'pkg.a' (most likely due to a circular import) (/path/pkg/a.py)"；模块在 `sys.path[0]` 里时，如果和标准库模块同名，或者正在初始化，提示改名；其余情况给出模块的文件位置
+- `from x import *` 仍然保留为 Python（§13）
+
+### 项目（M6）
+
+`steelix transpile app.py -o out/` 转换入口脚本和它用到的项目内模块，生成一个 crate，得到的程序和在项目目录里执行 `python app.py` 一样。`steelix transpile -m pkg -o out/` 相当于在当前目录（或 `--root`）执行 `python -m pkg`。
+
+**哪些模块属于项目**（`project.py`）。项目目录是入口脚本所在的目录（解析符号链接），也就是 `python app.py` 的 `sys.path[0]`。从入口开始静态地找 import，按 CPython 的 path finder 在项目目录里找得到源码的模块就属于项目，再从它们继续找：
+
+- `import a.b`（`a` 和 `a.b`），`from a import b`（`b` 是子模块时），相对 import，字面量名字的 `importlib.import_module("a.b")`（包括带 `package` 参数的相对名字）和 `__import__("a")`
+- 函数里、`try` 里的 import 也算。转换出来的模块只是登记在表里，运行时真的 import 时才执行，所以多算进来的模块不会改变行为
+- 和 path finder 一样，包（`a/__init__.py`）优先于同名的 `a.py`，旁边有同名的扩展模块时不算；builtin 模块和 frozen 模块优先于 `sys.path`，同名的项目文件不算
+- 不算的：标准库和第三方包（不在项目目录里），命名空间包（没有 `__init__.py` 的目录），编译不过的文件（CPython 在 import 时报 `SyntaxError`，不转换的话运行时也一样），用 `--exclude` 排除的模块。它们运行时照常从源码 import，报告里列出原因
+- 名字在运行时才算出来的 import（插件之类）用 `--include` 补充，参数是模块名、`.py` 文件或者目录（目录下所有能 import 的模块）
+- 入口脚本被别的模块按名字 import（`import app`）时，它也是项目里的一个模块。CPython 这时会再执行一遍 `app.py`，得到第二个模块对象，`__name__` 是 `app`；生成的程序一样，两个模块对象共用同一个 Rust mod
+
+**布局**。每个 Python 模块一个 Rust mod，按包嵌套，文件和 Python 文件一一对应：
+
+```
+app.py                  src/app.rs
+store/__init__.py       src/store/mod.rs        （开头是 `pub mod items;` 等子模块声明）
+store/items.py          src/store/items.rs
+store/reports/text.py   src/store/reports/text.rs
+                        src/main.rs             （模块表和 `main`）
+```
+
+- 包用 `mod.rs` 而不是 `store.rs` 加 `store/`，这样 `store/__init__.py` 和它的子模块都在同一个目录里，和 Python 的目录结构一样
+- Rust 名字尽量和 Python 名字相同。不是标识符的名字（`importlib` 能 import `my-tool.py`）把非法字符换成 `_`，关键字用 `r#`（`type.py` 是 `r#type`，文件仍然是 `type.rs`），`mod.py` 和 crate 根上的 `main.py` 等与生成代码冲突的名字加 `_`，同一个包里撞名时也加 `_`
+- 类的 mod（§10）避开同一个文件里子模块的名字和模块自己的名字（clippy 的 `module_inception`），`store/inventory.py` 里的 `class Inventory` 是 `inventory_`
+- `main.rs` 里列出所有转换过的模块，模块的源文件由名字推出（`store.items` 是 `store/items.py`）
+
+```rust
+const MODULES: &[NativeModule] = &[
+    NativeModule::module("config", config::exec_module),
+    NativeModule::package("store", store::exec_module),
+    NativeModule::module("store.items", store::items::exec_module),
+];
+```
+
+**finder 和 loader**（runtime 的 `importer.rs`）。`run_project` 在执行 `__main__` 之前把 `NativeImporter` 放进 `sys.meta_path`，位置在 `PathFinder` 前面，这样 builtin、frozen 模块仍然优先，项目模块的优先级和在 `sys.path[0]` 里一样
+
+- `find_spec` 用 `importlib.util.spec_from_file_location` 按原来的源文件创建 spec，所以 `__file__`（原来的绝对路径）、`__cached__`、`__package__`、包的 `__path__` 和 `submodule_search_locations` 都和从源码 import 时一样。importlib 自己负责创建模块对象、放进 `sys.modules`、设置 `_initializing`、失败时删掉
+- 每个模块一个 `NativeLoader`（`__loader__`），和 `SourceFileLoader` 一样有 `name`、`path`，实现了 `exec_module`、`is_package`、`get_filename`、`get_source`（读原来的源文件，`inspect.getsource` 和 `linecache` 能用）。`exec_module` 通过 importlib 的 `_call_with_frames_removed` 调用生成的 `exec_module`，所以 import 时出错的 traceback 里没有 importlib 的帧，和源码模块一样
+- 表里没有的模块交给后面的 finder，照常从源码 import：标准库、第三方包、`--exclude` 的模块、转换之后才加进来的文件。包的子模块也一样，`PathFinder` 按包的 `__path__` 找得到
+- 循环 import、`importlib.reload`、`importlib.import_module`、删掉 `sys.modules` 里的项之后重新 import 都由 importlib 处理，执行的是同一个生成的 `exec_module`，模块级状态在新的 globals 里，和 CPython 一样。这也是不用 static 保存模块对象的原因（上面）
+- 非入口模块的 `__name__` 是它的真实名字，`if __name__ == "__main__":` 照常不执行
+
+**跨模块调用**。调用别的模块的函数（`from helpers import f; f()`、`helpers.f()`）一律经过模块属性或者本模块的 globals（`rt::import_from` 绑定的名字），没有做跨模块的 Rust 直接调用。
+
+- 这样别的模块替换函数（`helpers.f = ..`、`mock.patch("helpers.f")`）照常生效，生成代码也和 Python 的写法一一对应
+- 直接调用要求在转换时确定 `f` 一定是 `helpers` 里那个 `def`：导入它的名字在本模块只绑定一次、`helpers.f` 在导入之后没有被替换、`from` import 发生在调用之前，而且循环 import 时 `helpers` 可能还没执行到 `def`。这些条件在转换时证明不了，而经过模块属性只多一次字典查找，所以不做
+- 反过来，模块内部的直接调用（上面的条件）要防备别的模块替换它的函数。M6 起在整个项目上检查常见写法（`project.py` 的 `cross_module_patches`）：对项目模块对象（import 绑定的名字、它的属性、`sys.modules["pkg.mod"]`、`importlib.import_module("pkg.mod")`）的属性赋值和删除、`setattr`/`delattr`、`vars()`、`__dict__`，参数是模块对象和它的函数名的调用（`mock.patch.object(helpers, "f")`、`monkeypatch.setattr(helpers, "f", ..)`），以及形如 `"pkg.mod.f"` 的字符串。被替换的函数不再直接调用（`ModuleBindings.patched`），名字不是字面量时整个模块的调用都走 globals。项目以外的代码（例如没有一起转换的测试）做的替换仍然看不到，见第 12 节
+- 对自身模块对象的识别也认模块的真实名字：`sys.modules["pkg.mod"]` 和 `import pkg.mod as me`。入口模块同时认 `__main__` 和它被 import 时的名字
 
 ## 8. 表达式与求值顺序
 
@@ -843,7 +897,12 @@ m.set_global(
     - `__main__` 的 `__file__` 是脚本的绝对路径（3.9 起 CPython 也是绝对路径），`__cached__` 是 `None`
     - 这些路径指向源码位置，和解释器路径一样只适合在本机运行，M7 再处理
   - 已知差异：`__main__` 的 `__loader__` 不是 `SourceFileLoader`
+  - 有项目模块时（M6，§7 的"项目"）`main.rs` 多一张模块表，调用 `rt::embed::run_project`，它在执行 `__main__` 之前安装 finder。只有一个模块时生成的代码和以前完全一样，仍然调用 `run_main`
+  - `-m pkg`（M6）调用 `rt::embed::run_module(.., "pkg.__main__")`，照 `runpy._run_module_as_main` 的做法：`sys.path[0]` 是项目目录，先 import 父包，`sys.argv[0]` 和 `__file__` 是 `__main__.py` 的绝对路径，`__main__` 的 `__spec__`、`__package__`、`__loader__`、`__cached__` 来自 `pkg.__main__` 的 spec，然后在 `__main__` 模块里执行生成的代码。`argparse` 由此得到和 CPython 一样的程序名 `python -m pkg`。`-m pkg.mod` 运行普通模块也可以
 - **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块
+  - 有项目模块时（M6），`PyInit_*` 先调用 `rt::init_extension(m, MODULES)` 安装 finder，项目目录是扩展模块所在的目录，其余模块照样惰性执行
+  - `--mode ext -m pkg` 生成包形式的扩展模块：`pkg.so` 只导出 `PyInit_pkg`，`init_extension` 给它设置 `__path__`、`__package__` 和 spec 的 `submodule_search_locations`，于是它成了包，相对 import 和 `import pkg.sub` 都能用。包里所有的模块都转换（库的任何子模块都可能被 import），不只是静态 import 到的。扩展模块不能和包的源码目录放在一起，否则 `PathFinder` 先找到源码目录
+  - 没有做：ext 模式下的 `python -m pkg`（`NativeLoader` 没有 `get_code`，`runpy` 拿不到代码对象）
 
 ### 分发（待设计）
 
@@ -883,9 +942,9 @@ m.set_global(
 - 特化的 builtin（`len`、`isinstance`、`str`、`repr`、`bool`、`abs`、`type`、`iter`）直接调用对应的 C API，不在运行时查找 `builtins` 模块，所以 `builtins.len = ..` 这样的 monkeypatch 对它们无效。模块级重新绑定这些名字（`len = ..`、`def len`）则会被识别，不再特化
 - 字面量每次求值都创建新对象，而 Python 的常量在同一段代码里共享。只有比较 `str`、大整数常量的 identity 时才看得出区别，例如 `d["k"] += 1` 里 `__getitem__` 和 `__setitem__` 收到的是两个相等但不同的 `"k"`
 - f-string 中带转换但没有 spec 的字段（`{x!r}`）直接使用 `repr()`/`str()`/`ascii()` 的结果，CPython 对非精确 `str` 的结果还会再调用一次 `format`。只有 `__repr__`/`__str__` 返回带自定义 `__format__` 的 `str` 子类时才有区别
-- `ImportError` 的文字只覆盖常见情况，CPython 对循环 import 中"partially initialized module"和模块名遮蔽标准库的特殊提示没有复刻。模块级 import 传给 `__import__` 的 `locals` 是 `None`（CPython 传模块的 dict）
+- `from x import y` 失败时 `ImportError` 的文字和 CPython 一样（M6 起包括循环 import 的"partially initialized module"和模块名遮蔽标准库的提示，§7）。模块级 import 传给 `__import__` 的 `locals` 是 `None`（CPython 传模块的 dict）
 - warning（例如 `DeprecationWarning`）的输出里没有源码行
-- 对自身模块的修改（第 7 节）只识别常见写法。识别不到的有：`importlib.import_module(__name__)`、`__import__(__name__)`、`getattr(sys, "modules")` 等其他取得模块对象的方式，经过参数、容器、属性传递的模块对象，ext 模式下按模块的真实名字 `import` 自己，`exec`/`eval` 的命名空间是别处得到的模块 dict，以及其他模块里的修改（`mock.patch("app.f")`）。这些情况下直接调用看不到替换
+- 对自身模块的修改（第 7 节）只识别常见写法。识别不到的有：`importlib.import_module(__name__)`、`__import__(__name__)`、`getattr(sys, "modules")` 等其他取得模块对象的方式，经过参数、容器、属性传递的模块对象，单个模块的 ext 模式下按模块的真实名字 `import` 自己，`exec`/`eval` 的命名空间是别处得到的模块 dict，项目以外的模块里的修改（没有一起转换的测试里的 `mock.patch("app.f")`），以及项目内用别的写法做的修改（模块名是算出来的字符串等）。这些情况下直接调用看不到替换
 - 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，`__code__` 只描述签名，没有字节码，`co_firstlineno` 是 1（`dis`、`inspect.getsource` 等依赖字节码或源位置的工具无法使用）。`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）
 - `del f.__defaults__` 等删除元信息属性的操作抛 `AttributeError`，CPython 是把它设为 None。赋值为 None 的行为一致
 - 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；函数注解在 FORWARDREF 格式下创建的 `ForwardRef` 没有 `owner`（类注解的有）。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
@@ -895,6 +954,13 @@ m.set_global(
 - 生成器表达式的对象（§8）不是 `types.GeneratorType`，而是 runtime 的 `generator` 类：`collections.abc.Generator`、`Iterator` 的 `isinstance` 为 True，`inspect.isgenerator(g)` 和 `isinstance(g, types.GeneratorType)` 为 False。`gi_frame`、`gi_code`、`gi_yieldfrom` 是 `None`，所以 `inspect.getgeneratorstate` 对还没开始的生成器返回 `GEN_CLOSED`（CPython 是 `GEN_CREATED`），开始之后的状态一致。`throw()` 抛出的异常的 traceback 里没有 `<genexpr>` 那一帧
 - 模块级只有一个参数的 `exec(src)`、`eval(src)` 在原生代码里显式传入模块的 globals（`exec(src, globals())`），和 CPython 在模块级的行为一样。函数里的要读写局部变量，所在的函数保留为 Python
 - 模块级不带参数的 `globals()`、`locals()`、`vars()` 都是模块的 globals 字典，`dir()` 是排好序的名字列表（`m.dir()?`），和 CPython 一样。函数里不带参数的 `locals()`、`vars()`、`dir()` 要读局部变量，所在的函数保留为 Python
+- 项目（§7，M6）的差异
+  - 项目模块的 `__loader__` 是 `steelix_runtime.NativeLoader`，不是 `SourceFileLoader`：有 `name`、`path`、`get_source`、`get_filename`、`is_package`，没有 `get_code`、`get_data`、`source_to_code`，依赖它们的工具（`runpy.run_module`、`pkgutil.get_data`）不能用于转换过的模块
+  - 转换时用到的路径（项目目录、`__file__`）写死在程序里，和 `sys.argv[0]` 一样只适合在本机运行（M7）
+  - finder 放在 `PathFinder` 前面，项目模块总是优先。CPython 里如果程序自己在 `sys.path` 的 `sys.path[0]` 前面插入了含有同名模块的目录，会 import 到那个目录里的模块
+  - import 失败的 traceback：经过 `builtins.__import__`（import 语句）时 importlib 的帧和 CPython 一样被去掉；经过 `importlib.import_module` 时 CPython 保留 importlib 的帧，转换过的模块少一帧 `<frozen importlib._bootstrap_external>` 的 `exec_module`（`NativeLoader.exec_module` 是原生方法，没有帧）
+  - `-m` 运行时 traceback 开头没有 `<frozen runpy>` 的两帧
+  - 命名空间包里的模块不转换，照常从源码 import
 - 混合模式（§13）的差异：跟在 `;` 后面的保留语句，第一行在 traceback 里的列位置会偏；ext 模式下文件名用模块的 `__file__`，也就是扩展模块的路径，traceback 显示不出源码行
 - 模块级注解（§13 的"模块注解"）：`__annotate__` 的结果和 CPython 一样，剩下的差异是
   - 一段保留代码执行期间，`__annotate__` 和 `__conditional_annotations__` 是这一段自己的（只有这一段的注解），执行完才换回整个模块的。只有同一段代码里读注解（或者它调用的函数读模块的 `__annotations__`）时才看得出来
@@ -975,7 +1041,7 @@ def evens(limit):
 - 生成的模块文件开头有一段模块文档，列出所有保留为 Python 的语句和原因，读代码的人一眼就能看出哪些已经是原生代码
 - 检查器（§2）认识这个宏：参数必须是模块上下文（类体里是命名空间 `ns`）、`line = N`、可选的 `future_annotations` 或 `first_annotation = I`（见下面的模块注解）和 raw string，源码必须从新的一行开始，并且按这个行号（缩进的源码按上面的 `if True:`）能用 `compile()` 编译
 
-运行时 `rt::python::exec_python` 在源码前面补 `line - 1` 个空行，用 `Py_CompileStringObject` 以模块的 `__file__` 为文件名编译，再用 `PyEval_EvalCode` 在模块的 globals 里执行（globals 和 locals 是同一个 dict，和模块级代码一样）。所以
+运行时 `rt::python::exec_python` 在源码前面补 `line - 1` 个空行，用 `Py_CompileStringObject` 以模块的 `__file__` 为文件名编译（项目里的每个模块都由 finder 设置成原来的源文件路径，所以别的模块里保留的代码和原生函数合成的帧显示的也是各自的文件，M6），再用 `PyEval_EvalCode` 在模块的 globals 里执行（globals 和 locals 是同一个 dict，和模块级代码一样）。所以
 
 - 保留的 `def` 和 `class` 定义的对象和 CPython 完全一样：`__module__` 来自 globals 的 `__name__`，`__qualname__`、`__code__.co_filename`、`co_firstlineno` 都是原来的，`inspect.getsource` 能读到源码
 - 异常经过保留的代码时，traceback 里是原来的文件名和行号，并且能显示源码行
@@ -1049,6 +1115,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
   generator expression          8     8           0           12
 ```
 
+- 项目（M6）按模块各打印一段，文件名是相对于项目目录的路径（`store/items.py`），最后是所有模块的合计和合并后的特性排名（`all 6 modules: ...`），JSON 是 `{"modules": [..], "total": {..}, "features": [..]}`。另外列出转换了哪些模块、哪些项目文件没有转换以及原因
 - 统计单位：函数是模块级 `def` 和类的方法（嵌套函数算在外层函数里），语句是除 `def` 以外的顶层语句，另外按行数统计
 - 每个特性的列：`functions` 是它出现在其中的函数个数（类出现时算类的所有方法），`only` 是只被它挡住的函数个数（支持它就能让这些函数变成原生代码），`statements` 是函数以外的顶层语句个数，`occurrences` 是出现次数
 - JSON 里还列出每个保留的函数和语句以及挡住它的特性。真实应用的数据和据此提出的优先级见 `coverage.md`
@@ -1057,7 +1124,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 
 - **单元测试**：rustast 打印、作用域与绑定分析等纯 Python 逻辑
 - **Golden 快照**：`tests/cases/*.py` 转换结果与 `tests/golden/*.rs` 对比，`--update-golden` 更新。rustfmt 是必须的，固定 style edition，避免快照抖动
-- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段。同一层还对所有 golden 跑 `cargo clippy`（默认 lint 组，警告也算失败）。crate 根上另外 allow 三个 clippy lint：`never_loop`（Python 里 `for` 的第一轮就 `return`/`break` 是常见写法）、`approx_constant`（Python 源码里的 `3.14159` 本来就是那个字面量）、`if_same_then_else`（Python 两个分支写同样的代码是程序本身的事），它们说的是 Python 程序本身，不是生成方式
+- **`cargo check` 层**：只检查 golden 能编译，比端到端快。同时要求生成代码没有编译警告（crate 根上只放 `non_snake_case`、`unused_variables`、`unused_assignments` 三个 allow。最后一个是因为 Python 代码里常见赋值后不再读取的写法，`del x` 生成的 `x = None;` 也是这种情况），把可读性问题挡在快照阶段。同一层还对所有 golden 跑 `cargo clippy`（默认 lint 组，警告也算失败）。crate 根上另外 allow 五个 clippy lint：`never_loop`（Python 里 `for` 的第一轮就 `return`/`break` 是常见写法）、`approx_constant`（Python 源码里的 `3.14159` 本来就是那个字面量）、`if_same_then_else`（Python 两个分支写同样的代码是程序本身的事）、`too_many_arguments`（Python 函数的参数个数，M6 转换 `json` 时遇到）、`doc_lazy_continuation`（docstring 不是 Markdown，doctest 的 `>>>` 会被当成引用块），它们说的是 Python 程序本身，不是生成方式
 - 所有用例生成到 `target/e2e/` 下同一个 cargo workspace 里一次构建，`CARGO_TARGET_DIR` 共用，PyO3 只编译一次；workspace 复用仓库的 `Cargo.lock`，离线也能解析到同一个 PyO3 版本
 - rustfmt 的配置随包附带（`rustast/rustfmt.toml`，edition 与 style edition 都是 2024），用 `--config-path` 显式指定，不受运行目录影响，并复制到生成的 crate 里
 - **端到端差分测试**：比较 `python case.py` 与生成的可执行程序的 stdout、退出码和 stderr。有 traceback 时比较完整的 traceback（M4 起原生函数也有帧，第 9 节），只去掉原生帧没有的 `^^^` 行和 CPython 编译时的 `SyntaxWarning`；少数用例（直接调用的递归，§12）只比较异常类型。未捕获异常的用例另外用 `2>&1` 比较输出顺序。ext 模式只保留少量冒烟测试（`python -c "import case"`）。用 pytest marker `e2e` 区分
@@ -1066,6 +1133,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
   - 带 `# steelix-test: interrupt after the first line of output` 的用例会一直运行，测试在它输出第一行之后发送 `SIGINT`，两边都必须以 `KeyboardInterrupt` 结束，退出码相同
   - 混合模式：保留为 Python 的代码的 traceback 帧必须和 CPython 的最后几帧完全相同（文件名、行号、源码行）。bin 模式下的 panic 必须以退出码 1 结束（用手写的模块文件替换生成的文件来触发）
 - **真实应用**：`tests/apps/` 是从本机 CPython 3.14 标准库原样复制的命令行工具（calendar、base64、tabnanny、tokenize、ast、json.tool，文件开头注明来源和 PSF 许可），以混合模式转换，在几组命令行参数下与 CPython 运行同一份副本比较 stdout、退出码和 stderr（没有 traceback 时完全相同；有 traceback 时比较每一帧的文件名、行号、函数名和第一行源码，以及最后一行和 traceback 之前的输出）。它们的覆盖率数据见 `coverage.md`
+- **项目**（M6，`tests/test_projects.py`）：`tests/projects/` 下是多模块的程序。`inventory` 是专门写的测试应用，覆盖带 re-export 的包、子包、相对 import、循环 import（包括 partially initialized 的报错）、import 的副作用顺序、模块间共享的模块级状态、跨模块的子类和异常、`importlib.import_module`（静态能找到的和 `--include` 的）、`importlib.reload`、非入口模块里的 `__name__ == "__main__"`、按名字 import 入口模块、跨模块替换函数、`--exclude` 的模块、子模块里保留为 Python 的生成器穿过别的模块的原生帧抛出异常，以及 `python -m store`。`stdlib_json` 是标准库 `json` 包的原样副本（加上来源和 PSF 许可的注释）和一个驱动脚本，它遮蔽了标准库的 `json`，C 加速模块 `_json` 照常在 import 时被选中，纯 Python 的 scanner、编码器另外显式调用；还以 `python -m json` 运行 `json/__main__.py`。每个项目生成的整个 `src/` 是 golden（`tests/golden/projects/`，`main.rs` 里仓库的路径换成 `$ROOT`），要求编译没有警告、clippy 干净，并在几组参数下和 CPython 运行同一份源码比较 stdout、退出码和完整的 traceback（文件名、行号、源码行；`-m` 时去掉 CPython 的 `<frozen runpy>` 帧）。另有包形式的 ext 模式的冒烟测试，以及 `tests/test_project.py` 里模块发现、布局命名、跨模块替换识别和命令行的单元测试
 - **语料**：`tests/corpus/` 下是模仿真实小程序的脚本（文本处理、argparse、路径处理、JSON、图算法、计算器等），只用已支持的子集，但把很多特性组合在一起。要求能转换、编译没有警告，输出与 CPython 一致。`tests/cases/` 每个用例针对一个特性，语料用来发现组合起来才出现的问题
 - **示例应用**：`tests/test_examples.py` 检查 `examples/*/generated` 与当前转换结果完全相同，并且 `generated` 和 `rewritten` 两个版本在几组命令行参数下的输出、退出码都与 CPython 一致，改写出来的原生代码的单元测试通过
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
@@ -1111,6 +1179,8 @@ pub fn percentile<'py>(
 ```
 
 原生函数放进一个不依赖 PyO3 的模块，沿用 Python 的函数名。例子里是 `src/logsum/native.rs`，由 `src/logsum.rs` 开头的 `mod native;` 引入，不用改 `main.rs`。这样原生代码可以用 `cargo test` 单独测试，以后整个程序都变成原生代码时也不用再挪。
+
+多模块的项目（§7，M6）里每个 Python 模块有自己的 Rust 文件，原生代码同样放在它旁边：`store/items.py` 的是 `src/store/items/native.rs`，由 `src/store/items.rs` 开头的 `mod native;` 引入；包 `store/__init__.py` 的是 `src/store/native.rs`，由 `src/store/mod.rs` 引入（包里有叫 `native.py` 的子模块时换一个名字）。模块表在 `main.rs` 里，改写不需要动它。原生代码之间可以跨模块直接调用（`crate::store::items::native::parse`），它们不经过 Python，不受上面说的跨模块替换影响；生成的适配层之间的调用仍然经过模块属性（§7），不要改成直接调用适配层，否则别的模块对这个函数的替换就失效了。
 
 没有为每个函数另外生成一个转发用的适配函数（比如注册 `count_words_py`，由它调用 `count_words`）。改写之前两者完全一样，每个函数多出一个空转发，生成代码变长；改写函数体的签名之后，生成代码里的直接调用全部编译失败，要逐个在调用处加转换。现在的约定下调用方不用动。也没有让 `rt::def!` 按 `FromPyObject`/`IntoPyObject` 自动转换参数和返回值（类似 `#[pyfunction]`），那样可以直接改函数签名，但转换藏在宏展开里，出错时报在宏里，直接调用同样会全部失败。
 

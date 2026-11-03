@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import tokenize
 from dataclasses import dataclass, field
@@ -31,8 +32,14 @@ def parse_source(source: str, name: str, filename: str | None = None) -> ParsedM
     return ParsedModule(name, filename, source, tree, _collect_comments(source))
 
 
+def read_source(path: Path) -> str:
+    """The text of a Python source file, decoded like the import system
+    does: UTF-8 unless a coding cookie says otherwise, universal newlines."""
+    return importlib.util.decode_source(path.read_bytes())
+
+
 def parse_file(path: Path) -> ParsedModule:
-    source = path.read_text(encoding="utf-8")
+    source = read_source(path)
     parsed = parse_source(source, path.stem, path.name)
     parsed.path = path
     return parsed

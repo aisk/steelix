@@ -189,9 +189,7 @@ class SubsetChecker:
                 self.check_body(orelse)
             case ast.Import():
                 pass
-            case ast.ImportFrom(_, names, level):
-                if level:
-                    self.fail("relative import", stmt)
+            case ast.ImportFrom(_, names):
                 if any(alias.name == "*" for alias in names):
                     self.fail("star import", stmt)
             case ast.Assert(test, msg):
