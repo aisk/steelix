@@ -292,6 +292,7 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 - [ ] 用 skime 的 108 个测试验证这条路径，替代 M10 的 ext 复制脚本
 - [ ] 补充 §15：被多个模块共享读写的类（如 skime 的 `Context`）怎么改写，适配层怎样构造别的模块的类、抛项目自己的异常类，Python 源码本身是生成出来的时候怎么保持单一来源
 - [ ] 属性读写索引：列出每个实例属性被哪些函数读写，改写共享的类之前先看这张表
+- [ ] `#[pyclass]` 改写草稿（只在用户指定某个类时生成，不接入构建）：字段取自 `__static_attributes__`，类型先留成 `Py<PyAny>` 加 TODO，并且和属性读写索引一起报告这个类是否被继承、有没有动态 `setattr`/`getattr`、`__dict__`/`vars` 的使用、装饰器和 metaclass，作为 §15 第二步的起点。不做自动升级（§10）
 - [ ] ext 模式下 `python -m pkg`（M6 遗留）
 - [ ] ext 模式退回次要用途（作为扩展库发布），不再参与改写流程
 
@@ -314,6 +315,13 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
 - 保留为 Python：异步生成器、异步推导式
 
 runtime 的公开接口变了（`FunctionDef::body` 是 `function::Kind`，新的 `rt::Coroutine`、`rt::await_` 等），下次发版要提升 `steelix-runtime` 的版本和 `RUNTIME_VERSION`。
+
+## 性能的候选项（未排期）
+
+只做语义不变的。
+
+- [ ] 字符串常量缓存：`rt::str(py, "..")` 和直接传 `&str` 的 `x.eq(")")`、`d.get_item("key")` 每次都新建 PyString，作为 dict 的 key 还要重新算哈希。字面量是 `'static`，可以用驻留名字的表缓存，`is` 的结果反而更接近 CPython（§6 当时的结论是不做）。先在 skime 的读取器上测收益，再决定生成代码的写法
+- [ ] `__slots__` 属性的 inline cache：`attr` 里按名字缓存类型、`tp_version_tag` 和 member descriptor 的偏移，命中时直接按偏移读，类型被修改后 version tag 失效。依赖非 limited API 的细节，要随 CPython 版本验证，成本中等
 
 ## 发布
 
