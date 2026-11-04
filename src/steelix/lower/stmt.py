@@ -9,17 +9,18 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
-from steelix.frontend.bindings import is_constant_true
 from steelix.frontend.desugar import AsyncFor, annotation_source, binding_name
 from steelix.frontend.fallback import COMPOUND, first_line, loop_jumps, python_runs, python_source
+from steelix.frontend.locals import is_constant_true
 from steelix.lower.comprehension import line_marker, unpack_pattern
 from steelix.lower.context import NAMESPACE, Context
-from steelix.lower.expr import IN_PLACE, ExprLowering, Kind, Value, negate
+from steelix.lower.expr import IN_PLACE, ExprLowering, negate
 from steelix.lower.function import cell_declared_at, lower_nested
 from steelix.lower.handling import HandlingLowering
 from steelix.lower.patterns import MatchLowering
 from steelix.lower.rustflow import diverges, fallible, statement_line
 from steelix.lower.temps import settle
+from steelix.lower.values import Kind, Value
 from steelix.rustast import nodes as rs
 from steelix.rustast.rewrite import map_exprs
 

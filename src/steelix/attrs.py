@@ -36,9 +36,9 @@ import ast
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from steelix.frontend.bindings import ModuleBindings, analyze_module_bindings
 from steelix.frontend.classinfo import compiler_info
 from steelix.frontend.fallback import first_line
+from steelix.frontend.module_bindings import ModuleBindings, analyze_module_bindings
 from steelix.project import Project, _module_aliases, _module_object, resolve_relative
 
 READ = "read"

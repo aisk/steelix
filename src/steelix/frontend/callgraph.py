@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
-from steelix.frontend.bindings import ModuleBindings
+from steelix.frontend.module_bindings import ModuleBindings
 from steelix.frontend.resolve import Direct, resolve_call
 from steelix.frontend.scope import FunctionNode, ModuleScopes, scope_body, walk_scope
 

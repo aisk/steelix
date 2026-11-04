@@ -6,7 +6,7 @@ an immediately called closure whose `PyResult` is then inspected. A closure
 can not initialize a variable of the enclosing fn, which matters for the
 variable model (design §5): a local assigned in such a region either lives
 entirely inside it (and is declared there) or must already be initialized
-when the closure runs. `frontend.bindings` works that out; the lowering
+when the closure runs. `frontend.locals` works that out; the lowering
 uses the same regions.
 
 A `try` whose body is a single statement evaluating one expression (`x =

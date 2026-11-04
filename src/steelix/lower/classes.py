@@ -26,15 +26,16 @@ import ast
 import re
 from typing import TYPE_CHECKING
 
-from steelix.frontend.bindings import analyze_class_flow
 from steelix.frontend.desugar import binding_name
 from steelix.frontend.fallback import first_line
+from steelix.frontend.locals import analyze_class_flow
 from steelix.frontend.scope import ClassScope
+from steelix.lower.calls import keyword_arg
 from steelix.lower.context import NAMESPACE, ClassBody, Context, ModuleContext
 from steelix.lower.docstrings import docstring
-from steelix.lower.expr import Kind, Value, keyword_arg
 from steelix.lower.function import bind_py, in_frame, lower_function
 from steelix.lower.names import FUNCTION_RESERVED, MODULE_RESERVED, RUST_KEYWORDS, rust_ident
+from steelix.lower.values import Kind, Value
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
 

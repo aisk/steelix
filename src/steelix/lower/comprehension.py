@@ -30,11 +30,12 @@ from typing import TYPE_CHECKING
 
 from steelix.frontend.scope import FunctionNode, comprehension_variables
 from steelix.lower.names import FUNCTION_RESERVED, rust_ident
+from steelix.lower.values import Kind, Value
 from steelix.rustast import nodes as rs
 from steelix.rustast.printer import string_literal
 
 if TYPE_CHECKING:
-    from steelix.lower.expr import ExprLowering, Value
+    from steelix.lower.expr import ExprLowering
 
 
 Comprehension = ast.ListComp | ast.SetComp | ast.DictComp
@@ -142,8 +143,6 @@ class ComprehensionLowering:
     # --- list, set and dict comprehensions ---
 
     def comprehension(self: ExprLowering, node: Comprehension) -> Value:
-        from steelix.lower.expr import Kind, Value
-
         type_name, base = _CONTAINERS[type(node)]
         self.use(f"pyo3::types::{type_name}")
         entry_line = self.line
@@ -259,8 +258,6 @@ class ComprehensionLowering:
     def bind_target(self: ExprLowering, target: ast.expr) -> tuple[str, list[rs.Stmt]]:
         """The pattern of a comprehension's `for` loop and the statements at
         the start of its body binding the target."""
-        from steelix.lower.expr import Kind, Value
-
         if isinstance(target, ast.Name):
             var = self.comprehension_variable(target.id)
             assert var is not None
@@ -273,8 +270,6 @@ class ComprehensionLowering:
     def bind_next(self: ExprLowering, target: ast.expr) -> tuple[str, list[rs.Stmt]]:
         """`bind_target` for an item that is already a `Bound`, not a
         `PyResult`: the pattern of `if let Some(pattern) = rt::next(..)?`."""
-        from steelix.lower.expr import Kind, Value
-
         if isinstance(target, ast.Name):
             var = self.comprehension_variable(target.id)
             assert var is not None
@@ -285,8 +280,6 @@ class ComprehensionLowering:
 
     def bind(self: ExprLowering, target: ast.expr, value: Value) -> list[rs.Stmt]:
         """Assign `value` to a target of a comprehension's `for`."""
-        from steelix.lower.expr import Kind, Value
-
         match target:
             case ast.Name(id):
                 var = self.comprehension_variable(id)
@@ -334,7 +327,6 @@ class ComprehensionLowering:
         """`rt::genexpr!(m, genexpr[captures](xs.try_iter()?))`, after the
         step fn item (design §8)."""
         from steelix.lower.classes import merge_text
-        from steelix.lower.expr import Kind, Value
         from steelix.lower.function import captures_text, lower_genexpr
 
         entry_line = self.line
@@ -365,8 +357,6 @@ class ComprehensionLowering:
         Reads of a local that `:=` assigns somewhere in the function are not
         pure (`ExprLowering.name`), so an earlier read in the same expression
         is evaluated into a temporary before the assignment."""
-        from steelix.lower.expr import Kind, Value
-
         assert isinstance(node.target, ast.Name)
         name = node.target.id
         value = self.value(node.value)

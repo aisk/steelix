@@ -6,9 +6,10 @@ import ast
 from dataclasses import dataclass, field
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
-from steelix.frontend.bindings import LocalsInfo, ModuleBindings
 from steelix.frontend.callgraph import CallGraph
 from steelix.frontend.fallback import FallbackPlan
+from steelix.frontend.locals import LocalsInfo
+from steelix.frontend.module_bindings import ModuleBindings
 from steelix.frontend.scope import ClassScope, FunctionNode, FunctionScope, ModuleScopes
 from steelix.lower.names import CONTEXT, FUNCTION_RESERVED, RUST_KEYWORDS, Renamer
 from steelix.rustast import nodes as rs

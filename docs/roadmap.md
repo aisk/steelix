@@ -379,7 +379,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] 简化协程里的异常状态：保留函数体自己的异常在暂停前后的保存和恢复（`State::Suspended` 的 `handled`）和 `throw` 进来的异常的 `__context__`，去掉让直接委托的内层、`throw` 进委托对象时看到调用方的异常的机制（`Channel` 的 `caller`、`raise_in_body`、`as_caller`、`rt::delegate` 的 `outer`/`inherited`、`rt::Handling` 里协程相关的字段、`coroutine::polling()`）。`rt::Handling` 和同步代码一样无条件恢复，暂停在 `except` 里的函数体在自己的 poll 以外被释放时由 `Body` 保存和恢复线程的状态（`coroutines` 用例的 `stubborn_in_except`）。`coroutine.rs` 少了 4 个 unsafe 块。差异记在 §12（`coroutines`、`generator_close` 用例的 `KNOWN_DIFFERENCES`），上一节"`__context__` 也和 CPython 一样"现在只对外层自己的异常成立
 - [x] ~~生成器表达式改用协程的机制，删掉 `generator.rs`~~，不做。先测了每个元素的开销（release，LTO）：`sum(x * 2 for x in xs)` 用现在的 step 约 35 ns，同样的函数体写成原生生成器约 63 ns（慢约 80%，CPython 约 22 ns），去掉 C 栈检查、异常状态的保存恢复和状态的 `Mutex` 也只到约 59 ns，开销分散在每次恢复的固定成本里。超过了 30% 的界限，保留 step（design §8 生成器表达式的否决方案）。两个同名的 pyclass 只改了 Rust 的名字：生成器表达式的是 `rt::GenExpr`，Python 的类名仍然是 `generator`
 - [x] 拆分 runtime 的大文件：`coroutine.rs` 拆成 `coroutine/`（`state`、`channel`、`awaits`、`objects`、`finalize`），`lib.rs` 拆出 `names.rs`（驻留的名字）、`values.rs`（字面量、slice、f-string）、`macros.rs`（`rt::function!`、`rt::def!`），`rt::` 的路径不变
-- [ ] 拆分大文件：`frontend/bindings.py`（模块级绑定、局部变量）、`lower/expr.py`（调用、def）
+- [x] 拆分大文件：`frontend/bindings.py` 拆成 `module_bindings.py`（模块级绑定）和 `locals.py`（局部变量的定值分析）；`lower/expr.py` 拆出 `calls.py`（调用）、`defs.py`（`def`/`lambda` 的函数对象）和它们共用的 `values.py`（`Kind`、`Value`）。有了 `values.py`，`comprehension.py` 里为避开循环 import 写在函数内的 import 也挪到了模块顶部
 - [ ] `frame.catch` 和 `rt::Handling` 合成一个 RAII 的值（`Caught`），`except` 块里不用再分别写两步
 - [x] 文档：§12 里不存在的 `--dynamic-globals` 改成"以后可以加"，§14 的 `traceback_lines/` golden 列表，§2 的流水线和 §3 的目录结构补上漏掉的模块、子命令和 runtime 文件，`CLAUDE.md` 是本地文件，不在仓库里
 

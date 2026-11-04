@@ -5,9 +5,10 @@ import textwrap
 
 import pytest
 
-from steelix.frontend.bindings import analyze_locals, analyze_module_bindings
 from steelix.frontend.booleans import bool_locals
 from steelix.frontend.callgraph import build_call_graph
+from steelix.frontend.locals import analyze_locals
+from steelix.frontend.module_bindings import analyze_module_bindings
 from steelix.frontend.parse import parse_source
 from steelix.frontend.resolve import (
     Direct,

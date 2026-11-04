@@ -32,8 +32,8 @@ Python AST + 注释
   │  frontend/subset.py      找出还没有 lowering 的构造
   │  frontend/fallback.py    混合模式：决定哪些语句保留为 Python（§13）
   │  frontend/scope.py       symtable 分析作用域（local/global/nonlocal/cell/free），函数的种类
-  │  frontend/bindings.py    自行遍历 AST，统计模块级名字的绑定次数，
-  │                          局部变量的定值分析（definite assignment）
+  │  frontend/module_bindings.py  自行遍历 AST，统计模块级名字的绑定次数（§7）
+  │  frontend/locals.py      局部变量的定值分析（definite assignment，§5），模块和类体的可达性
   │  frontend/regions.py     lowering 放进 Rust 闭包的代码（§9）
   │  frontend/booleans.py    只会是 bool 的局部变量（§5）
   │  frontend/resolve.py     全局名字的引用怎样编译：直接调用、globals 查找、特化的 builtin（§7）
@@ -44,7 +44,8 @@ Python AST + 注释
 带作用域信息的 AST
   │  lower/module.py         整个模块（exec_module、保留的语句生成 rt::exec_python!）
   │  lower/function.py       def 和 lambda，lower/classes.py 类，lower/stmt.py 语句，
-  │  lower/expr.py ...       lower/expr.py 表达式（按 Python 求值顺序生成临时变量），
+  │  lower/expr.py ...       lower/expr.py 表达式（按 Python 求值顺序生成临时变量），calls.py 调用，
+  │                          defs.py 函数对象（rt::function!、装饰器），values.py 表达式的形态（Value），
   │                          handling.py（try/raise/with）、comprehension.py、patterns.py（match）、
   │                          temps.py、rustflow.py、names.py（名字卫生，§12）、docstrings.py
   ▼
@@ -237,7 +238,7 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
   - 变量本身必须是普通的 Rust 局部变量：只由 `x = value` 赋值（没有 `for`、`with`、`except`、`import`、`del`、增量赋值、解包赋值和 `:=`），不会在可能未赋值时读取（那需要 `Option`，仍然用对象），没有被内层函数捕获，也不是单表达式 `try`（`try: x = expr`）的赋值目标（它的 `match` 得到的是对象）。函数里的 `locals()` 等本来就让整个函数保留为 Python
   - 赋值时右边按条件求值（`exprs.condition`），和 `if` 的条件写法一样。读取时是 `Kind.BOOL` 的值，和 `in`、`is` 的结果一样处理：条件里直接用，作为 `IntoPyObject` 参数（`print(found)`、`call1((found,))`）直接传 `found`，PyO3 转换成 `True`/`False`；需要 `Bound<PyAny>` 的地方（返回值、方法的接收者、`&Bound` 参数）写 `rt::bool(py, found)`。没有用 `PyBool::new(py, found)`，因为它返回 `Borrowed<PyBool>`，还要 `.to_owned().into_any()`；`found.into_pyobject(py)?` 也一样要擦除类型。全是 Rust `bool` 的列表、元组字面量直接写成 `[found, x.is_none()]`
   - 标准库 154 个模块里 7171 个转换的函数共有 12087 个局部变量，符合的有 128 个（99 个函数），`tests/apps` 的 6 个工具里有 4 个
-- `try` 体、`finally` 之前的部分和 `with` 体在立即调用的闭包里执行（第 9 节），闭包不能初始化外层 fn 里声明了但还没赋值的变量，所以（`frontend/regions.py`、`frontend/bindings.py`）
+- `try` 体、`finally` 之前的部分和 `with` 体在立即调用的闭包里执行（第 9 节），闭包不能初始化外层 fn 里声明了但还没赋值的变量，所以（`frontend/regions.py`、`frontend/locals.py`）
   - 只在一个闭包区域内出现的局部变量在闭包里声明，规则同上（区域顶层第一次赋值处 `let`，否则在闭包开头声明），每次执行闭包都从未赋值开始
   - 在闭包里赋值、但在外面也用到的变量，进入闭包时必须已经确定赋值，否则是 `Option`
   - 只有一个表达式的 `try`（`x = int(s)`）不需要闭包，`match` 之后才赋值，`x` 仍然是普通的 `Bound`
@@ -523,7 +524,7 @@ Rust 方法调用的形状会改变求值顺序，例如 `x in y` 写成 `y.cont
 
 ### 实现（M2）
 
-lowering 给每个子表达式记录它在 Rust 里的形态（`lower/expr.py` 的 `Value`）：拥有的 `Bound`、`&Bound` 参数、局部变量、可以直接作为 `IntoPyObject` 的字面量、代表 Python bool 的 Rust `bool`（`in`、`is`、`not`、`isinstance`），以及代表 int 的 Rust 整数（`len`）。每个使用点选最可读的写法，例如条件里直接用 Rust `bool`，`len(xs) > 3` 直接写 `xs.len()? > 3`。
+lowering 给每个子表达式记录它在 Rust 里的形态（`lower/values.py` 的 `Value`）：拥有的 `Bound`、`&Bound` 参数、局部变量、可以直接作为 `IntoPyObject` 的字面量、代表 Python bool 的 Rust `bool`（`in`、`is`、`not`、`isinstance`），以及代表 int 的 Rust 整数（`len`）。每个使用点选最可读的写法，例如条件里直接用 Rust `bool`，`len(xs) > 3` 直接写 `xs.len()? > 3`。
 
 `Value` 还记录值的具体类型（`typed`），例如容器字面量是 `PyList`，`*args` 是 `PyTuple`，`str(x)` 是 `PyString`，`iter(x)` 是 `PyIterator`。这很重要：`Bound<PyDict>` 除了 `PyAnyMethods` 还有 `PyDictMethods`，同名时 Rust 优先选后者，而 `PyDict::get_item` 在 key 不存在时返回 `None`，不抛 `KeyError`。`Bound<PyIterator>` 实现了 `Iterator`，`eq`、`lt` 等会解析成 `Iterator` 的方法。所以生成的方法调用都经过 `Value.method(name, ..)`，它查 `rustast/pyo3.py` 的表，被遮蔽且行为不同的方法先 `.as_any()` 擦除类型。行为完全相同的（精确类型上的 `contains`、`len`，dict 的 `set_item`、`del_item`）保留原写法，其中 `len` 不会失败，写成 `args.len()`，不带 `?`。
 

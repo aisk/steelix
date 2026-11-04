@@ -16,7 +16,6 @@ import dataclasses
 from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
-from steelix.frontend.bindings import analyze_module_bindings, analyze_module_flow
 from steelix.frontend.callgraph import build_call_graph
 from steelix.frontend.classinfo import CompilerInfo, compiler_info
 from steelix.frontend.desugar import desugar
@@ -27,6 +26,8 @@ from steelix.frontend.fallback import (
     python_runs,
     source_lines,
 )
+from steelix.frontend.locals import analyze_module_flow
+from steelix.frontend.module_bindings import analyze_module_bindings
 from steelix.frontend.parse import ParsedModule
 from steelix.frontend.scope import analyze_scopes, has_future_annotations
 from steelix.frontend.subset import Issue, find_unsupported

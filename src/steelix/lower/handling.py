@@ -34,9 +34,9 @@ from typing import TYPE_CHECKING
 from steelix.frontend.desugar import AsyncWith
 from steelix.frontend.regions import Region, expression_body, suspends
 from steelix.frontend.resolve import Lookup, resolve_global
-from steelix.lower.expr import MAX_CALL_ARGS, Kind, Value
 from steelix.lower.function import BOUND
 from steelix.lower.rustflow import children, diverges, returns_as_tail, statement_line
+from steelix.lower.values import MAX_CALL_ARGS, Kind, Value
 from steelix.rustast import nodes as rs
 from steelix.rustast.pyo3 import BUILTIN_EXCEPTIONS
 from steelix.rustast.rewrite import map_exprs

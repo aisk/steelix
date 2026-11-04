@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import ast
 
-from steelix.frontend.bindings import LocalsInfo, analyze_locals
 from steelix.frontend.booleans import bool_locals
 from steelix.frontend.desugar import annotation_source
+from steelix.frontend.locals import LocalsInfo, analyze_locals
 from steelix.frontend.scope import (
     FunctionNode,
     FunctionScope,

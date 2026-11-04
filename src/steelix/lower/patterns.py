@@ -31,8 +31,8 @@ from typing import TYPE_CHECKING
 
 from steelix.frontend.patterns import pattern_captures
 from steelix.lower.comprehension import unpack_pattern
-from steelix.lower.expr import Kind, Value
 from steelix.lower.rustflow import diverges
+from steelix.lower.values import Kind, Value
 from steelix.rustast import nodes as rs
 
 if TYPE_CHECKING:

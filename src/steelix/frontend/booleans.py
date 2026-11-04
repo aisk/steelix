@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import ast
 
-from steelix.frontend.bindings import LocalsInfo, ModuleBindings
+from steelix.frontend.locals import LocalsInfo
+from steelix.frontend.module_bindings import ModuleBindings
 from steelix.frontend.regions import expression_body
 from steelix.frontend.resolve import Lookup, resolve_call
 from steelix.frontend.scope import FunctionScope, scope_body, walk_scope, walrus_targets

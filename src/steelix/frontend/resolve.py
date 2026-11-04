@@ -7,8 +7,8 @@ import builtins
 from dataclasses import dataclass
 from enum import Enum
 
-from steelix.frontend.bindings import ModuleBindings
 from steelix.frontend.desugar import suspends
+from steelix.frontend.module_bindings import ModuleBindings
 from steelix.frontend.scope import function_kind
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
