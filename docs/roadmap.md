@@ -387,8 +387,8 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 
 只做语义不变的。
 
-- [ ] 字符串常量缓存：`rt::str(py, "..")` 和直接传 `&str` 的 `x.eq(")")`、`d.get_item("key")` 每次都新建 PyString，作为 dict 的 key 还要重新算哈希。字面量是 `'static`，可以用驻留名字的表缓存，`is` 的结果反而更接近 CPython（§6 当时的结论是不做）。先在 skime 的读取器上测收益，再决定生成代码的写法
-- [ ] `__slots__` 属性的 inline cache：`attr` 里按名字缓存类型、`tp_version_tag` 和 member descriptor 的偏移，命中时直接按偏移读，类型被修改后 version tag 失效。依赖非 limited API 的细节，要随 CPython 版本验证，成本中等
+- [x] ~~字符串常量缓存~~，不做。在 skime 的读取器上测（release，`parse` 一段 30 万字符的生成的 S 表达式）：生成的代码 622 ms（CPython 261 ms），把 `parser.rs` 里的 `.eq("..")` 和 `rt::str(py, "..")` 都换成 `pyo3::intern!` 之后 620 ms，约 1%。读取器的字面量几乎都是单字符，CPython 对 Latin-1 的单字符字符串本来就有缓存，新建它们不分配内存；差距在 Python 方法调用的开销上（`slf.method0("peak")` 等，M10 §7）
+- [x] ~~`__slots__` 属性的 inline cache~~，不做。单次读取（release）：驻留名字的 `getattr` 约 10 ns，检查 `tp_version_tag` 之后按 member descriptor 的偏移直接读约 1 ns。但 skime 的 fib 22 只有约 20 万次 slot 读取（`CallValue.value`、`CallFrame.context`，热点的 `Context` 没有 `__slots__`），一共省约 1.6 ms，占 1.10 s 的 0.15%，不值得依赖非 limited API 的细节
 
 ## 发布
 
