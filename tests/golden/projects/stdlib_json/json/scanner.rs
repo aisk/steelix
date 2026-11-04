@@ -48,7 +48,7 @@ pub fn py_make_scanner<'py>(
                 let nextchar = match string.get_item(idx) {
                     Ok(value) => value,
                     Err(err) if err.is_instance_of::<PyIndexError>(py) => {
-                        let _handling = rt::Handling::new(&frame.catch(err));
+                        let _caught = frame.catch(err);
                         return Err(frame.raise_from(
                             PyStopIteration::new_err((idx.clone().unbind(),)),
                             py.None(),
@@ -191,7 +191,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("c_make_scanner", py.None())?;
             }
             Err(err) => return Err(err),

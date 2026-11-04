@@ -161,7 +161,6 @@ pub async fn nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(134);
                 rt::builtins::print(py, ("propagated", e.repr()?))?;
             }
@@ -270,7 +269,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     frame.line(173);
                     rt::builtins::print(
                         py,
@@ -317,7 +315,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     frame.line(179);
                     rt::builtins::print(
                         py,
@@ -342,7 +339,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(184);
                 rt::builtins::print(py, (&e,))?;
             }
@@ -386,7 +382,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match result {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyTimeoutError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 frame.line(196);
                 rt::builtins::print(py, ("timed out",))?;
             }

@@ -214,7 +214,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if frame.matches(&err, 1, || m.global("ConfigError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     rt::builtins::print(
                         py,
                         (
@@ -231,7 +230,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if frame.matches(&err, 1, || m.global("AppError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     rt::builtins::print(
                         py,
                         (
@@ -261,7 +259,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("AppError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(
                     py,
                     (
@@ -287,7 +284,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("Kept"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(
                     py,
                     (
@@ -314,7 +310,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("ValueError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }

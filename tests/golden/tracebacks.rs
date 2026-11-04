@@ -134,7 +134,6 @@ pub fn outer<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 show(m, &e)?;
             }
             Err(err) => return Err(err),
@@ -143,7 +142,6 @@ pub fn outer<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 show(m, &e)?;
             }
             Err(err) => return Err(err),
@@ -169,7 +167,6 @@ pub fn raise_again<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 return Err(frame.raise(&e));
             }
             Err(err) => return Err(err),
@@ -185,7 +182,7 @@ pub fn raise_from_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny
         match (|| leaf(m, PyList::new(py, [1])?.as_any(), &rt::int(py, 3)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyIndexError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 return Err(frame.raise(PyValueError::new_err("converted")));
             }
             Err(err) => return Err(err),
@@ -271,7 +268,6 @@ def kept_middle(values, key):
             Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.set_global("out", m.global("io")?.method0("StringIO")?)?;
                 rt::call!(
@@ -293,7 +289,6 @@ def kept_middle(values, key):
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -305,7 +300,6 @@ def kept_middle(values, key):
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -323,7 +317,6 @@ def kept_middle(values, key):
                 Err(err) if err.is_instance_of::<PyException>(py) => {
                     let exception = frame.catch(err);
                     m.set_global("e", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     m.set_global("out", m.global("io")?.method0("StringIO")?)?;
                     rt::call!(
                         m.global("traceback")?.attr("print_exception")?,
@@ -345,7 +338,6 @@ def kept_middle(values, key):
             Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }

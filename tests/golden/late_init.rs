@@ -108,7 +108,7 @@ pub fn parse<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bou
         })() {
             Ok(()) => rt::local(&number, "number")?.mul(2)?,
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("not a number:", text))?;
                 rt::none(py)
             }
@@ -240,7 +240,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("ValueError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }

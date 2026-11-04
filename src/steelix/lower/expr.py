@@ -412,7 +412,8 @@ class ExprLowering(CallLowering, FunctionObjectLowering, ComprehensionLowering):
                 return Value(rs.Path(rust), Kind.REF, typed=typed)
             # A later `:=` in the same expression may assign it.
             pure = False if name in fn.walrus_targets else None
-            return Value(rs.Path(rust), Kind.PLACE, pure=pure)
+            caught = name in fn.locals.handler_scoped
+            return Value(rs.Path(rust), Kind.PLACE, pure=pure, caught=caught)
         return self.global_name(name)
 
     def global_name(self, name: str) -> Value:

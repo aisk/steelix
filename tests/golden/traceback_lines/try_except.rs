@@ -111,7 +111,6 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
                 }
                 Err(err) if frame.matches(&err, 48, || m.global("KeyError"))? => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     frame.line(49);
                     m.global("print")?.call1(("key error", &e))?;
                     Ok(rt::str(py, "key"))
@@ -125,7 +124,6 @@ pub fn classify<'py>(m: &rt::Module<'py>, kind: &Bound<'py, PyAny>) -> PyResult<
                     })? =>
                 {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     frame.line(52);
                     m.global("print")?.call1((
                         "caught",
@@ -159,7 +157,6 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 66, || m.global("ValueError"))? => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     frame.line(67);
                     return Err(
                         frame.raise_from(m.global("RuntimeError")?.call1(("wrapped",))?, &e)
@@ -172,7 +169,6 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 68, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(69);
                 m.global("describe")?.call1((&e,))?;
             }
@@ -183,7 +179,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             match (|| m.global("risky")?.call1(("key",)))() {
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 73, || m.global("KeyError"))? => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     frame.line(74);
                     return Err(frame.raise(m.global("RuntimeError")?.call1(("implicit",))?));
                 }
@@ -194,7 +190,6 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 75, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(76);
                 m.global("describe")?.call1((&e,))?;
             }
@@ -205,7 +200,7 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             match (|| m.global("risky")?.call1(("app",)))() {
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 80, || m.global("AppError"))? => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     frame.line(81);
                     return Err(
                         frame.raise_from(m.global("TypeError")?.call1(("hidden",))?, py.None())
@@ -218,7 +213,6 @@ pub fn chained<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 82, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(83);
                 m.global("describe")?.call1((&e,))?;
             }
@@ -237,7 +231,6 @@ pub fn reraise<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 89, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(90);
                 e.set_attr("args", PyTuple::new(py, ["changed"])?)?;
                 frame.line(91);
@@ -264,7 +257,7 @@ pub fn via_helper<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match (|| m.global("risky")?.call1(("key",)))() {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 101, || m.global("KeyError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 frame.line(102);
                 m.global("bare_reraise_helper")?.call0()?;
             }
@@ -282,7 +275,6 @@ pub fn no_active<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 108, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(109);
                 m.global("print")?.call1(("RuntimeError:", &e))?;
             }
@@ -301,7 +293,6 @@ pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 115, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(116);
                 m.global("print")?.call1(("TypeError:", &e))?;
             }
@@ -314,7 +305,6 @@ pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 119, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(120);
                 m.global("print")?.call1(("TypeError:", &e))?;
             }
@@ -330,7 +320,7 @@ pub fn not_an_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
         })() {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 126, || m.global("int"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 frame.line(127);
                 m.global("print")?.call1(("unreachable",))?;
             }
@@ -348,7 +338,6 @@ pub fn bad_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 133, || m.global("TypeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(134);
                 m.global("print")?.call1(("bad handler:", &e))?;
             }
@@ -368,7 +357,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match (|| m.global("risky")?.call1(("value",)))() {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 141, || m.global("ValueError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 frame.line(142);
                 m.global("print")?.call1((
                     "inside:",
@@ -379,7 +368,7 @@ pub fn handled_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 match (|| m.global("risky")?.call1(("key",)))() {
                     Ok(_) => {}
                     Err(err) if frame.matches(&err, 145, || m.global("KeyError"))? => {
-                        let _handling = rt::Handling::new(&frame.catch(err));
+                        let _caught = frame.catch(err);
                         frame.line(146);
                         m.global("print")?.call1((
                             "nested:",
@@ -413,7 +402,6 @@ pub fn handler_name_is_deleted<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, 
             Ok(_) => {}
             Err(err) if frame.matches(&err, 154, || m.global("ValueError"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 frame.line(155);
                 m.global("print")?.call1(("bound:", &err))?;
             }
@@ -453,7 +441,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
                     m.global("risky")?.call1(("key",))?;
                 }
                 Err(err) if frame.matches(&err, 172, || m.global("ValueError"))? => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     frame.line(173);
                     m.global("print")?.call1(("not reached",))?;
                 }
@@ -464,7 +452,6 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
             Ok(()) => {}
             Err(err) if frame.matches(&err, 176, || m.global("KeyError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(177);
                 m.global("print")?
                     .call1(("from else:", m.global("repr")?.call1((&e,))?))?;
@@ -476,7 +463,7 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
             match (|| m.global("risky")?.call1(("value",)))() {
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 181, || m.global("ValueError"))? => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     frame.line(182);
                     m.global("risky")?.call1(("key",))?;
                 }
@@ -487,7 +474,6 @@ pub fn exceptions_in_else_and_handlers<'py>(m: &rt::Module<'py>) -> PyResult<Bou
             Ok(()) => {}
             Err(err) if frame.matches(&err, 183, || m.global("KeyError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(184);
                 m.global("print")?.call1((
                     "from handler:",
@@ -517,7 +503,7 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         })() {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 192, || m.global("StopIteration"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 frame.line(193);
                 m.global("print")?.call1(("exhausted",))?;
             }
@@ -556,7 +542,6 @@ pub fn generator_into_native<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             Ok(()) => {}
             Err(err) if frame.matches(&err, 206, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 frame.line(207);
                 m.global("print")?
                     .call1(("generator raised", &e, "after", &total))?;
@@ -726,7 +711,6 @@ def name_after_handler():
             Err(err) if frame.matches(&err, 251, || m.global("ValueError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 frame.line(252);
                 m.global("print")?
                     .call1(("reraised", m.global("e")?.attr("args")?))?;
@@ -740,7 +724,6 @@ def name_after_handler():
             Err(err) if frame.matches(&err, 255, || m.global("KeyError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 frame.line(256);
                 m.global("print")?.call1((
                     "helper reraised",
@@ -787,7 +770,6 @@ def name_after_handler():
             Err(err) if frame.matches(&err, 270, || m.global("AppError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 frame.line(271);
                 m.global("print")?.call1((
                     "module level",

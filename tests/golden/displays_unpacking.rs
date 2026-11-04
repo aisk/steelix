@@ -259,7 +259,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     rt::builtins::print(py, (e.get_type().attr("__name__")?, &e))?;
                 }
                 Err(err) => return Err(err),

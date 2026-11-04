@@ -166,7 +166,6 @@ pub fn maybe_unbound<'py>(
             Ok(value) => Ok(value),
             Err(err) if err.is_instance_of::<PyUnboundLocalError>(py) => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 rt::builtins::print(py, ("UnboundLocalError:", &err))?;
                 Ok(rt::none(py))
             }

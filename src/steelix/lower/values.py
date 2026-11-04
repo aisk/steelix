@@ -44,6 +44,10 @@ class Value:
     """Name for a temporary holding the value, if the expression suggests one."""
     temp: bool = False
     """A temporary of the generated code, which its single owned use may move."""
+    caught: bool = False
+    """A `PLACE` that is the `rt::Caught` of an `except` block
+    (`let e = frame.catch(err);`): used like a `Bound`, which it
+    dereferences to, but returning it clones the `Bound`."""
     awaited: bool = False
     """The result of a native coroutine or generator awaited in place,
     `rt::delegate(f(m, &x)).await?` for `await f(x)` or `yield from f(x)`."""
@@ -131,7 +135,7 @@ class Value:
         """As a `PyResult<Bound<'py, PyAny>>`, for returning from a function."""
         if self.kind is Kind.OWNED and not self.typed and isinstance(self.expr, rs.Try):
             return self.expr.expr
-        if self.kind is Kind.PLACE:
+        if self.kind is Kind.PLACE and not self.caught:
             # Returning moves the local out; nothing runs afterwards.
             expr = rs.MethodCall(self.expr, "into_any") if self.typed else self.expr
             return rs.Call(rs.Path("Ok"), (expr,))

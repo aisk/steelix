@@ -160,7 +160,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -181,7 +180,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -199,7 +197,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -217,7 +214,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -243,7 +239,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -260,7 +255,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }
@@ -272,7 +266,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("e")?)?;
                 m.unbind_global("e")?;
             }

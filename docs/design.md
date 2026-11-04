@@ -568,7 +568,7 @@ h.call0()?.contains(&item)?
 
 返回值和赋值的清理（M9）。下面这些只在语义上完全等价时做，不改变求值顺序，也不改变任何对象释放的时机（`tests/cases/returned_locals.py` 用 `__del__` 和 weakref 检查）
 
-- 返回或者 yield 一个在同一个 fn 或闭包里声明的局部变量时直接 move（`return Ok(x)`、`return Ok(Some(x))`），不 clone（`rustast/cleanup.py`，在 Rust AST 上做，因为只有那里知道变量在哪个闭包里声明）。返回之后这个变量不会再被用到，对象由返回值继续持有，不会有别的对象因此提前或推迟释放。外层 fn 或闭包的变量（被闭包按引用捕获）、参数（`&Bound`）、`Option` 变量和被 guard 借用的变量（`rt::Handling::new(&err)`）照旧 clone
+- 返回或者 yield 一个在同一个 fn 或闭包里声明的局部变量时直接 move（`return Ok(x)`、`return Ok(Some(x))`），不 clone（`rustast/cleanup.py`，在 Rust AST 上做，因为只有那里知道变量在哪个闭包里声明）。返回之后这个变量不会再被用到，对象由返回值继续持有，不会有别的对象因此提前或推迟释放。外层 fn 或闭包的变量（被闭包按引用捕获）、参数（`&Bound`）、`Option` 变量被 guard 借用的变量和 `except` 块的 `rt::Caught`（`let e = frame.catch(err);`）照旧 clone
 - 目标和右边个数相同、都没有 `*` 的解包赋值 `a, b = b, a` 不再构造元组再 `rt::unpack`，写成 `[a, b] = [b.clone(), a.clone()];`。Python 也是先按顺序求值右边的每一项，再依次赋值，中间的元组看不到（CPython 对两三项的情况本来就不构造元组）
 - `globals()` 是模块持有的 `&Bound<PyDict>`，直接用 `m.globals()`，不再 `.clone().into_any()`（`m.globals().contains("n")?`）
 - 带装饰器的类和以前带装饰器的函数一样，最外层的装饰器在保存时调用：`m.set_global("Point", decorator.call1((point,))?)?`（M11b 起函数的装饰器写在 `rt::def!` 里，§6）
@@ -1010,7 +1010,6 @@ match (|| -> PyResult<()> {
     Ok(()) => {}
     Err(err) if frame.matches(&err, 66, || m.global("ValueError"))? => {
         let e = frame.catch(err);
-        let _handling = rt::Handling::new(&e);
         ..
     }
     Err(err) => return Err(err),
@@ -1020,9 +1019,9 @@ match (|| -> PyResult<()> {
 - 闭包里没有会被 `match` 接住的东西（没有 `?`，结果只是最后的 `Ok`/`Err`，例如 `try: raise E`）时不生成闭包：前面的语句直接放在 `match` 之前，`match` 的是结果本身。闭包里有 `let` 时写成 `let result: PyResult<()> = { .. }; match result { .. }`，让这些变量在 handler 执行前离开作用域（clippy 的 `redundant_closure_call`、`blocks_in_conditions`）
 - 函数和闭包最后的 `return x;` 写成尾表达式 `x`，最后的 `if`/`match` 每个分支都 `return` 时整体变成表达式（clippy 的 `needless_return`，`lower/rustflow.py` 的 `returns_as_tail`）
 - 闭包的返回类型按块里的跳转决定：没有跳转是 `PyResult<()>`；只有 `return` 并且结尾不可达时直接返回值，写 `return Ok(..)`；其余是 `PyResult<rt::Flow<'py>>`，`Flow` 有 `Next`、`Break`、`Continue`、`Return(value)`。外面按 `Flow` 分派，只有一种跳转时写成 `if let rt::Flow::Return(value) = ..? { return Ok(value); }`，否则写 `match`
-- handler 的 `let e = frame.catch(err);` 把这一帧补进 traceback，得到异常对象。不用 `as` 也要设置正在处理的异常时写 `let _handling = rt::Handling::new(&frame.catch(err));`。handler 只有 `pass`、赋值字面量这类不会调用 Python 代码的语句时省略这两行
+- handler 的 `let e = frame.catch(err);` 把这一帧补进 traceback，得到 `rt::Caught`：它 deref 成异常对象（`&Bound`），也实现了 `IntoPyObject`、`IntoException`，所以 `e` 和别的局部变量一样用；同时它在块结束前是正在处理的异常（内部是一个 `rt::Handling`）。不用 `as` 时写 `let _caught = frame.catch(err);`。handler 只有 `pass`、赋值字面量这类不会调用 Python 代码的语句时省略这一行
 - 异常对象由 `match` 的 `err` 持有，离开 handler（包括 `continue`、`break`）时释放，和 CPython 一样，`__del__` 和参数的 weakref 在下一条语句之前生效。`Frame` 为了不重复添加 traceback 条目，要记住哪个异常已经有这一帧的条目（在这里 `raise` 的、重新抛出的），M11a 之前它持有这个异常，不经过 `frame.catch` 的 handler（`pass`、只有 `continue`）接住之后异常要等函数返回才释放。现在只记地址：异常的地址，和当时它的 traceback 第一项的帧（这一帧，或者裸 `raise` 时正在处理它的那一帧，都还在运行）。异常释放之后新的异常可能用同一个地址，但它是从被调用的函数来的，traceback 的第一项是别的帧，不会被当成已经有条目（`tests/cases/handler_release.py`）
-- `rt::Handling` 是 RAII guard：创建时用 `PyErr_GetHandledException`/`PyErr_SetHandledException` 保存并设置正在处理的异常，`Drop` 时恢复。所以 handler 里 `sys.exception()`、`logging.exception()`、`traceback.print_exc()`、新异常的 `__context__`、辅助函数里的裸 `raise` 都和 CPython 一样，从 `?`、`return`、`break`、panic 离开时也会恢复
+- `rt::Caught` 里的 `rt::Handling` 是 RAII guard：创建时用 `PyErr_GetHandledException`/`PyErr_SetHandledException` 保存并设置正在处理的异常，`Drop` 时恢复。所以 handler 里 `sys.exception()`、`logging.exception()`、`traceback.print_exc()`、新异常的 `__context__`、辅助函数里的裸 `raise` 都和 CPython 一样，从 `?`、`return`、`break`、panic 离开时也会恢复
 - `as e` 的名字只在 handler 内使用时就是 handler 里的 `let`，离开 handler 自然消失，这就是 CPython 结尾的隐式 `del e`。模块级的名字写入 globals，handler 结束时 `m.unbind_global("e")?`。函数里 handler 之外也用到这个名字的，所在的函数保留为 Python（`except-as name used outside its handler`，标准库里只有 1 处）
 - `except*` 保留为 Python（§13），异常组的拆分和重新组合不值得用 Rust 再实现一遍
 
@@ -1318,7 +1317,7 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 - 生成器表达式的对象（§8）不是 `types.GeneratorType`，而是 runtime 的 `generator` 类：`collections.abc.Generator`、`Iterator` 的 `isinstance` 为 True，`inspect.isgenerator(g)` 和 `isinstance(g, types.GeneratorType)` 为 False。`gi_frame`、`gi_code`、`gi_yieldfrom` 是 `None`，所以 `inspect.getgeneratorstate` 对还没开始的生成器返回 `GEN_CLOSED`（CPython 是 `GEN_CREATED`），开始之后的状态一致。`throw()` 抛出的异常的 traceback 里没有 `<genexpr>` 那一帧
 - 原生的协程和生成器函数（§8 "协程和生成器"，M13，`tests/cases/coroutines.py` 检查前两条）。M12 之前生成器函数和 `async def` 保留为 Python，是 CPython 自己的对象，现在转换后的程序里它们都是原生的，下面几条因此适用于所有转换过的生成器和协程
   - 协程是 runtime 的 `coroutine` 类型，不是 `types.CoroutineType`：`asyncio.iscoroutine`、`isinstance(c, collections.abc.Coroutine)` 为 True，`inspect.iscoroutine(c)` 为 False，生成器同理（`inspect.isgenerator` 为 False）。`cr_frame`、`cr_code`、`cr_await`、`cr_origin`（生成器的 `gi_frame`、`gi_code`、`gi_yieldfrom`）都是 `None`，所以 `inspect.getcoroutinestate` 对没开始的协程返回 `CORO_CLOSED`，`sys.set_coroutine_origin_tracking_depth` 不起作用，按 `cr_await` 链打印任务栈的工具（`asyncio` 的 `Task.print_stack`、`python -m asyncio ps`）看不到原生协程里面。Cython 的协程有同样的限制
-  - GC 能看到暂停的协程和生成器的模块 globals、捕获的变量、参数、正在处理的异常、`await`/`yield from` 委托的对象和 traceback 帧对象（§8），经过它们的循环和 CPython 一样被回收并 `close()`。看不到的是函数体自己的代码跨过暂停持有的东西：局部变量、语句的临时值、`except` 块绑定的异常（`except E as e` 的 `e`，以及 `rt::Handling` 保存的之前的异常）、`with` 块的上下文管理器和 `__enter__` 的值、`finally` 里待重新抛出的异常。被它们引用的对象（以及从这些对象能到达的一切）不会被回收，经过它们的循环也就不会被回收，`finally` 也不会执行，直到循环被别的方式打断。例如暂停在 `except KeyError as e:` 块里的协程，`e` 的 traceback 引用帧对象，帧对象引用模块的 globals，于是模块的 globals 和挂在上面的这个协程在退出时都不会被回收；CPython 的帧里的局部变量对 GC 可见，会回收。lowering 先绑定被 await 的表达式（§8），所以被等待的对象的临时值不会跨过暂停。同一条语句里先于 `await` 求值的操作数（`f(a) + await g()` 里 `f(a)` 的结果）和直接 await 的实参（`await f(g())` 里 `g()` 的结果，CPython 里它们分别在值栈上和被调用的协程的帧里，GC 都看得到）跨过暂停，和局部变量一样看不见
+  - GC 能看到暂停的协程和生成器的模块 globals、捕获的变量、参数、正在处理的异常、`await`/`yield from` 委托的对象和 traceback 帧对象（§8），经过它们的循环和 CPython 一样被回收并 `close()`。看不到的是函数体自己的代码跨过暂停持有的东西：局部变量、语句的临时值、`except` 块绑定的异常（`except E as e` 的 `e`，以及 `rt::Caught` 保存的之前的异常）、`with` 块的上下文管理器和 `__enter__` 的值、`finally` 里待重新抛出的异常。被它们引用的对象（以及从这些对象能到达的一切）不会被回收，经过它们的循环也就不会被回收，`finally` 也不会执行，直到循环被别的方式打断。例如暂停在 `except KeyError as e:` 块里的协程，`e` 的 traceback 引用帧对象，帧对象引用模块的 globals，于是模块的 globals 和挂在上面的这个协程在退出时都不会被回收；CPython 的帧里的局部变量对 GC 可见，会回收。lowering 先绑定被 await 的表达式（§8），所以被等待的对象的临时值不会跨过暂停。同一条语句里先于 `await` 求值的操作数（`f(a) + await g()` 里 `f(a)` 的结果）和直接 await 的实参（`await f(g())` 里 `g()` 的结果，CPython 里它们分别在值栈上和被调用的协程的帧里，GC 都看得到）跨过暂停，和局部变量一样看不见
   - 正在处理的异常（§8）：函数体自己的异常在暂停前后保存和恢复，`except` 里 `sys.exception()` 跨过 `await` 不变，也不会泄漏给调用方，`throw` 进来的异常以它为 `__context__`（没有时不设置，不用调用方的），这些和 CPython 一样。不同的是看到调用方的异常的地方（`coroutines`、`generator_close` 用例的 `KNOWN_DIFFERENCES`）
     - 跨过暂停的 `except` 块结束时恢复它开始时正在处理的异常，那是开始那一次 poll 的调用方的（或者没有），CPython 是这一次 poll 的调用方的。例如在调用方的 `except ValueError` 里恢复一个暂停在 `except KeyError` 块里的协程，块结束后 `sys.exception()` 是 `None` 而不是那个 `ValueError`，此后抛出的异常也就没有它作为 `__context__`
     - 直接委托（`rt::delegate`）的内层和外层共用一份异常状态，内层自己没有正在处理的异常时看到外层的（`sys.exception()`、新异常的 `__context__`，包括 `close()` 送进内层的 `GeneratorExit`），CPython 的内层看到的是调用方的。`rt::await_` 往委托对象里 `throw` 时，委托对象看到的也是外层的

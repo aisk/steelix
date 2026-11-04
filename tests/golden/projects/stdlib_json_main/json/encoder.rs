@@ -68,7 +68,7 @@ pub fn py_encode_basestring_ascii<'py>(
                     match (|| m.global("ESCAPE_DCT")?.get_item(&s))() {
                         Ok(value) => Ok(value),
                         Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                            let _handling = rt::Handling::new(&frame.catch(err));
+                            let _caught = frame.catch(err);
                             n = rt::builtin(py, "ord")?.call1((&s,))?;
                             if n.lt(65536)? {
                                 rt::str(py, "\\u{0:04x}").method1("format", (&n,))
@@ -234,12 +234,11 @@ pub fn _make_iterencode<'py>(
                         match result {
                             Ok(()) => {}
                             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                                let _handling = rt::Handling::new(&frame.catch(err));
+                                let _caught = frame.catch(err);
                                 return Err(frame.reraise());
                             }
                             Err(err) if err.is_instance_of::<PyBaseException>(py) => {
                                 let exc = frame.catch(err);
-                                let _handling = rt::Handling::new(&exc);
                                 exc.attr("add_note")?.call1((rt::fstring(
                                     py,
                                     (
@@ -423,12 +422,11 @@ pub fn _make_iterencode<'py>(
                         match result {
                             Ok(()) => {}
                             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                                let _handling = rt::Handling::new(&frame.catch(err));
+                                let _caught = frame.catch(err);
                                 return Err(frame.reraise());
                             }
                             Err(err) if err.is_instance_of::<PyBaseException>(py) => {
                                 let exc = frame.catch(err);
-                                let _handling = rt::Handling::new(&exc);
                                 exc.attr("add_note")?.call1((rt::fstring(
                                     py,
                                     (
@@ -535,12 +533,11 @@ pub fn _make_iterencode<'py>(
                         {
                             Ok(_) => {}
                             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                                let _handling = rt::Handling::new(&frame.catch(err));
+                                let _caught = frame.catch(err);
                                 return Err(frame.reraise());
                             }
                             Err(err) if err.is_instance_of::<PyBaseException>(py) => {
                                 let exc = frame.catch(err);
-                                let _handling = rt::Handling::new(&exc);
                                 exc.attr("add_note")?.call1((rt::fstring(
                                     py,
                                     (
@@ -1018,7 +1015,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("c_encode_basestring_ascii", py.None())?;
             }
             Err(err) => return Err(err),
@@ -1033,7 +1030,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("c_encode_basestring", py.None())?;
             }
             Err(err) => return Err(err),
@@ -1045,7 +1042,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("c_make_encoder", py.None())?;
             }
             Err(err) => return Err(err),

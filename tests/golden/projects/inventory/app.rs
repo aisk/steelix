@@ -38,7 +38,6 @@ pub fn shop<'py>(
             Ok(_) => {}
             Err(err) if frame.matches(&err, 52, || m.global("OutOfStock"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 rt::builtins::print(
                     py,
                     (
@@ -56,7 +55,6 @@ pub fn shop<'py>(
             Ok(_) => {}
             Err(err) if frame.matches(&err, 52, || m.global("StoreError"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 rt::builtins::print(
                     py,
                     (
@@ -356,7 +354,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("app: relative import:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
@@ -371,7 +368,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(
                     py,
                     (

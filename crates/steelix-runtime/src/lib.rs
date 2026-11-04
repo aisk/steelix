@@ -58,7 +58,7 @@ pub mod builtins;
 #[doc(hidden)]
 pub mod frame;
 
-pub use frame::{Flow, Frame, Handling, IntoException};
+pub use frame::{Caught, Flow, Frame, Handling, IntoException};
 
 pub use attr::Attributes;
 pub use cell::Cell;

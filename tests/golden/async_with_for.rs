@@ -129,7 +129,6 @@ pub async fn nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("propagated", e.repr()?))?;
             }
             Err(err) => return Err(err),
@@ -224,7 +223,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     rt::builtins::print(
                         py,
                         (
@@ -265,7 +263,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     rt::builtins::print(
                         py,
                         (
@@ -287,7 +284,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, (&e,))?;
             }
             Err(err) => return Err(err),
@@ -325,7 +321,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match result {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyTimeoutError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("timed out",))?;
             }
             Err(err) => return Err(err),

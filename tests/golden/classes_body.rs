@@ -74,7 +74,6 @@ pub mod body_ {
                     Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                         let exception = frame.catch(err);
                         ns.set("err", &exception)?;
-                        let _handling = rt::Handling::new(&exception);
                         ns.set("caught", ns.get("repr")?.call1((ns.get("err")?,))?)?;
                         ns.unbind("err")?;
                     }
@@ -103,7 +102,6 @@ pub mod body_ {
                 Err(err) if err.is_instance_of::<PyNameError>(py) => {
                     let exception = frame.catch(err);
                     ns.set("err", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     ns.set("name_error", ns.get("str")?.call1((ns.get("err")?,))?)?;
                     ns.unbind("err")?;
                 }
@@ -530,7 +528,6 @@ def failing_body():
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("ZeroDivisionError", show_tb(m, &m.global("err")?)?))?;
                 m.unbind_global("err")?;
             }
@@ -547,7 +544,6 @@ def failing_body():
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("ZeroDivisionError", show_tb(m, &m.global("err")?)?))?;
                 m.unbind_global("err")?;
             }

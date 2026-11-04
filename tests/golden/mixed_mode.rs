@@ -205,7 +205,7 @@ squares = list(s for s in map(double, range(4)) for _ in "1")
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("json", py.None())?;
             }
             Err(err) => return Err(err),

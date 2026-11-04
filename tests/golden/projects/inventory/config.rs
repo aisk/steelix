@@ -29,7 +29,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("config: relative import:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }

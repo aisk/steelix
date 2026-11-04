@@ -91,7 +91,6 @@ pub fn not_suppressing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
             Ok(()) => {}
             Err(err) if frame.matches(&err, 74, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 m.global("print")?.call1(("caught", &e))?;
             }
             Err(err) => return Err(err),
@@ -118,7 +117,6 @@ pub fn enter_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 82, || m.global("RuntimeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 m.global("print")?.call1(("caught", &e))?;
             }
             Err(err) => return Err(err),
@@ -142,7 +140,6 @@ pub fn exit_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if frame.matches(&err, 90, || m.global("KeyError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 m.global("print")?.call1((
                     "caught",
                     m.global("repr")?.call1((&e,))?,
@@ -226,7 +223,6 @@ pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(()) => {}
                 Err(err) if frame.matches(&err, 117, || m.global("TypeError"))? => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     m.global("print")?.call1(("TypeError:", &e))?;
                 }
                 Err(err) => return Err(err),
@@ -275,7 +271,6 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
             Ok(()) => {}
             Err(err) if frame.matches(&err, 126, || module.global("TypeError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 module.global("print")?.call1(("TypeError:", &e))?;
             }
             Err(err) => return Err(err),

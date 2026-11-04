@@ -380,7 +380,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] ~~生成器表达式改用协程的机制，删掉 `generator.rs`~~，不做。先测了每个元素的开销（release，LTO）：`sum(x * 2 for x in xs)` 用现在的 step 约 35 ns，同样的函数体写成原生生成器约 63 ns（慢约 80%，CPython 约 22 ns），去掉 C 栈检查、异常状态的保存恢复和状态的 `Mutex` 也只到约 59 ns，开销分散在每次恢复的固定成本里。超过了 30% 的界限，保留 step（design §8 生成器表达式的否决方案）。两个同名的 pyclass 只改了 Rust 的名字：生成器表达式的是 `rt::GenExpr`，Python 的类名仍然是 `generator`
 - [x] 拆分 runtime 的大文件：`coroutine.rs` 拆成 `coroutine/`（`state`、`channel`、`awaits`、`objects`、`finalize`），`lib.rs` 拆出 `names.rs`（驻留的名字）、`values.rs`（字面量、slice、f-string）、`macros.rs`（`rt::function!`、`rt::def!`），`rt::` 的路径不变
 - [x] 拆分大文件：`frontend/bindings.py` 拆成 `module_bindings.py`（模块级绑定）和 `locals.py`（局部变量的定值分析）；`lower/expr.py` 拆出 `calls.py`（调用）、`defs.py`（`def`/`lambda` 的函数对象）和它们共用的 `values.py`（`Kind`、`Value`）。有了 `values.py`，`comprehension.py` 里为避开循环 import 写在函数内的 import 也挪到了模块顶部
-- [ ] `frame.catch` 和 `rt::Handling` 合成一个 RAII 的值（`Caught`），`except` 块里不用再分别写两步
+- [x] `frame.catch` 和 `rt::Handling` 合成一个 RAII 的值 `rt::Caught`，`except` 块里只写 `let e = frame.catch(err);`（没有 `as` 时是 `_caught`）。`Caught` deref 成 `Bound`，实现了 `IntoPyObject`、`IntoException`，生成的代码里 `e` 的用法不变，golden 净少约 115 行。`rt::Handling` 仍然用在 `finally`、`with` 的 runtime 里
 - [x] 文档：§12 里不存在的 `--dynamic-globals` 改成"以后可以加"，§14 的 `traceback_lines/` golden 列表，§2 的流水线和 §3 的目录结构补上漏掉的模块、子命令和 runtime 文件，`CLAUDE.md` 是本地文件，不在仓库里
 
 ## 性能的候选项（未排期）

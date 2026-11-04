@@ -119,7 +119,6 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
                 rt::await_(sleep).await?;
                 rt::builtins::print(py, ("handled", &e))?;
@@ -165,7 +164,7 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             match rt::delegate(raises(m, &rt::str(py, "in loop"))).await {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyValueError>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     return Ok(value);
                 }
                 Err(err) => return Err(err),
@@ -305,7 +304,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err)
                 if frame.matches(&err, 145, || m.global("asyncio")?.attr("CancelledError"))? =>
             {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("cancelled", &log, task.method0("cancelled")?))?;
             }
             Err(err) => return Err(err),
@@ -322,7 +321,6 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("gather raised", &e))?;
             }
             Err(err) => return Err(err),

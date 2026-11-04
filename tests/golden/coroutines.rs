@@ -123,7 +123,6 @@ pub async fn catcher<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 68, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 m.global("print")?.call1(("caught", &e))?;
                 let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
                 rt::await_(sleep).await?;
@@ -186,7 +185,7 @@ pub async fn stubborn<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 92, || m.global("GeneratorExit"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.global("print")?.call1(("ignoring GeneratorExit",))?;
                 let awaitable = m.global("Suspend")?.call1((2,))?;
                 rt::await_(awaitable).await?;
@@ -208,7 +207,6 @@ pub async fn reenter<'py>(
             Ok(_) => {}
             Err(err) if frame.matches(&err, 100, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 m.global("print")?.call1(("reenter:", &e))?;
             }
             Err(err) => return Err(err),
@@ -252,7 +250,7 @@ pub async fn handler_state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
         match (|| -> PyResult<()> { Err(frame.raise(m.global("KeyError")?.call1((1,))?)) })() {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 121, || m.global("KeyError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.global("print")?.call1((
                     "in handler",
                     m.global("repr")?
@@ -347,7 +345,6 @@ pub async fn resilient<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 160, || m.global("KeyError"))? => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     m.global("print")?
                         .call1(("handled", m.global("repr")?.call1((&e,))?))?;
                 }
@@ -557,7 +554,7 @@ pub async fn in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
         })() {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 249, || m.global("KeyError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::yield_(rt::str(py, "in except")).await?;
             }
             Err(err) => return Err(err),
@@ -574,7 +571,7 @@ pub async fn sleep_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         })() {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 256, || m.global("KeyError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 let sleep = m.global("asyncio")?.method1("sleep", (10,))?;
                 rt::await_(sleep).await?;
             }
@@ -739,7 +736,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err)
                 if frame.matches(&err, 353, || m.global("asyncio")?.attr("CancelledError"))? =>
             {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.global("print")?
                     .call1(("cancelled", &log, task.method0("cancelled")?))?;
             }
@@ -780,7 +777,6 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                         .matches(&err, 353, || m.global("asyncio")?.attr("CancelledError"))? =>
                 {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     {
                         let print = m.global("print")?;
                         let list = PyList::empty(py);
@@ -805,7 +801,6 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 353, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 m.global("print")?
                     .call1(("traceback", &e, m.global("frames")?.call1((&e,))?))?;
             }
@@ -838,7 +833,6 @@ pub fn trampoline<'py>(
                 Ok(value2) => request = value2,
                 Err(err) if frame.matches(&err, 544, || m.global("StopIteration"))? => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     return e.attr("value");
                 }
                 Err(err) => return Err(err),
@@ -865,7 +859,7 @@ pub async fn stubborn_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py,
         ) {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 674, || m.global("KeyError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 loop {
                     match rt::yield_(rt::none(py)).await {
                         Ok(_) => {}
@@ -920,7 +914,6 @@ pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
                     Ok(_) => {}
                     Err(err) if frame.matches(&err, 715, || m.global("RuntimeError"))? => {
                         let e = frame.catch(err);
-                        let _handling = rt::Handling::new(&e);
                         m.global("print")?.call1((
                             "awaited already:",
                             &e,
@@ -1290,7 +1283,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("StopIteration"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     "StopIteration",
                     m.global("e")?.attr("value")?,
@@ -1305,7 +1297,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("RuntimeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1(("reuse:", m.global("e")?))?;
                 m.unbind_global("e")?;
             }
@@ -1320,7 +1311,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("RuntimeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1(("reuse throw:", m.global("e")?))?;
                 m.unbind_global("e")?;
             }
@@ -1339,7 +1329,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("KeyError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     "throw propagates",
                     m.global("repr")?.call1((m.global("e")?,))?,
@@ -1366,7 +1355,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("RuntimeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((m.global("e")?,))?;
                 m.unbind_global("e")?;
             }
@@ -1384,7 +1372,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("StopIteration"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?
                     .call1(("reenter returned", m.global("e")?.attr("value")?))?;
                 m.unbind_global("e")?;
@@ -1402,7 +1389,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("RuntimeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("e")?,
                     m.global("repr")?
@@ -1421,7 +1407,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("TypeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1(("TypeError:", m.global("e")?))?;
                 m.unbind_global("e")?;
             }
@@ -1437,7 +1422,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     Err(err) if frame.matches(&err, 1, || m.global("TypeError"))? => {
                         let exception = frame.catch(err);
                         m.set_global("e", &exception)?;
-                        let _handling = rt::Handling::new(&exception);
                         m.global("print")?.call1(("TypeError:", m.global("e")?))?;
                         m.unbind_global("e")?;
                     }
@@ -1466,7 +1450,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("KeyError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     "thrown before start",
                     m.global("repr")?.call1((m.global("e")?,))?,
@@ -1483,7 +1466,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("RuntimeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1(("after throw:", m.global("e")?))?;
                 m.unbind_global("e")?;
             }
@@ -1501,7 +1483,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         ) {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 match (|| m.global("c")?.method1("send", (py.None(),)))() {
                     Ok(_) => {}
                     Err(err) if frame.matches(&err, 1, || m.global("StopIteration"))? => {}
@@ -1671,7 +1653,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("StopIteration"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?
                     .call1(("accumulated", m.global("e")?.attr("value")?))?;
                 m.unbind_global("e")?;
@@ -1707,7 +1688,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         match (|| m.global("next")?.call1((m.global("d")?,)))() {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 1, || m.global("StopIteration"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.global("print")?.call1(("delegate done",))?;
             }
             Err(err) => return Err(err),
@@ -1742,7 +1723,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1(("with saw", m.global("e")?))?;
                 m.unbind_global("e")?;
             }
@@ -1760,7 +1740,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("RuntimeError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("e")?,
                     m.global("repr")?
@@ -1782,7 +1761,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         match (|| m.global("next")?.call1((m.global("o")?,)))() {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 1, || m.global("StopIteration"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.global("print")?.call1(("outer_items done",))?;
             }
             Err(err) => return Err(err),
@@ -1802,7 +1781,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("KeyError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 {
                     let print = m.global("print")?;
                     let value = m.global("repr")?.call1((m.global("e")?,))?;
@@ -1925,7 +1903,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     Err(err) if frame.matches(&err, 1, || m.global("RecursionError"))? => {
                         let exception = frame.catch(err);
                         m.set_global("e", &exception)?;
-                        let _handling = rt::Handling::new(&exception);
                         m.global("print")?.call1((
                             m.global("name")?,
                             m.global("n")?,
@@ -1955,7 +1932,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     "thrown context",
                     m.global("repr")?
@@ -1974,7 +1950,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 1, || m.global("KeyError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 match (|| {
                     m.global("g")?
                         .attr("throw")?
@@ -1984,7 +1960,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
                         let exception = frame.catch(err);
                         m.set_global("e", &exception)?;
-                        let _handling = rt::Handling::new(&exception);
                         m.global("print")?.call1((
                             "thrown context without a handler",
                             m.global("repr")?
@@ -2015,7 +1990,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.del_global("g")?;
                 m.global("print")?.call1((
                     "handled after the drop",

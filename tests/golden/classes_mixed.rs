@@ -390,7 +390,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("stop", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, (m.global("stop")?.attr("value")?,))?;
                 m.unbind_global("stop")?;
             }
@@ -484,7 +483,6 @@ class WholeKept:
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.set_global("traceback", rt::import(m, "traceback")?)?;
                 m.set_global(
                     "tb",

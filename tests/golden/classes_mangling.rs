@@ -146,7 +146,6 @@ pub mod account {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyKeyError>(m.py()) => {
                     let _Account__err = frame.catch(err);
-                    let _handling = rt::Handling::new(&_Account__err);
                     Ok(_Account__err.repr()?.into_any())
                 }
                 Err(err) => Err(err),

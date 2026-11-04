@@ -239,7 +239,6 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 return Err(frame.raise(PySystemExit::new_err((e.clone().unbind(),))));
             }
             Err(err) => return Err(err),
@@ -293,7 +292,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if err.is_instance_of::<PyBrokenPipeError>(py) => {
                     let exception = frame.catch(err);
                     m.set_global("exc", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     return Err(frame.raise(PySystemExit::new_err((m
                         .global("exc")?
                         .attr("errno")?

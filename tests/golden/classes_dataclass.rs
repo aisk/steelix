@@ -244,7 +244,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("FrozenInstanceError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }
@@ -355,7 +354,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyNameError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("NameError:", m.global("err")?))?;
                 m.unbind_global("err")?;
             }

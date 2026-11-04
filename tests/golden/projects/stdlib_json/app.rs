@@ -155,7 +155,6 @@ pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 if frame.matches(&err, 50, || m.global("json")?.attr("JSONDecodeError"))? =>
             {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 m.global("print")?.call1((
                     "pure:",
                     &err,
@@ -187,7 +186,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     if frame.matches(&err, 80, || m.global("json")?.attr("JSONDecodeError"))? =>
                 {
                     let err = frame.catch(err);
-                    let _handling = rt::Handling::new(&err);
                     m.global("print")?.call1((
                         m.global("repr")?.call1((&text,))?,
                         "->",
@@ -209,7 +207,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 80, || m.global("TypeError"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 m.global("print")?
                     .call1(("TypeError:", &err, err.attr("__notes__")?))?;
             }
@@ -225,7 +222,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 80, || m.global("ValueError"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 m.global("print")?.call1(("ValueError:", &err))?;
             }
             Err(err2) => return Err(err2),
@@ -236,7 +232,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 80, || m.global("ValueError"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 m.global("print")?.call1(("ValueError:", &err))?;
             }
             Err(err2) => return Err(err2),

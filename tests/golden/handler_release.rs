@@ -122,7 +122,7 @@ pub fn reraise_caught_outside<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
             match (|| -> PyResult<()> { Err(frame.raise(m.global("Big")?.call1(("inner",))?)) })() {
                 Ok(()) => unreachable!(),
                 Err(err) if frame.matches(&err, 72, || m.global("Big"))? => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     Err(frame.reraise())
                 }
                 Err(err) => Err(err),
@@ -166,7 +166,6 @@ pub fn handler_as<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 94, || m.global("Big"))? => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 rt::builtins::print(py, ("handling", &err))?;
             }
             Err(err2) => return Err(err2),
@@ -219,7 +218,6 @@ pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 111, || m.global("Big"))? => {
                     let err = frame.catch(err);
-                    let _handling = rt::Handling::new(&err);
                     rt::builtins::print(py, ("traceback", frame_names(m, &err)?))?;
                 }
                 Err(err2) => return Err(err2),
@@ -353,7 +351,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("Big"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("caught", m.global("err")?))?;
                 m.unbind_global("err")?;
             }

@@ -157,7 +157,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.set_global("g", &value)?;
             }
             Err(err) if err.is_instance_of::<PyException>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("g", 0)?;
             }
             Err(err) => return Err(err),

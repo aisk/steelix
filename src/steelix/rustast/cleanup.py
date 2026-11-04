@@ -8,8 +8,9 @@ observable from Python: the object stays alive through the returned
 reference either way, and no other object is dropped earlier or later.
 
 Locals of an enclosing fn or closure are captured by reference and keep
-their clone, and so do parameters (`&Bound`) and locals that a guard
-borrows (`let _handling = rt::Handling::new(&err);`).
+their clone, and so do parameters (`&Bound`), locals that a guard
+borrows (`let _guard = Guard::new(&x);`) and the exception of an `except`
+block, an `rt::Caught` (`let e = frame.catch(err);`).
 
 `declare_late`: a local declared without a value (`let kind: T;`) is
 declared where it is first used. When that first use is an assignment, or
@@ -248,12 +249,14 @@ def _block(block: rs.Block, owned: frozenset[str], returns: bool = False) -> rs.
         stmts.append(_node(stmt, owned))
         if isinstance(stmt, rs.Let):
             names = _pattern_names(stmt.name)
-            if stmt.ty is None or stmt.ty.startswith("Bound<"):
+            if _caught(stmt.init):
+                owned -= names  # an `rt::Caught`, not a `Bound`
+            elif stmt.ty is None or stmt.ty.startswith("Bound<"):
                 owned |= names
             else:
                 owned -= names
             if stmt.name.startswith("_") and stmt.init is not None:
-                owned -= _borrowed(stmt.init)  # a guard such as `rt::Handling`
+                owned -= _borrowed(stmt.init)  # a guard
     if block.tail is None:
         tail = None
     elif returns:
@@ -340,6 +343,14 @@ def _pattern_names(pattern: str) -> frozenset[str]:
     """The variables bound by a `let` or `if let` pattern such as `[a, mut b]`."""
     words = re.findall(r"(?:r#)?[A-Za-z_][A-Za-z_0-9]*", pattern)
     return frozenset(w for w in words if w not in _PATTERN_WORDS)
+
+
+def _caught(expr: rs.Expr | None) -> bool:
+    """Whether `expr` is `frame.catch(err)`."""
+    match expr:
+        case rs.MethodCall(rs.Path("frame"), "catch"):
+            return True
+    return False
 
 
 def _borrowed(expr: rs.Expr) -> frozenset[str]:

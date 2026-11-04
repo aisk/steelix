@@ -50,7 +50,7 @@ pub fn missing_name<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match int.call1(("nope",)) {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("not this one",))?;
             }
             Err(err) if frame.matches(&err, 20, || m.global("Missing"))? => {
@@ -82,7 +82,6 @@ pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             Ok(()) => unreachable!(),
             Err(err) if frame.matches(&err, 29, || pick.call0())? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("caught", e.repr()?))?;
             }
             Err(err) => return Err(err),
@@ -133,7 +132,7 @@ pub fn class_in_a_local<'py>(
             match PyDict::new(py).as_any().get_item("k") {
                 Ok(_) => {}
                 Err(err) if frame.matches(&err, 48, || Ok(ignored.clone()))? => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     caught = rt::iadd(&caught, 1)?;
                 }
                 Err(err) => return Err(err),
@@ -179,7 +178,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if err.is_instance_of::<PyException>(py) => {
                     let exception = frame.catch(err);
                     m.set_global("error", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     report(m, &m.global("error")?)?;
                     m.unbind_global("error")?;
                 }

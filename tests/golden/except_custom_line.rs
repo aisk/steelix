@@ -15,7 +15,6 @@ pub fn handle<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound
             Ok(()) => {}
             Err(err) if frame.matches(&err, 5, || m.global("AppError"))? => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("caught", &e))?;
             }
             Err(err) => return Err(err),

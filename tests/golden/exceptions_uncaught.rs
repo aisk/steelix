@@ -36,7 +36,6 @@ pub fn lookup<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bou
             Ok(value) => Ok(value),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 Err(frame.raise_from(
                     PyLookupError::new_err((rt::str(py, "no such key: ").add(key)?.unbind(),)),
                     &e,
@@ -78,7 +77,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match (|| process(m, PyList::new(py, ["a", "b"])?.as_any()))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyLookupError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 cleanup = rt::none(py);
                 cleanup.method0("close")?;
             }

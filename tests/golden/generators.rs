@@ -84,7 +84,6 @@ pub async fn catches<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyValueError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     rt::builtins::print(
                         py,
                         ("caught", &e, m.global("sys")?.method0("exception")?.repr()?),
@@ -240,7 +239,7 @@ pub async fn tag<'py>(
             match async { rt::yield_(name.method0("upper")?).await }.await {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     rt::builtins::print(py, ("contextmanager caught",))?;
                 }
                 Err(err) => return Err(err),
@@ -594,7 +593,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("returned", m.global("e")?.attr("value")?))?;
                 m.unbind_global("e")?;
             }
@@ -611,7 +609,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         match (|| m.global("b")?.method1("send", ("hello",)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("bare done",))?;
             }
             Err(err) => return Err(err),
@@ -632,7 +630,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         match (|| rt::builtin(py, "next")?.call1((m.global("c")?,)))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("exhausted", m.global("log")?))?;
             }
             Err(err) => return Err(err),
@@ -655,7 +653,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("propagated", m.global("e")?.repr()?))?;
                 m.unbind_global("e")?;
             }
@@ -684,7 +681,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("loops stopped", m.global("e")?.attr("value")?))?;
                 m.unbind_global("e")?;
             }
@@ -728,7 +724,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("suppressed by __exit__",))?;
             }
             Err(err) => return Err(err),
@@ -749,7 +745,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(
                     py,
                     ("python_delegate returned", m.global("e")?.attr("value")?),
@@ -780,7 +775,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(
                     py,
                     ("native_delegate returned", m.global("e")?.attr("value")?),

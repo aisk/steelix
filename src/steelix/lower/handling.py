@@ -463,24 +463,19 @@ class HandlingLowering:
         head: list[rs.Stmt] = []
         tail: list[rs.Stmt] = []
         if not trivial:
+            # `rt::Caught`: the exception, handled until the end of the block.
             catch = _frame("catch", rs.Path(err))
-            handling = rs.Path("rt::Handling::new")
             if name is None:
-                head.append(rs.Let("_handling", init=rs.Call(handling, (rs.Ref(catch),))))
+                head.append(rs.Let("_caught", init=catch))
             elif fn is not None and not fn.scope.is_global(name):
                 if name not in fn.locals.handler_scoped:
                     raise self.ctx.unsupported("except-as name used outside its handler", handler)
-                rust = fn.names[name]
-                head.append(rs.Let(rust, init=catch))
-                head.append(rs.Let("_handling", init=rs.Call(handling, (rs.Ref(rs.Path(rust)),))))
+                head.append(rs.Let(fn.names[name], init=catch))
             else:
                 exception = self.ctx.binding("exception")
                 head.append(rs.Let(exception, init=catch))
                 setter = self.exprs.scope_call("set", rs.StrLit(name), rs.Ref(rs.Path(exception)))
                 head.append(rs.ExprStmt(rs.Try(setter)))
-                head.append(
-                    rs.Let("_handling", init=rs.Call(handling, (rs.Ref(rs.Path(exception)),)))
-                )
                 # The implicit `del name` at the end of the handler.
                 unbind = self.exprs.scope_call("unbind", rs.StrLit(name))
                 tail.append(rs.ExprStmt(rs.Try(unbind)))

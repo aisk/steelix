@@ -365,7 +365,6 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if frame.matches(&err, 92, || m.global("StopIteration"))? => {
                 let exc = frame.catch(err);
-                let _handling = rt::Handling::new(&exc);
                 m.global("print")?.call1(("StopIteration", &exc))?;
             }
             Err(err) => return Err(err),
@@ -486,7 +485,6 @@ pub mod config {
                 Err(err) if frame.matches(&err, 130, || ns.get("NameError"))? => {
                     let exception = frame.catch(err);
                     ns.set("exc", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     ns.get("print")?.call1(("class body:", ns.get("exc")?))?;
                     ns.unbind("exc")?;
                 }
@@ -726,7 +724,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if frame.matches(&err, 1, || m.global("ZeroDivisionError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("exc", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     m.global("show")?.call1((m.global("exc")?,))?;
                     m.unbind_global("exc")?;
                 }
@@ -739,7 +736,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("exc", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("show")?.call1((m.global("exc")?,))?;
                 m.unbind_global("exc")?;
             }

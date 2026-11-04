@@ -22,7 +22,6 @@ pub fn show<'py>(
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("TypeError:", &e))?;
             }
             Err(err) => return Err(err),
@@ -107,7 +106,7 @@ pub fn catch<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         })() {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("caught",))?;
             }
             Err(err) => return Err(err),
@@ -421,7 +420,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("e", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 rt::builtins::print(py, ("TypeError:", m.global("e")?))?;
                 m.unbind_global("e")?;
             }
@@ -610,7 +608,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         match (|| through(m, &rt::int(py, 0), &m.global("through")?))() {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyRecursionError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("RecursionError",))?;
             }
             Err(err) => return Err(err),

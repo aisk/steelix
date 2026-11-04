@@ -102,7 +102,7 @@ pub fn py_scanstring<'py>(
             match s.get_item(&end) {
                 Ok(value) => esc = value,
                 Err(err) if err.is_instance_of::<PyIndexError>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     return Err(frame.raise_from(
                         module.global("JSONDecodeError")?.call1((
                             "Unterminated string starting at",
@@ -119,7 +119,7 @@ pub fn py_scanstring<'py>(
                 match _b.get_item(&esc) {
                     Ok(value) => char = value,
                     Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                        let _handling = rt::Handling::new(&frame.catch(err));
+                        let _caught = frame.catch(err);
                         msg = rt::str(py, "Invalid \\escape: {0!r}").method1("format", (&esc,))?;
                         return Err(
                             frame.raise(module.global("JSONDecodeError")?.call1((&msg, s, &end))?)
@@ -250,7 +250,6 @@ pub fn JSONObject<'py>(
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                     let err = frame.catch(err);
-                    let _handling = rt::Handling::new(&err);
                     return Err(frame.raise_from(
                         m.global("JSONDecodeError")?.call1((
                             "Expecting value",
@@ -351,7 +350,6 @@ pub fn JSONArray<'py>(
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                     let err = frame.catch(err);
-                    let _handling = rt::Handling::new(&err);
                     return Err(frame.raise_from(
                         m.global("JSONDecodeError")?.call1((
                             "Expecting value",
@@ -747,7 +745,6 @@ pub mod json_decoder {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                     let err = frame.catch(err);
-                    let _handling = rt::Handling::new(&err);
                     return Err(frame.raise_from(
                         m.global("JSONDecodeError")?.call1((
                             "Expecting value",
@@ -782,7 +779,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         })() {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyImportError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.set_global("c_scanstring", py.None())?;
             }
             Err(err) => return Err(err),

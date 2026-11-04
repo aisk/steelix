@@ -134,7 +134,7 @@ pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bo
                     .call1((rt::str(py, "good ").add(number.str()?)?,))?
             }
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 m.global("T")?.call1((rt::str(py, "bad ").add(text)?,))?
             }
             Err(err) => return Err(err),

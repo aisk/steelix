@@ -65,9 +65,8 @@ pub fn from_handler<'py>(
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 rt::builtins::print(py, ("handling", &err))?;
-                Ok(err)
+                Ok(err.clone())
             }
             Err(err2) => Err(err2),
         }

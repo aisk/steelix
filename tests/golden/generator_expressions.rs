@@ -378,7 +378,6 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyRuntimeError>(py) => {
                 let exc = frame.catch(err);
-                let _handling = rt::Handling::new(&exc);
                 rt::builtins::print(
                     py,
                     (
@@ -439,7 +438,6 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                 let exc = frame.catch(err);
-                let _handling = rt::Handling::new(&exc);
                 rt::builtins::print(py, ("TypeError", &exc))?;
             }
             Err(err) => return Err(err),
@@ -458,7 +456,6 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exc = frame.catch(err);
-                let _handling = rt::Handling::new(&exc);
                 rt::builtins::print(py, ("thrown back", &exc))?;
             }
             Err(err) => return Err(err),
@@ -833,7 +830,6 @@ pub fn reentrant<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exc = frame.catch(err);
-                let _handling = rt::Handling::new(&exc);
                 return Ok(exc.str()?.into_any());
             }
             Err(err) => return Err(err),
@@ -929,7 +925,6 @@ pub mod table {
                 Err(err) if err.is_instance_of::<PyNameError>(m.py()) => {
                     let exception = frame.catch(err);
                     ns.set("exc", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     ns.get("print")?.call1(("class body:", ns.get("exc")?))?;
                     ns.unbind("exc")?;
                 }
@@ -988,7 +983,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("exc", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("exc")?)?;
                 m.unbind_global("exc")?;
             }
@@ -999,7 +993,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("exc", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("exc")?)?;
                 m.unbind_global("exc")?;
             }
@@ -1010,7 +1003,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if err.is_instance_of::<PyZeroDivisionError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("exc", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 show(m, &m.global("exc")?)?;
                 m.unbind_global("exc")?;
             }

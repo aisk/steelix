@@ -32,7 +32,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("type")?
                         .call1((m.global("err")?,))?
@@ -54,7 +53,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("type")?
                         .call1((m.global("err")?,))?
@@ -74,7 +72,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("type")?
                         .call1((m.global("err")?,))?
@@ -91,7 +88,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?
                     .call1(("in a function:", m.global("err")?))?;
                 m.unbind_global("err")?;
@@ -117,7 +113,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                     let exception = frame.catch(err);
                     m.set_global("err", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     m.global("print")?.call1((
                         m.global("module")?,
                         m.global("err")?.attr("name")?,
@@ -139,7 +134,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("str")?
                         .call1((m.global("err")?,))?
@@ -161,7 +155,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) if frame.matches(&err, 1, || m.global("ImportError"))? => {
                 let exception = frame.catch(err);
                 m.set_global("err", &exception)?;
-                let _handling = rt::Handling::new(&exception);
                 m.global("print")?.call1((
                     m.global("err")?.attr("name")?,
                     m.global("err")?.attr("name_from")?,

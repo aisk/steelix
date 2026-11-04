@@ -26,7 +26,7 @@ pub async fn swallows<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             match rt::yield_(rt::int(py, 1)).await {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     rt::builtins::print(py, ("  swallows: caught GeneratorExit",))?;
                     return Ok(rt::Flow::Return(rt::str(py, "swallowed")));
                 }
@@ -60,7 +60,7 @@ pub async fn outer<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             match result {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     rt::builtins::print(py, ("  outer: caught GeneratorExit",))?;
                     return Err(frame.reraise());
                 }
@@ -92,7 +92,7 @@ pub async fn outer_via<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
             match result {
                 Ok(()) => {}
                 Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     rt::builtins::print(py, ("  outer: caught GeneratorExit",))?;
                     return Err(frame.reraise());
                 }
@@ -116,7 +116,7 @@ pub async fn yields_again<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny
             match rt::yield_(rt::int(py, 1)).await {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     rt::builtins::print(py, ("  yields_again: yields again",))?;
                     rt::yield_(rt::str(py, "again")).await?;
                 }
@@ -139,13 +139,12 @@ pub async fn outer_of_yields_again<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'
         match Err(frame.raise(PyKeyError::new_err("outer's"))) {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 let result: PyResult<()> = async {
                     match rt::delegate(yields_again(m)).await {
                         Ok(_) => {}
                         Err(err) if err.is_instance_of::<PyRuntimeError>(py) => {
                             let e = frame.catch(err);
-                            let _handling = rt::Handling::new(&e);
                             rt::builtins::print(
                                 py,
                                 (
@@ -179,7 +178,7 @@ pub async fn outer_of_yields_again_via<'py>(m: &rt::Module<'py>) -> PyResult<Bou
         match Err(frame.raise(PyKeyError::new_err("outer's"))) {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 let result: PyResult<()> = async {
                     match async {
                         let iterable = via(m, &m.global("yields_again")?)?.call0()?;
@@ -190,7 +189,6 @@ pub async fn outer_of_yields_again_via<'py>(m: &rt::Module<'py>) -> PyResult<Bou
                         Ok(_) => {}
                         Err(err) if err.is_instance_of::<PyRuntimeError>(py) => {
                             let e = frame.catch(err);
-                            let _handling = rt::Handling::new(&e);
                             rt::builtins::print(
                                 py,
                                 (
@@ -225,7 +223,7 @@ pub async fn keeps_yielding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
             match rt::yield_(rt::str(py, "x")).await {
                 Ok(_) => {}
                 Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     rt::builtins::print(py, ("  keeps_yielding: ignores GeneratorExit",))?;
                 }
                 Err(err) => return Err(err),
@@ -243,7 +241,6 @@ pub async fn outer_of_keeps_yielding<'py>(m: &rt::Module<'py>) -> PyResult<Bound
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyRuntimeError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("  outer caught", &e))?;
             }
             Err(err) => return Err(err),
@@ -273,12 +270,11 @@ pub async fn outer_of_raises<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         match Err(frame.raise(PyKeyError::new_err("outer's"))) {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 match rt::delegate(raises_in_finally(m)).await {
                     Ok(_) => {}
                     Err(err) if err.is_instance_of::<PyValueError>(py) => {
                         let e = frame.catch(err);
-                        let _handling = rt::Handling::new(&e);
                         rt::builtins::print(
                             py,
                             (
@@ -307,7 +303,6 @@ pub async fn leaf<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(
                     py,
                     ("  leaf: caught, context", e.attr("__context__")?.repr()?),
@@ -334,7 +329,7 @@ pub async fn middle<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match result {
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("  middle: caught",))?;
                 return Ok(rt::str(py, "middle-ret"));
             }
@@ -352,7 +347,7 @@ pub async fn top<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match Err(frame.raise(PyKeyError::new_err("top's"))) {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 r = rt::delegate(middle(m)).await?;
                 rt::builtins::print(py, ("  top continues", &r))?;
                 rt::yield_(rt::str(py, "top-after")).await?;
@@ -385,7 +380,7 @@ pub async fn countdown<'py>(
             Ok(rt::Flow::Return(value)) => return Ok(value),
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("  countdown caught", n))?;
                 return Ok(n.clone());
             }
@@ -403,7 +398,6 @@ pub async fn catches_thrown<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("  delegate: context", e.attr("__context__")?.repr()?))?;
                 return Err(frame.raise_from(PyTypeError::new_err("from the delegate"), py.None()));
             }
@@ -420,7 +414,7 @@ pub async fn outer_of_catches<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
         match Err(frame.raise(PyKeyError::new_err("outer's"))) {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::delegate(catches_thrown(m)).await?;
             }
             Err(err) => return Err(err),
@@ -441,7 +435,7 @@ pub async fn aswallows<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
         {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("  aswallows: caught GeneratorExit",))?;
                 return Ok(rt::str(py, "swallowed"));
             }
@@ -488,7 +482,7 @@ pub async fn aignores<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyGeneratorExit>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 let awaitable = m.global("Sleep")?.call0()?;
                 rt::await_(awaitable).await?;
             }
@@ -506,7 +500,6 @@ pub async fn aouter_of_ignores<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, 
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyRuntimeError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("  aouter caught", &e))?;
                 return Ok(rt::str(py, "aouter-ret"));
             }
@@ -554,7 +547,6 @@ pub fn run<'py>(
             Ok(()) => {}
             Err(err) if err.is_instance_of::<PyBaseException>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(
                     py,
                     (
@@ -571,7 +563,6 @@ pub fn run<'py>(
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyBaseException>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(py, ("  next raised", e.repr()?))?;
             }
             Err(err) => return Err(err),
@@ -792,7 +783,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             match Err(frame.raise(PyLookupError::new_err("the caller's"))) {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyLookupError>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     run(m, &m.global("top")?, &m.global("how")?)?;
                 }
                 Err(err) => return Err(err),
@@ -848,7 +839,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
                         let exception = frame.catch(err);
                         m.set_global("e", &exception)?;
-                        let _handling = rt::Handling::new(&exception);
                         rt::builtins::print(
                             py,
                             (
@@ -908,7 +898,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Err(err) if err.is_instance_of::<PyTypeError>(py) => {
                     let exception = frame.catch(err);
                     m.set_global("e", &exception)?;
-                    let _handling = rt::Handling::new(&exception);
                     rt::builtins::print(py, (m.global("e")?,))?;
                     m.unbind_global("e")?;
                 }

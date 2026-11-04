@@ -173,7 +173,6 @@ pub fn exception_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                     let e = frame.catch(err);
-                    let _handling = rt::Handling::new(&e);
                     log(
                         m,
                         &PyTuple::new(
@@ -250,7 +249,7 @@ pub fn finally_after_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             })() {
                 Ok(()) => unreachable!(),
                 Err(err) if err.is_instance_of::<PyIndexError>(py) => {
-                    let _handling = rt::Handling::new(&frame.catch(err));
+                    let _caught = frame.catch(err);
                     events.method1("append", ("handler",))?;
                     Ok(events.clone())
                 }

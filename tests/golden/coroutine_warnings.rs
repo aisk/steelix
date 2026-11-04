@@ -11,7 +11,7 @@ pub async fn r#gen<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match rt::yield_(rt::int(py, 1)).await {
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::yield_(rt::int(py, 2)).await?;
             }
             Err(err) => return Err(err),
@@ -88,7 +88,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err)
                 if frame.matches(&err, 52, || m.global("asyncio")?.attr("CancelledError"))? =>
             {
-                let _handling = rt::Handling::new(&frame.catch(err));
+                let _caught = frame.catch(err);
                 rt::builtins::print(py, ("cancelled",))?;
             }
             Err(err) => return Err(err),

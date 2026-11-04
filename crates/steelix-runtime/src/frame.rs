@@ -214,7 +214,7 @@ pub fn run<'py, T>(
     body: impl FnOnce(&Frame<'_, 'py>) -> PyResult<T>,
 ) -> PyResult<T> {
     let frame = Frame::new(scope, code, false);
-    body(&frame).map_err(|err| PyErr::from_value(frame.catch(err)))
+    body(&frame).map_err(|err| PyErr::from_value(frame.take(err)))
 }
 
 /// Runs the body of a native coroutine or generator in a traceback frame:
@@ -234,7 +234,7 @@ pub async fn run_async<'py, T>(
         Some(err) => Err(err),
         None => body(&frame).await,
     };
-    result.map_err(|err| PyErr::from_value(frame.catch(err)))
+    result.map_err(|err| PyErr::from_value(frame.take(err)))
 }
 
 impl<'f, 'py> Frame<'f, 'py> {
@@ -260,10 +260,30 @@ impl<'f, 'py> Frame<'f, 'py> {
         self.line.set(line);
     }
 
-    /// An exception that reached a handler (`except`, `finally`, the end of
-    /// a `with` block) or the end of the function: its traceback gets this
-    /// frame at the current line, unless it already has it.
-    pub fn catch(&self, err: PyErr) -> Bound<'py, PyAny> {
+    /// An exception caught by an `except` block: its traceback gets this
+    /// frame at the current line, unless it already has it, and it is the
+    /// exception being handled until the returned [`Caught`] is dropped, at
+    /// the end of the block.
+    ///
+    /// ```ignore
+    /// Err(err) if err.is_instance_of::<PyValueError>(py) => {
+    ///     let e = frame.catch(err);
+    ///     rt::builtins::print(py, ("caught", &e))?;
+    /// }
+    /// ```
+    pub fn catch(&self, err: PyErr) -> Caught<'py> {
+        let exception = self.take(err);
+        let handling = Handling::new(&exception);
+        Caught {
+            _handling: handling,
+            exception,
+        }
+    }
+
+    /// An exception that reached a `finally` block, the end of a `with`
+    /// block or the end of the function: its traceback gets this frame at
+    /// the current line, unless it already has it.
+    fn take(&self, err: PyErr) -> Bound<'py, PyAny> {
         let py = self.py();
         let exception = err.into_value(py).into_bound(py).into_any();
         self.enter(&exception);
@@ -394,7 +414,7 @@ impl<'f, 'py> Frame<'f, 'py> {
                 _handling: None,
             },
             Err(err) => {
-                let exception = self.catch(err);
+                let exception = self.take(err);
                 let handling = Handling::new(&exception);
                 Finally {
                     frame: self,
@@ -432,7 +452,7 @@ impl<'f, 'py> Frame<'f, 'py> {
                 Ok(result)
             }
             Err(err) => {
-                let exception = self.catch(err);
+                let exception = self.take(err);
                 self.line(line);
                 let _handling = Handling::new(&exception);
                 let traceback = exception.getattr("__traceback__")?;
@@ -476,7 +496,7 @@ impl<'f, 'py> Frame<'f, 'py> {
                 Ok(result)
             }
             Err(err) => {
-                let exception = self.catch(err);
+                let exception = self.take(err);
                 self.line(line);
                 let _handling = Handling::new(&exception);
                 let traceback = exception.getattr("__traceback__")?;
@@ -525,7 +545,7 @@ impl<'f, 'py> Frame<'f, 'py> {
                 Ok(result)
             }
             Err(err) => {
-                let exception = self.catch(err);
+                let exception = self.take(err);
                 self.line(line);
                 let _handling = Handling::new(&exception);
                 let traceback = exception.getattr("__traceback__")?;
@@ -671,6 +691,40 @@ pub enum Flow<'py> {
     Return(Bound<'py, PyAny>),
 }
 
+/// The exception of an `except` block, from [`Frame::catch`]: used like the
+/// `Bound` it dereferences to, and the exception being handled (see
+/// [`Handling`]) until it is dropped at the end of the block.
+pub struct Caught<'py> {
+    // Dropped first: the previous exception is restored before this one is
+    // released, like CPython's implicit `del e` after the block.
+    _handling: Handling<'py>,
+    exception: Bound<'py, PyAny>,
+}
+
+impl<'py> std::ops::Deref for Caught<'py> {
+    type Target = Bound<'py, PyAny>;
+
+    fn deref(&self) -> &Bound<'py, PyAny> {
+        &self.exception
+    }
+}
+
+impl AsRef<Py<PyAny>> for Caught<'_> {
+    fn as_ref(&self) -> &Py<PyAny> {
+        self.exception.as_ref()
+    }
+}
+
+impl<'a, 'py> IntoPyObject<'py> for &'a Caught<'py> {
+    type Target = PyAny;
+    type Output = Borrowed<'a, 'py, PyAny>;
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, _py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(self.exception.as_borrowed())
+    }
+}
+
 /// The exception being handled while an `except` (or `finally`) block runs:
 /// `sys.exception()` returns it, and exceptions raised meanwhile get it as
 /// `__context__`. Restores the previous one when dropped, on every way out
@@ -757,6 +811,12 @@ impl<'py> IntoException<'py> for Bound<'py, PyAny> {
 impl<'py> IntoException<'py> for &Bound<'py, PyAny> {
     fn into_exception(self, _py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         instantiate(self, "exceptions must derive from BaseException")
+    }
+}
+
+impl<'py> IntoException<'py> for &Caught<'py> {
+    fn into_exception(self, _py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(self.exception.clone())
     }
 }
 

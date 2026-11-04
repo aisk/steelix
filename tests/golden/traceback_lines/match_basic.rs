@@ -332,7 +332,6 @@ pub fn guard_binds<'py>(
             Ok(_) => {}
             Err(err) if err.is_instance_of::<PyUnboundLocalError>(py) => {
                 let err = frame.catch(err);
-                let _handling = rt::Handling::new(&err);
                 frame.line(129);
                 rt::builtins::print(py, ("UnboundLocalError:", &err))?;
             }
