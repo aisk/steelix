@@ -99,9 +99,9 @@ When building a generated crate yourself, point PyO3 at the interpreter whose pa
 
 Each generated function keeps its Python calling convention, so it can be rewritten on its own: keep the signature as an adapter, move the logic into plain Rust, convert the arguments at the boundary. Python containers can stay as they are at first. [`examples/logsum`](examples/logsum) shows a small CLI before and after rewriting some of its functions.
 
-`steelix test out/ -- tests/` checks each step with the project's own tests: it runs pytest with the generated executable as the interpreter and fails if a transpiled module was imported from source. Before turning a class into a `#[pyclass]`, `steelix attrs` shows which functions, in which modules, touch its attributes, and `--pyclass NAME` prints a draft.
-
-`--mode ext` builds a PyO3 extension module instead of an executable, for publishing a transpiled library.
+- `steelix test out/ -- tests/` checks each step with the project's own tests, running pytest with the generated executable as the interpreter. It fails if a transpiled module was imported from source.
+- `steelix attrs app.py` shows which functions, in which modules, touch the attributes of a class, before it becomes a `#[pyclass]`; `--pyclass NAME` prints a draft.
+- `--mode ext` builds a PyO3 extension module instead of an executable, for publishing a transpiled library.
 
 ## What is missing
 
