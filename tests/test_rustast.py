@@ -262,12 +262,12 @@ def test_if_let_and_nested_returns() -> None:
 BOUND = "Bound<'py, PyAny>"
 
 
-# Positions in `co_varnames`: `x` comes after `a` and before `t`.
-RANKS = {"a": 0, "x": 1, "t": 2, "y": 3}
+# The function's locals; anything else is a temporary.
+LOCALS = {"a", "x", "t", "y"}
 
 
-def _merged(body: rs.Block, ranks: dict[str, int] = RANKS) -> str:
-    fn = rs.Fn("f", (), "PyResult<Bound<'py, PyAny>>", declare_late(body, ranks), ("'py",))
+def _merged(body: rs.Block) -> str:
+    fn = rs.Fn("f", (), "PyResult<Bound<'py, PyAny>>", declare_late(body, LOCALS), ("'py",))
     return print_file(rs.File([fn]))
 
 
@@ -357,10 +357,6 @@ def test_late_init_local_is_declared_with_the_match() -> None:
         [rs.If(rs.Ref(p("x")), rs.Block((_set("x", p("b")),)), rs.Block((_set("x", p("c")),)))],
         # `if let`.
         [rs.If(p("a"), rs.Block((_set("x", p("b")),)), rs.Block((_set("x", p("c")),)), "Some(z)")],
-        # Moving the declaration past a local that comes later in
-        # `co_varnames` would change the drop order.
-        [rs.Let("t", init=_call("t")), _set("x", p("b"))],
-        [rs.Let("t", ty=BOUND), _set("x", p("b"))],
     ],
 )
 def test_late_init_local_kept(stmts: list[rs.Stmt]) -> None:
@@ -368,10 +364,13 @@ def test_late_init_local_kept(stmts: list[rs.Stmt]) -> None:
     assert f"let x: {BOUND};" in out
 
 
-def test_late_init_moves_past_earlier_locals_and_bools() -> None:
-    # Past a local that comes first in `co_varnames`, or a temporary.
+def test_late_init_moves_past_other_declarations() -> None:
+    # Past another local, whatever the drop order then is (design §12), or a
+    # temporary.
     stmts = (rs.Let("x", ty=BOUND), rs.Let("a", init=_call("a")), _set("x", p("b")))
     assert "let a = a()?;\n    let x = b;\n" in _merged(rs.Block(stmts, p("x")))
+    stmts = (rs.Let("x", ty=BOUND), rs.Let("t", ty=BOUND), _set("x", p("b")))
+    assert f"let t: {BOUND};\n    let x = b;\n" in _merged(rs.Block(stmts, p("x")))
     stmts = (rs.Let("x", ty=BOUND), rs.Let("tmp", init=_call("g")), _set("x", p("b")))
     assert "let tmp = g()?;\n    let x = b;\n" in _merged(rs.Block(stmts, p("x")))
     # Rust does not drop a `bool`.
@@ -390,10 +389,10 @@ def test_declarations_move_down_to_their_first_use() -> None:
     assert (
         f"g()?;\n    let x: {BOUND};\n    let mut y: Option<{BOUND}> = None;\n    // note\n" in out
     )
-    # As far as the order allows: not past `t`, which comes after `x`.
+    # Past other declarations too.
     stmts = (late, rs.ExprStmt(_call("g")), rs.Let("t", init=_call("t")), no_else)
     out = _merged(rs.Block(stmts, p("x")))
-    assert f"g()?;\n    let x: {BOUND};\n    let t = t()?;\n" in out
+    assert f"g()?;\n    let t = t()?;\n    let x: {BOUND};\n" in out
     # Only the tail uses it; a local nothing uses stays.
     stmts = (late, rs.ExprStmt(_call("g")))
     assert f"g()?;\n    let x: {BOUND};\n    x\n" in _merged(rs.Block(stmts, p("x")))

@@ -233,6 +233,19 @@ async def chain(n):
     return 1 + await chain(n - 1)
 
 
+# The same through generator and coroutine objects (not direct calls).
+def walk_objects(n, f=None):
+    if n:
+        yield from (f or walk_objects)(n - 1, f)
+    yield n
+
+
+async def chain_objects(n, f=None):
+    if n == 0:
+        return 0
+    return 1 + await (f or chain_objects)(n - 1, f)
+
+
 def in_except():
     try:
         raise KeyError("in_except")
@@ -619,16 +632,21 @@ except KeyError as e:
     print("thrown through", repr(e), [name for name, _ in frames(e)])
 
 print("--- recursion depth")
-for n in (100, 2000):
+# Too deep a chain raises `RecursionError`: CPython at the recursion limit,
+# native code when the C stack runs out (design §12), so only the type is
+# compared.
+for n in (100, 100_000):
     for name, run in (
         ("walk", lambda: len(list(walk(n)))),
         ("chain", lambda: asyncio.run(chain(n))),
         ("countdown", lambda: asyncio.run(countdown(n))),
+        ("walk_objects", lambda: len(list(walk_objects(n)))),
+        ("chain_objects", lambda: asyncio.run(chain_objects(n))),
     ):
         try:
             print(name, n, run())
         except RecursionError as e:
-            print(name, n, type(e).__name__, e)
+            print(name, n, type(e).__name__)
 
 print("--- context of thrown exceptions")
 g = in_except()
@@ -637,6 +655,42 @@ try:
     g.throw(ValueError("thrown"))
 except ValueError as e:
     print("thrown context", repr(e.__context__))
+
+# A body that handles nothing itself gives what is thrown in no context,
+# whatever the caller handles.
+g = walk(0)
+next(g)
+try:
+    raise KeyError("the caller's")
+except KeyError:
+    try:
+        g.throw(ValueError("thrown"))
+    except ValueError as e:
+        print("thrown context without a handler", repr(e.__context__))
+
+
+# A body suspended in an `except` block that is dropped (here it ignores
+# `close()`) leaves the exception handled where it is dropped alone.
+def stubborn_in_except():
+    try:
+        raise KeyError("stubborn")
+    except KeyError:
+        while True:
+            try:
+                yield
+            except GeneratorExit:
+                pass
+
+
+sys.unraisablehook = lambda u: print("unraisable:", repr(u.exc_value))
+g = stubborn_in_except()
+next(g)
+try:
+    raise ValueError("mine")
+except ValueError:
+    del g
+    print("handled after the drop", repr(sys.exception()))
+sys.unraisablehook = sys.__unraisablehook__
 
 
 async def cancel_in_except():

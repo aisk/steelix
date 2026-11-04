@@ -37,8 +37,25 @@ EXPECT_ERROR = re.compile(r"^# steelix-test: expect-error (.*)$", re.MULTILINE)
 # that removes the difference (such as frames for native functions) fails
 # the test, so that the entry gets removed.
 KNOWN_DIFFERENCES: dict[str, dict[str, str]] = {
-    # Native coroutines are not `types.CoroutineType`.
-    "coroutines": {"inspect.iscoroutine True": r"inspect\.iscoroutine False"},
+    "coroutines": {
+        # Native coroutines are not `types.CoroutineType`.
+        "inspect.iscoroutine True": r"inspect\.iscoroutine False",
+        # An `except` block that spans a suspension restores the exception
+        # handled when it started, not the caller's at the time it ends.
+        "after the handler ValueError('caller')": r"after the handler None",
+    },
+    # A delegate run in place (`rt::delegate`) shares the exception state of
+    # the delegating body: it sees the body's handled exception where
+    # CPython's sees the caller's (none, or `LookupError`).
+    "generator_close": {
+        "  leaf: caught, context None": r"  leaf: caught, context KeyError\(\"top's\"\)",
+        '  leaf: caught, context LookupError("the caller\'s")': (
+            r"  leaf: caught, context KeyError\(\"top's\"\)"
+        ),
+        "  delegate: context None": r"  delegate: context KeyError\(\"outer's\"\)",
+    },
+    # `let a = if ..` is declared after `b`, so Rust drops `a` first.
+    "drop_order": {"del crossing b": r"del crossing a2", "del crossing a2": r"del crossing b"},
     # The subject lives until the `match` ends and the values a pattern took
     # apart without binding them until their case ends (CPython releases both
     # before the body). A capture only read in its case is released when the

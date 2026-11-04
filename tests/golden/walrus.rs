@@ -78,7 +78,6 @@ pub fn in_comprehension<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "in_comprehension", 31, |_| {
-        let mut last: Option<Bound<'py, PyAny>> = None;
         let found = rt::Cell::new(py, "found", py.None())?;
         // walrus.py:33
         fn genexpr<'py>(
@@ -105,6 +104,7 @@ pub fn in_comprehension<'py>(
             rt::builtins::print(py, ("found", found.get()?))?;
         }
         let list = PyList::empty(py);
+        let mut last: Option<Bound<'py, PyAny>> = None;
         for v in values.try_iter()? {
             let v = v?;
             let last2 = v.mul(2)?;

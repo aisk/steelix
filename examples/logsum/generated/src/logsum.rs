@@ -199,8 +199,8 @@ pub fn print_statuses<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "print_statuses", 92, |_| {
-        let mut name: Bound<'py, PyAny>;
         let classes = PyDict::new(py).into_any();
+        let mut name: Bound<'py, PyAny>;
         for request in requests.try_iter()? {
             let request = request?;
             name = m

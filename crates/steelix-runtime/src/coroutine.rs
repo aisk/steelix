@@ -184,6 +184,42 @@ impl Locals<'_> {
 struct Body {
     future: BodyFuture<'static>,
     locals: Rc<Locals<'static>>,
+    /// Dropped last, see `Drop`.
+    handled: KeepHandled,
+}
+
+impl Body {
+    fn new(future: BodyFuture<'static>, locals: Rc<Locals<'static>>) -> Self {
+        Body {
+            future,
+            locals,
+            handled: KeepHandled(None),
+        }
+    }
+}
+
+/// A body suspended in an `except` or `finally` block that is dropped (the
+/// object is deallocated or cleared, or it ignored `close()`) drops the
+/// block's [`Handling`](crate::Handling), which puts back the exception
+/// handled when the block started. That is not the thread's state where
+/// the body is dropped, so the exception handled there is kept across the
+/// drop.
+impl Drop for Body {
+    fn drop(&mut self) {
+        // Attached already (a body is only dropped attached, module
+        // documentation), so this only gets the token.
+        Python::attach(|py| self.handled.0 = handled_exception(py).map(Bound::unbind));
+    }
+}
+
+/// The exception handled where a [`Body`] is dropped, made current again
+/// once the future and the locals are gone.
+struct KeepHandled(Option<Py<PyAny>>);
+
+impl Drop for KeepHandled {
+    fn drop(&mut self) {
+        Python::attach(|py| set_handled_exception(py, self.0.as_ref().map(|e| e.bind(py))));
+    }
 }
 
 // SAFETY: the future and the locals hold Python objects (which may be used
@@ -296,10 +332,6 @@ impl Core {
 
     /// Runs the body until it suspends or ends.
     fn resume<'py>(&self, py: Python<'py>, input: Input) -> PyResult<Step<'py>> {
-        // Coroutines resuming each other through Python nest their polls on
-        // the C stack. The depth in Python frames is counted by the frames
-        // of the body (`rt::frame!`, see `Depth`).
-        let _stack = crate::RecursionGuard::enter(py)?;
         let (mut body, mut handled, input) = {
             let mut state = self.state();
             match std::mem::replace(&mut *state, State::Running) {
@@ -328,12 +360,23 @@ impl Core {
                 }
             }
         };
+        // Coroutines resuming each other through Python nest their polls on
+        // the C stack: a chain too deep raises `RecursionError` here, from
+        // the C stack check (design §12), and the body ends like a CPython
+        // frame that fails to start. Direct delegation nests polls without a
+        // resume and checks in `delegate`.
+        let _stack = match crate::RecursionGuard::enter(py) {
+            Ok(guard) => guard,
+            Err(err) => {
+                self.finish(body);
+                return Err(err);
+            }
+        };
         let finish = FinishOnUnwind(self);
         let channel = Channel {
             input: Cell::new(input),
             output: Cell::new(None),
             owner: self,
-            caller: Cell::new(std::ptr::null_mut()),
             own_handled: Cell::new(false),
         };
         let poll = channel.poll(py, &mut body, &mut handled);
@@ -644,11 +687,8 @@ struct Channel {
     /// The coroutine being polled, whose `resume` is on the stack below the
     /// poll (see [`with_polled`]).
     owner: *const Core,
-    /// The exception the caller is handling during this poll (only
-    /// compared, the poll keeps it alive), or null.
-    caller: Cell<*mut ffi::PyObject>,
-    /// Whether the body has an exception of its own to handle in this poll
-    /// (it suspended in an `except` or `finally` block).
+    /// Whether the body handles an exception of its own in this poll (it
+    /// suspended in an `except` or `finally` block).
     own_handled: Cell<bool>,
 }
 
@@ -670,7 +710,9 @@ impl Channel {
     /// `gi_exc_state`: while the body runs, `sys.exception()` is the
     /// exception it is handling, or else the caller's. When it suspends
     /// inside an `except` or `finally`, that exception is kept for the next
-    /// poll and the caller's is put back.
+    /// poll and the caller's is put back. A block that spans suspensions
+    /// puts back, when it ends, what was handled when it started, which may
+    /// be the caller's of an earlier poll (design §12).
     fn poll(
         &self,
         py: Python<'_>,
@@ -678,8 +720,6 @@ impl Channel {
         handled: &mut Option<Py<PyAny>>,
     ) -> Poll<PyResult<Bound<'static, PyAny>>> {
         let caller = handled_exception(py);
-        self.caller
-            .set(caller.as_ref().map_or(std::ptr::null_mut(), Bound::as_ptr));
         if let Some(own) = handled.take() {
             set_handled_exception(py, Some(own.bind(py)));
             self.own_handled.set(true);
@@ -708,37 +748,14 @@ impl Channel {
 
     /// An exception thrown in (`throw`, `close`) on its way into the body,
     /// where the body suspended: like CPython's `_PyErr_ChainStackItem`, it
-    /// gets the exception the body is handling there as `__context__`
-    /// (unless it is that exception, breaking cycles like `raise` does).
-    /// Nothing changes when the body handles none.
+    /// gets the exception the body is handling there as `__context__`, and
+    /// none if the body handles no exception of its own (the caller's does
+    /// not count).
     fn thrown(&self, py: Python<'_>, err: PyErr) -> PyErr {
         if !self.own_handled.get() {
             return err;
         }
         chain_handled(py, err)
-    }
-
-    /// An exception entering the body at a [`delegate`] that something was
-    /// thrown into: like [`Channel::thrown`], with the exception the body is
-    /// handling at that point, which the delegate may have changed since the
-    /// poll started.
-    fn raise_in_body(&self, py: Python<'_>, err: PyErr) -> PyErr {
-        match handled_exception(py) {
-            Some(handled) if handled.as_ptr() != self.caller.get() => chain_handled(py, err),
-            _ => err,
-        }
-    }
-
-    /// Runs `f` with the caller's exception as the one being handled, not
-    /// the body's.
-    fn as_caller<R>(&self, py: Python<'_>, f: impl FnOnce() -> R) -> R {
-        let body = handled_exception(py);
-        // SAFETY: attached; null or the caller's exception, which the poll
-        // keeps alive.
-        unsafe { ffi::PyErr_SetHandledException(self.caller.get()) };
-        let result = f();
-        set_handled_exception(py, body.as_ref());
-        result
     }
 
     /// Takes the exception thrown in before the body started, if any.
@@ -763,15 +780,6 @@ fn chain_handled(py: Python<'_>, err: PyErr) -> PyErr {
         ffi::PyErr_SetObject(ffi::Py_TYPE(exception.as_ptr()).cast(), exception.as_ptr());
         PyErr::from_value(Bound::from_owned_ptr(py, ffi::PyErr_GetRaisedException()))
     }
-}
-
-/// For [`Handling`](crate::Handling) in the body of a coroutine or
-/// generator: the coroutine being polled on this thread and the exception
-/// its caller is handling (null if none), as addresses.
-pub(crate) fn polling() -> Option<(*const (), *mut ffi::PyObject)> {
-    let channel = CURRENT.get();
-    // SAFETY: a non-null `CURRENT` is the live channel of the running poll.
-    unsafe { channel.as_ref() }.map(|channel| (channel.owner.cast(), channel.caller.get()))
 }
 
 /// Runs `f` with the coroutine `owner` if it is the one being polled on this
@@ -850,104 +858,6 @@ impl Drop for Held {
         let object = self.release();
         drop(object);
     }
-}
-
-/// One level of Python recursion for a poll of a frame of a native
-/// coroutine or generator ([`frame!`](crate::frame) with an `async`
-/// closure), like CPython counts the frame of a generator each time it is
-/// resumed: a chain of generators delegating to each other (`yield from`,
-/// `await`, through Python objects or direct awaits) raises `RecursionError:
-/// maximum recursion depth exceeded` at `sys.getrecursionlimit()` frames.
-/// Also checks the C stack, like [`RecursionGuard`](crate::RecursionGuard).
-pub(crate) struct Depth<'py> {
-    _stack: crate::RecursionGuard<'py>,
-    #[cfg(python_recursion)]
-    counted: *mut ThreadState,
-}
-
-impl<'py> Depth<'py> {
-    pub(crate) fn enter(py: Python<'py>) -> PyResult<Self> {
-        let stack = crate::RecursionGuard::enter(py)?;
-        #[cfg(python_recursion)]
-        {
-            let counted = thread_state();
-            if !counted.is_null() {
-                // SAFETY: the current thread state, attached; the fields are
-                // CPython 3.14's (checked by `thread_state`). This is
-                // `_Py_EnterRecursivePy` and `_Py_CheckRecursiveCallPy`; with
-                // the headroom for handling a recursion error (50 frames)
-                // used up CPython aborts, this raises again.
-                unsafe {
-                    let remaining = (*counted).py_recursion_remaining;
-                    if remaining <= 0 && ((*counted).recursion_headroom == 0 || remaining <= -50) {
-                        return Err(crate::raised(pyo3::exceptions::PyRecursionError::new_err(
-                            "maximum recursion depth exceeded",
-                        )));
-                    }
-                    (*counted).py_recursion_remaining = remaining - 1;
-                }
-            }
-            Ok(Self {
-                _stack: stack,
-                counted,
-            })
-        }
-        #[cfg(not(python_recursion))]
-        Ok(Self { _stack: stack })
-    }
-}
-
-#[cfg(python_recursion)]
-impl Drop for Depth<'_> {
-    fn drop(&mut self) {
-        if !self.counted.is_null() {
-            // SAFETY: the thread state counted in `enter`, on this thread
-            // (the guard lives in one poll).
-            unsafe { (*self.counted).py_recursion_remaining += 1 };
-        }
-    }
-}
-
-/// The start of CPython 3.14's `PyThreadState` (`Include/cpython/pystate.h`,
-/// public but not part of the limited API), up to the counters of Python
-/// recursion, which no function exposes: `Py_EnterRecursiveCall` checks the
-/// C stack since 3.14.
-#[cfg(python_recursion)]
-#[repr(C)]
-struct ThreadState {
-    prev: *mut std::ffi::c_void,
-    next: *mut std::ffi::c_void,
-    interp: *mut std::ffi::c_void,
-    eval_breaker: usize,
-    status: std::ffi::c_uint,
-    holds_gil: std::ffi::c_int,
-    whence: std::ffi::c_int,
-    state: std::ffi::c_int,
-    py_recursion_remaining: std::ffi::c_int,
-    py_recursion_limit: std::ffi::c_int,
-    recursion_headroom: std::ffi::c_int,
-}
-
-/// The current thread state as [`ThreadState`], or null if its layout does
-/// not look like 3.14's (then only the C stack is checked).
-#[cfg(python_recursion)]
-fn thread_state() -> *mut ThreadState {
-    static LAYOUT: OnceLock<bool> = OnceLock::new();
-    // SAFETY: attached (the caller holds a `Python`), so there is a current
-    // thread state.
-    let state = unsafe { ffi::PyThreadState_Get() }.cast::<ThreadState>();
-    // The layout is checked once against what the public API says: the
-    // thread's limit is `sys.getrecursionlimit()`, and the depth is within
-    // it.
-    let matches = *LAYOUT.get_or_init(|| {
-        // SAFETY: as above; reading plain `int` fields of the thread state.
-        unsafe {
-            let limit = (*state).py_recursion_limit;
-            let remaining = (*state).py_recursion_remaining;
-            limit == ffi::Py_GetRecursionLimit() && (-50..=limit).contains(&remaining)
-        }
-    });
-    if matches { state } else { std::ptr::null_mut() }
 }
 
 /// Puts back the thread's state after a poll, also when it panics.
@@ -1052,7 +962,9 @@ pub fn yield_from<'py>(iterable: impl AsRef<Bound<'py, PyAny>>) -> Await<'py> {
 /// if it yields again). This does the same. An exception that comes out of
 /// the delegate when something is thrown in enters the delegating body like
 /// a thrown one, with the exception the body handles there as `__context__`
-/// (`_gen_throw`), like [`await_`] does.
+/// (`_gen_throw`), like [`await_`] does. The delegate shares the exception
+/// state of the delegating body: where it handles none of its own it sees
+/// the body's, CPython's would see the caller's (design §12).
 pub async fn delegate<'py, F>(future: F) -> PyResult<Bound<'py, PyAny>>
 where
     F: Future<Output = PyResult<Bound<'py, PyAny>>>,
@@ -1061,53 +973,28 @@ where
     // Whether the delegate suspended in the last poll: the input of the
     // next one is for it.
     let mut suspended = false;
-    let mut started = false;
-    // The exception the delegating body was handling when the delegate
-    // started, as an address, if it was the body's own (which keeps it
-    // alive until the delegate ends). While the delegate does not handle
-    // one of its own, this is the one a poll makes current.
-    let mut outer = std::ptr::null_mut();
     std::future::poll_fn(move |cx| {
         let Some(channel) = channel(cx) else {
             return future.as_mut().poll(cx);
         };
         Python::attach(|py| {
-            let handled = handled_exception(py);
-            let handled_ptr = handled.as_ref().map_or(std::ptr::null_mut(), Bound::as_ptr);
-            if !started {
-                started = true;
-                if handled_ptr != channel.caller.get() {
-                    outer = handled_ptr;
-                }
-            }
+            // A chain of direct delegations nests these polls on the C stack
+            // within one `resume`: too deep raises `RecursionError`.
+            let _stack = match crate::RecursionGuard::enter(py) {
+                Ok(guard) => guard,
+                Err(err) => return Poll::Ready(Err(err)),
+            };
             let poll = match channel.input.take() {
+                // What comes out enters the body like a thrown exception.
                 Some(Input::Throw(err, args)) if suspended => {
-                    // CPython throws into the frame of the delegate, where
-                    // the delegating body's exception is not handled.
-                    let inherited = !outer.is_null() && handled_ptr == outer;
-                    let own_handled = channel.own_handled.get();
-                    let caller = channel.caller.get();
-                    if inherited {
-                        channel.own_handled.set(false);
-                        // SAFETY: attached; `caller` is null or the exception
-                        // the poll keeps alive.
-                        unsafe { ffi::PyErr_SetHandledException(caller) };
-                    }
                     let poll = if err.is_instance_of::<PyGeneratorExit>(py) {
                         Poll::Ready(Err(close_delegate(py, channel, future.as_mut(), cx, err)))
                     } else {
                         channel.input.set(Some(Input::Throw(err, args)));
                         future.as_mut().poll(cx)
                     };
-                    channel.own_handled.set(own_handled);
-                    let now = handled_exception(py);
-                    if inherited
-                        && now.as_ref().map_or(std::ptr::null_mut(), Bound::as_ptr) == caller
-                    {
-                        set_handled_exception(py, handled.as_ref());
-                    }
                     match poll {
-                        Poll::Ready(Err(err)) => Poll::Ready(Err(channel.raise_in_body(py, err))),
+                        Poll::Ready(Err(err)) => Poll::Ready(Err(channel.thrown(py, err))),
                         poll => poll,
                     }
                 }
@@ -1147,19 +1034,7 @@ where
     };
     // `gen_close`: `Ok(true)` if the delegate yielded again.
     let mut close = || -> PyResult<bool> {
-        // Created where `close()` was called, like CPython's: the context is
-        // the caller's exception (the delegate's own replaces it).
         let new_exit = PyGeneratorExit::new_err(());
-        // SAFETY: a valid exception object; `caller` is null or the
-        // exception the poll keeps alive, and the call steals the new
-        // reference.
-        unsafe {
-            let caller = channel.caller.get();
-            if !caller.is_null() {
-                ffi::Py_IncRef(caller);
-            }
-            ffi::PyException_SetContext(new_exit.value(py).as_ptr(), caller);
-        }
         channel.input.set(Some(Input::Throw(new_exit, None)));
         let poll = future.as_mut().poll(cx);
         channel.input.set(None);
@@ -1331,10 +1206,7 @@ impl<'py> Future for Await<'py> {
                     // Whatever comes out of the iterator then enters the
                     // body as a thrown exception (`_gen_throw`).
                     Some(Input::Throw(err, args)) => {
-                        // CPython throws into the delegate where `throw()`
-                        // was called, outside the body's frame.
-                        let step = channel.as_caller(py, || throw(&iter, err, args));
-                        step.map_err(|err| channel.thrown(py, err))
+                        throw(&iter, err, args).map_err(|err| channel.thrown(py, err))
                     }
                     None => send(&iter, &py.None().into_bound(py)),
                 };
@@ -1575,10 +1447,7 @@ pub(crate) fn create<'py>(
         closure: (body.capture)(&closure)?,
         args: args.iter().map(rebind).collect(),
     });
-    let body = Body {
-        future: (body.start)(Rc::clone(&locals)),
-        locals,
-    };
+    let body = Body::new((body.start)(Rc::clone(&locals)), locals);
     let flavor = if generator {
         Flavor::Generator
     } else {

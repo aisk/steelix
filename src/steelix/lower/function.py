@@ -89,8 +89,8 @@ def lower_function(
     lowering = StmtLowering(ctx, line=first_line)
 
     guard: list[rs.Stmt] = []
-    # A coroutine or generator counts its depth in `rt::frame!` instead,
-    # each time it runs (design §8).
+    # A coroutine or generator checks the stack each time it is resumed, and
+    # `rt::delegate` at each direct await (design §8).
     if fn in module.callgraph.recursive and not info.is_async:
         enter = rs.Call(rs.Path("rt::RecursionGuard::enter"), (rs.Path("py"),))
         guard.append(rs.Let("_guard", init=rs.Try(enter)))
@@ -166,12 +166,8 @@ def lower_function(
         params.append(rs.Param(names[param], ty))
 
     doc = docstring(fn, module.filename) if isinstance(fn, ast.FunctionDef) else None
-    # Declared in the order of `co_varnames`, which is the reverse of the
-    # order CPython releases them in when the function returns.
-    varnames = module.varnames.get((scope.qualname, first_line), ())
-    order = [*varnames, *(n for n in [*scope.params, *locals_info.order] if n not in varnames)]
-    ranks = {names[n]: i for i, n in enumerate(order) if n in names}
-    lowered = declare_late(rs.Block(tuple(body), tail), ranks)
+    locals_ = {names[n] for n in [*scope.params, *locals_info.order]}
+    lowered = declare_late(rs.Block(tuple(body), tail), locals_)
     block = in_frame(ctx.context_name, scope.qualname, first_line, lowered, info.is_async)
     return rs.Fn(
         name=rust_name,
@@ -198,8 +194,8 @@ def in_frame(
 ) -> rs.Block:
     """`body` run in a traceback frame: `rt::frame!(m, "name", line, |frame| ..)`
     (design §9). A body that can not raise needs none, except the body of a
-    coroutine or generator: `async |frame| ..` also counts its recursion
-    depth and raises what `throw()` sends before it starts (design §8)."""
+    coroutine or generator: `async |frame| ..` also raises what `throw()`
+    sends before it starts (design §8)."""
     if body.tail is None:
         stmts, tail_expr = returns_as_tail(body.stmts)
         body = rs.Block(tuple(stmts), tail_expr)

@@ -4,10 +4,10 @@ use pyo3::types::PyTuple;
 use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
-// drop_order.py:14
+// drop_order.py:17
 pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "straight", 14, |_| {
+    rt::frame!(m, "straight", 17, |_| {
         let b = m.global("T")?.call1(("b",))?;
         let a = m.global("T")?.call1(("a",))?;
         let c = m.global("T")?.call1(("c",))?;
@@ -24,10 +24,10 @@ pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     })
 }
 
-// drop_order.py:21
+// drop_order.py:24
 pub fn reassigned<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "reassigned", 21, |_| {
+    rt::frame!(m, "reassigned", 24, |_| {
         let mut x = x.clone();
         let y = m.global("T")?.call1(("y",))?;
         x = m.global("T")?.call1(("x",))?;
@@ -36,10 +36,10 @@ pub fn reassigned<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<B
     })
 }
 
-// drop_order.py:27
+// drop_order.py:30
 pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "branches", 27, |_| {
+    rt::frame!(m, "branches", 30, |_| {
         // `a` and `c` are assigned on every path of an `if` chain.
         rt::builtins::print(py, ("start",))?;
         let a = if n.gt(1)? {
@@ -65,10 +65,10 @@ pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bou
     })
 }
 
-// drop_order.py:45
+// drop_order.py:48
 pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "in_loop", 45, |_| {
+    rt::frame!(m, "in_loop", 48, |_| {
         let first = m.global("T")?.call1(("first",))?;
         let mut last: Option<Bound<'py, PyAny>> = None;
         for i in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
@@ -93,13 +93,13 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Boun
     })
 }
 
-// drop_order.py:53
+// drop_order.py:56
 pub fn without_else<'py>(
     m: &rt::Module<'py>,
     n: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "without_else", 53, |_| {
+    rt::frame!(m, "without_else", 56, |_| {
         let head = m.global("T")?.call1(("head",))?;
         let mut maybe: Option<Bound<'py, PyAny>> = None;
         if n.is_truthy()? {
@@ -121,10 +121,10 @@ pub fn without_else<'py>(
     })
 }
 
-// drop_order.py:62
+// drop_order.py:65
 pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "in_try", 62, |frame| {
+    rt::frame!(m, "in_try", 65, |frame| {
         let int = rt::builtin(py, "int")?;
         let number: Bound<'py, PyAny>;
         let value = match int.call1((text,)) {
@@ -145,38 +145,55 @@ pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bo
     })
 }
 
+// drop_order.py:76
+pub fn crossing<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "crossing", 76, |_| {
+        let b: Bound<'py, PyAny>;
+        // `b` is declared before the chain that gives `a` its value.
+        let a = if n.is_truthy()? {
+            m.global("T")?.call1(("crossing a",))?
+        } else {
+            b = m.global("T")?.call1(("crossing b",))?;
+            m.global("T")?.call1(("crossing a2",))?
+        };
+        rt::builtins::print(py, ("crossing", a.attr("name")?))?;
+        Ok(rt::none(py))
+    })
+}
+
 pub mod t {
     use super::*;
 
-    // drop_order.py:6
+    // drop_order.py:9
     /// The body of `class T`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "T", 6, |_| {
+        rt::frame!(ns, "T", 9, |_| {
             rt::def!(ns, __init__(slf as "self", name))?;
             rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }
 
-    // drop_order.py:7
+    // drop_order.py:10
     pub fn __init__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "T.__init__", 7, |_| {
+        rt::frame!(m, "T.__init__", 10, |_| {
             slf.set_attr("name", name)?;
             Ok(rt::none(m.py()))
         })
     }
 
-    // drop_order.py:10
+    // drop_order.py:13
     pub fn __del__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "T.__del__", 10, |_| {
+        rt::frame!(m, "T.__del__", 13, |_| {
             rt::builtins::print(py, ("del", slf.attr("name")?))?;
             Ok(rt::none(py))
         })
@@ -189,13 +206,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::frame!(m, "<module>", 1, |_| {
         m.set_global(
             "__doc__",
-            "Locals are released when the function returns in reverse order of\n\
-                `co_varnames` (parameters first, then the other locals by first use), and\n\
-                the generated Rust declares them in that order (design §5).",
+            "CPython releases the locals when the function returns in reverse order of\n\
+                `co_varnames` (parameters first, then the other locals by first use), Rust\n\
+                in reverse order of declaration. The generated Rust declares them by first\n\
+                use, which mostly gives the same order. A declaration merged with an `if`\n\
+                chain past another one (`crossing`) does not: `KNOWN_DIFFERENCES` in\n\
+                tests/test_e2e.py has it (design §12).",
         )?;
         m.set_global(
             "T",
-            rt::class!(m, "T"(), t::body, line = 6, attributes = ["name"])?,
+            rt::class!(m, "T"(), t::body, line = 9, attributes = ["name"])?,
         )?;
         rt::def!(m, straight())?;
         rt::def!(m, reassigned(x))?;
@@ -203,7 +223,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, in_loop(n))?;
         rt::def!(m, without_else(n))?;
         rt::def!(m, in_try(text))?;
+        rt::def!(m, crossing(n))?;
         straight(m)?;
+        rt::builtins::print(py, ("--",))?;
+        crossing(m, &rt::int(py, 0))?;
         rt::builtins::print(py, ("--",))?;
         reassigned(m, &rt::none(py))?;
         rt::builtins::print(py, ("--",))?;

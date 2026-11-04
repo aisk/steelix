@@ -1,6 +1,9 @@
-"""Locals are released when the function returns in reverse order of
-`co_varnames` (parameters first, then the other locals by first use), and
-the generated Rust declares them in that order (design §5)."""
+"""CPython releases the locals when the function returns in reverse order of
+`co_varnames` (parameters first, then the other locals by first use), Rust
+in reverse order of declaration. The generated Rust declares them by first
+use, which mostly gives the same order. A declaration merged with an `if`
+chain past another one (`crossing`) does not: `KNOWN_DIFFERENCES` in
+tests/test_e2e.py has it (design §12)."""
 
 
 class T:
@@ -70,7 +73,19 @@ def in_try(text):
     print("try", value.name, extra.name)
 
 
+def crossing(n):
+    # `b` is declared before the chain that gives `a` its value.
+    if n:
+        a = T("crossing a")
+    else:
+        b = T("crossing b")
+        a = T("crossing a2")
+    print("crossing", a.name)
+
+
 straight()
+print("--")
+crossing(0)
 print("--")
 reassigned(None)
 print("--")

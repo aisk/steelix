@@ -224,33 +224,17 @@ pub fn run<'py, T>(
 /// exception gets one entry for it however often the body was resumed. An
 /// exception thrown in before the body started is raised here, before the
 /// first statement, like CPython does.
-///
-/// Each poll of the body counts as one level of Python recursion, as each
-/// resumption of a CPython generator's frame does, so chains of coroutines
-/// awaiting each other (directly or through Python objects) raise
-/// `RecursionError` at CPython's depth.
 pub async fn run_async<'py, T>(
     scope: &impl Scope<'py>,
     code: &'static Code,
     body: impl AsyncFnOnce(&Frame<'_, 'py>) -> PyResult<T>,
 ) -> PyResult<T> {
-    let py = scope.globals().py();
-    let mut run = std::pin::pin!(async {
-        let frame = Frame::new(scope, code, true);
-        let result = match crate::coroutine::thrown_at_start().await {
-            Some(err) => Err(err),
-            None => body(&frame).await,
-        };
-        result.map_err(|err| PyErr::from_value(frame.catch(err)))
-    });
-    std::future::poll_fn(|cx| {
-        let _depth = match crate::coroutine::Depth::enter(py) {
-            Ok(depth) => depth,
-            Err(err) => return std::task::Poll::Ready(Err(err)),
-        };
-        run.as_mut().poll(cx)
-    })
-    .await
+    let frame = Frame::new(scope, code, true);
+    let result = match crate::coroutine::thrown_at_start().await {
+        Some(err) => Err(err),
+        None => body(&frame).await,
+    };
+    result.map_err(|err| PyErr::from_value(frame.catch(err)))
 }
 
 impl<'f, 'py> Frame<'f, 'py> {
@@ -693,19 +677,11 @@ pub enum Flow<'py> {
 /// of the block (`?`, `return`, `break`, a panic).
 ///
 /// In the body of a native coroutine or generator the block may span
-/// suspensions, and the caller may be handling a different exception at
-/// each resumption. A previous exception that was the caller's then stands
-/// for "the caller's", whatever it is when the block ends, like the
-/// exception state of a CPython generator falls back to its caller's. A
-/// body dropped outside its own poll (a suspended generator that is
-/// deallocated) restores nothing: the thread's state is not its own.
+/// suspensions: the previous exception it restores is the one handled when
+/// it started, even if the caller handles another one by then (design §12).
 pub struct Handling<'py> {
     py: Python<'py>,
     previous: Option<Bound<'py, PyAny>>,
-    /// The coroutine whose poll created the guard (null outside one), and
-    /// whether `previous` was its caller's exception.
-    coroutine: *const (),
-    inherited: bool,
 }
 
 impl<'py> Handling<'py> {
@@ -714,49 +690,23 @@ impl<'py> Handling<'py> {
         // SAFETY: attached to the interpreter. `PyErr_GetHandledException`
         // returns a new reference or NULL; `PyErr_SetHandledException` takes
         // its own reference.
-        let previous = unsafe {
+        unsafe {
             let previous = Bound::from_owned_ptr_or_opt(py, ffi::PyErr_GetHandledException());
             ffi::PyErr_SetHandledException(exception.as_ptr());
-            previous
-        };
-        let (coroutine, inherited) = match crate::coroutine::polling() {
-            Some((coroutine, caller)) => {
-                let previous = previous
-                    .as_ref()
-                    .map_or(std::ptr::null_mut(), Bound::as_ptr);
-                (coroutine, previous == caller)
-            }
-            None => (std::ptr::null(), false),
-        };
-        Self {
-            py,
-            previous,
-            coroutine,
-            inherited,
+            Self { py, previous }
         }
     }
 }
 
 impl Drop for Handling<'_> {
     fn drop(&mut self) {
-        let _ = self.py;
-        let mut previous = self
+        let previous = self
             .previous
             .as_ref()
             .map_or(std::ptr::null_mut(), Bound::as_ptr);
-        if !self.coroutine.is_null() {
-            match crate::coroutine::polling() {
-                Some((coroutine, caller)) if coroutine == self.coroutine => {
-                    if self.inherited {
-                        previous = caller;
-                    }
-                }
-                _ => return,
-            }
-        }
-        // SAFETY: attached (we hold `Bound`s); `previous` is NULL, an object
-        // we hold, or the caller's exception, which the running poll keeps
-        // alive. NULL clears it.
+        let _ = self.py;
+        // SAFETY: attached (we hold a `Python` token); `previous` is NULL or
+        // an object we hold, and the call takes its own reference.
         unsafe { ffi::PyErr_SetHandledException(previous) };
     }
 }

@@ -225,7 +225,7 @@ M9 第一项提前做，并且改成默认行为。
 - [x] 只会是 `bool` 的局部变量是 Rust `bool`（§5，`frontend/booleans.py`），只认 Python 语义保证是 `bool` 的值（`not`、`is`、`in`、`isinstance`、`bool()`、字面量和它们的 `and`/`or`），比较运算不算。标准库 12087 个局部变量里有 128 个
 - [x] 用例 `bool_locals`（富比较返回非 bool、`__bool__` 的调用时机、被捕获、可能未赋值、`try`/`with` 里赋值）和 `returned_locals`（move 之后 `__del__`、weakref 的时机不变）
 - [x] CI：`.github/workflows/ci.yml`，ruff、cargo fmt、clippy 和完整的 pytest（§14）
-- [x] 先声明后赋值的局部变量移到第一次使用之前，第一次使用就是赋值（或者每个分支最后都赋值的 `if` 链、`match`）时带值声明：`let kind = if .. { a } else { b };`（§8，较新的 clippy 报 `needless_late_init`）。局部变量按 `co_varnames` 的顺序声明，函数返回时的释放顺序和 CPython 一致（§5，剩下的差异见 §12）。用例 `late_init`、`drop_order`，golden 里的扫描测试保证不再出现可以合并的写法。标准库里合并了 308 个
+- [x] 先声明后赋值的局部变量移到第一次使用之前，第一次使用就是赋值（或者每个分支最后都赋值的 `if` 链、`match`）时带值声明：`let kind = if .. { a } else { b };`（§8，较新的 clippy 报 `needless_late_init`）。局部变量按 `co_varnames` 的顺序声明，函数返回时的释放顺序和 CPython 一致（§5，剩下的差异见 §12。M14 之后的简化改成按第一次出现的顺序声明，见下面的"简化"）。用例 `late_init`、`drop_order`，golden 里的扫描测试保证不再出现可以合并的写法。标准库里合并了 308 个
 
 已有用例的 golden 从 18168 行变成 18138 行（新增的两个用例另有 815 行），`tests/golden/projects` 的模块从 7873 行变成 7860 行，`tests/apps` 的输出从 9419 行变成 9407 行，154 个标准库模块从 332793 行变成 332235 行。行数变化不大，主要的变化是返回值少了 clone、解包不再构造元组、bool 局部变量不再经过 `rt::bool` 和 `is_truthy`（标准库里 `rt::bool(` 从 1251 个减到 1048 个，`is_truthy` 从 5585 个减到 5440 个）。
 
@@ -310,7 +310,7 @@ M10 改写 skime 时最主要的阻碍是改写过的模块要在 bin 和 ext �
   - [x] 让 GC 看到暂停的协程：协程对象持有模块、捕获的变量和参数（`Locals`，future 只借用），`rt::await_` 委托的迭代器和帧对象放在协程对象里（`Held`），`Frame` 借用 globals，加上 `tp_clear`。测试：退出时 globals 里从没开始的生成器、暂停的生成器和协程、处理过异常后暂停的协程，经过 `self` 的方法生成器和 `self.task = create_task(self.run())`。局部变量和语句的临时值仍然看不到（§12）
   - [x] 在 `except` 里暂停时 `throw`、`close`、取消送进来的异常的 `__context__`
   - [x] `RuntimeError: coroutine is being awaited already`（Python 的 `await` 和 `rt::await_`，原生的和 CPython 的协程）
-  - [x] 递归深度：每次 poll `rt::frame!` 的函数体算一层 Python 递归（3.14 的 `py_recursion_remaining`），每次 poll 和 `send` 检查 C 栈，`yield from`、`await` 的链和 `Box::pin` 的递归在和 CPython 相同的深度抛 `RecursionError`
+  - [x] 递归深度：每次 poll `rt::frame!` 的函数体算一层 Python 递归（3.14 的 `py_recursion_remaining`），每次 poll 和 `send` 检查 C 栈，`yield from`、`await` 的链和 `Box::pin` 的递归在和 CPython 相同的深度抛 `RecursionError`（M14 之后的简化去掉了 Python 的递归计数，现在只检查 C 栈，见下面的"简化"）
   - [x] 文档：future 的 `Send` 前提和改写时的规则、`join!`/`select!` 的限制（§15）
   - [x] 原生生成器之间满足直接调用条件的 `yield from g(x)` 可以直接 await 内层的 future
 - [x] lowering：`async def` 和含 `yield` 的函数生成 `async fn`（`rt::frame!` 的 `async` 闭包，`rt::def!`/`rt::function!` 的 `async`、`gen`，方法、装饰器、嵌套函数），`await`、`yield`、`yield from`，会暂停的 `try` 区域换成 `async` 块（`let result: PyResult<..> = async { .. }.await;`），会暂停的 `with` 换成 `frame.with_async`，被 await 的表达式会留下临时值时先用 `let` 绑定（§8 "GC 看得到的东西"），`--traceback-lines` 照常工作
@@ -369,6 +369,18 @@ M13、M14 之后的独立 review 发现的问题。
 - [x] design §12 补上原生帧的警告位置（`<sys>:0`）带来的后果（默认 filter 不显示 `DeprecationWarning`，多个 never awaited 只显示一次）和 `repr(asyncio.Task)` 没有 `running at`（`coroutine_warnings` 用例）
 
 runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和 M13、M14 的变化一起发版。
+
+## 简化（M14 之后的架构 review）
+
+原则：程序很少依赖的实现细节（确切的递归深度、函数返回时局部变量之间的释放顺序、委托时内层看到的是谁的异常）不追求和 CPython 完全一致，对齐的代价大时用简单的实现，差异记在 design §12，e2e 用例用 `KNOWN_DIFFERENCES` 或只比较异常类型记录下来。程序依赖的语义（异常类型、副作用顺序、`close`/`finally`、`except E: await x; raise F` 的 `__context__`）仍然和 CPython 一样。
+
+- [x] 去掉协程和生成器的 Python 递归计数（`Depth`、按 3.14 布局读写的 `PyThreadState`、`build.rs` 的 `python_recursion`、`rt::frame!` 的 async 版本外面的 `poll_fn`）。每次恢复函数体只在 `Core::resume` 检查一次 C 栈，直接委托的链在 `rt::delegate` 每层检查一次，太深时是 C 栈的 `RecursionError`，debug 和 release 都不崩溃（`coroutines` 用例的 10 万层链，只比较异常类型）。`coroutine.rs` 少了 4 个 unsafe 块，per-item 的生成器从约 80 ns 到约 73 ns（release，`yield from` 两层从约 127 ns 到约 102 ns）
+- [x] 局部变量不再按 `co_varnames` 排序声明（`lower/function.py` 的排序、`declare_late` 的限制、`ModuleContext.varnames`、`frontend/classinfo.py` 里取 `co_varnames` 的部分；编译模块仍然用来取 `__static_attributes__`），按第一次出现的顺序声明，`declare_late` 可以越过别的声明合并 `let x = if ..`。标准库里没有值的声明从 3774 个变成 3746 个。释放顺序的差异记在 §12（`drop_order` 用例的 `crossing`）
+- [x] 简化协程里的异常状态：保留函数体自己的异常在暂停前后的保存和恢复（`State::Suspended` 的 `handled`）和 `throw` 进来的异常的 `__context__`，去掉让直接委托的内层、`throw` 进委托对象时看到调用方的异常的机制（`Channel` 的 `caller`、`raise_in_body`、`as_caller`、`rt::delegate` 的 `outer`/`inherited`、`rt::Handling` 里协程相关的字段、`coroutine::polling()`）。`rt::Handling` 和同步代码一样无条件恢复，暂停在 `except` 里的函数体在自己的 poll 以外被释放时由 `Body` 保存和恢复线程的状态（`coroutines` 用例的 `stubborn_in_except`）。`coroutine.rs` 少了 4 个 unsafe 块。差异记在 §12（`coroutines`、`generator_close` 用例的 `KNOWN_DIFFERENCES`），上一节"`__context__` 也和 CPython 一样"现在只对外层自己的异常成立
+- [ ] 生成器表达式改用协程的机制（`rt::def!(.., gen ..)` 那一套），删掉 `generator.rs`，现在有两个叫 `Generator` 的 pyclass
+- [ ] 拆分大文件：`coroutine.rs`（core、channel、awaits、objects、finalize）、runtime 的 `lib.rs`（names、macros）、`frontend/bindings.py`（模块级绑定、局部变量）、`lower/expr.py`（调用、def）
+- [ ] `frame.catch` 和 `rt::Handling` 合成一个 RAII 的值（`Caught`），`except` 块里不用再分别写两步
+- [x] 文档：§12 里不存在的 `--dynamic-globals` 改成"以后可以加"，§14 的 `traceback_lines/` golden 列表，§2 的流水线和 §3 的目录结构补上漏掉的模块、子命令和 runtime 文件，`CLAUDE.md` 是本地文件，不在仓库里
 
 ## 性能的候选项（未排期）
 

@@ -148,7 +148,6 @@ def _lower(
         source_lines=source_lines(parsed.source),
         leading_comments=_leading_comments(tree, parsed, plan),
         static_attributes=compiled.static_attributes,
-        varnames=compiled.varnames,
         traceback_lines=traceback_lines,
         # Class modules avoid the submodules and the module's own name.
         mod_names={

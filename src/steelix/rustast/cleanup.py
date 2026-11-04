@@ -12,26 +12,26 @@ their clone, and so do parameters (`&Bound`) and locals that a guard
 borrows (`let _handling = rt::Handling::new(&err);`).
 
 `declare_late`: a local declared without a value (`let kind: T;`) is
-declared where it is first used, as far as the drop order allows. When that
-first use is an assignment, or an `if`/`else` chain or `match` whose every
-branch ends by assigning it or leaves (`return`, `break`, `continue`), it
-is declared with that value: `let kind = if .. { a } else { b };`. The local
-held nothing before, so evaluation order and drop timing stay the same.
+declared where it is first used. When that first use is an assignment, or
+an `if`/`else` chain or `match` whose every branch ends by assigning it or
+leaves (`return`, `break`, `continue`), it is declared with that value:
+`let kind = if .. { a } else { b };`. The local held nothing before, so
+evaluation order stays the same. Moving a declaration past another one
+changes the order Rust drops the two in when the function returns, which
+may differ from CPython's (design §12).
 """
 
 from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Mapping
+from collections.abc import Collection
 from typing import Any
 
 from steelix.rustast import nodes as rs
 
 _RETURN_WRAPPERS = ("Ok", "Some", "rt::Flow::Return")
 _PATTERN_WORDS = frozenset({"Some", "Ok", "Err", "mut", "ref", "_"})
-# Types of locals that Rust does not drop.
-_COPY = frozenset({"bool"})
 
 
 def move_returned_locals(file: rs.File) -> rs.File:
@@ -39,78 +39,62 @@ def move_returned_locals(file: rs.File) -> rs.File:
     return dataclasses.replace(file, items=[_item(item) for item in file.items])
 
 
-def declare_late(block: rs.Block, ranks: Mapping[str, int]) -> rs.Block:
+def declare_late(block: rs.Block, locals_: Collection[str]) -> rs.Block:
     """The body of a lowered function with each declaration that holds no
     object yet (`let x: T;`, `let mut x: Option<T> = None;`) moved down to
     the statement that first uses the local, and given its value there when
-    that statement assigns it. `ranks` is the position of each local in
-    `co_varnames` by its Rust name.
-
-    A declaration moves past another local's only when that one comes first
-    in `co_varnames`: Rust drops locals in reverse order of declaration, like
-    CPython does when the function returns (design §5). Nested fns are left
-    alone, they have their own locals."""
-    return _late_node(block, ranks)
+    that statement assigns it. `locals_` are the Rust names of the
+    function's locals. Nested fns are left alone, they have their own
+    locals."""
+    return _late_node(block, locals_)
 
 
-def _late_node(node: Any, ranks: Mapping[str, int]) -> Any:
+def _late_node(node: Any, locals_: Collection[str]) -> Any:
     """`node` with every block in it rewritten, innermost first."""
     if isinstance(node, rs.Fn | rs.ItemStmt):
         return node
     if isinstance(node, tuple):
-        new = tuple(_late_node(item, ranks) for item in node)
+        new = tuple(_late_node(item, locals_) for item in node)
         return node if all(a is b for a, b in zip(new, node, strict=True)) else new
     if not dataclasses.is_dataclass(node) or isinstance(node, type):
         return node
     changes = {}
     for field in dataclasses.fields(node):
         value = getattr(node, field.name)
-        new = _late_node(value, ranks)
+        new = _late_node(value, locals_)
         if new is not value:
             changes[field.name] = new
     if changes:
         node = dataclasses.replace(node, **changes)
-    return _late_block(node, ranks) if isinstance(node, rs.Block) else node
+    return _late_block(node, locals_) if isinstance(node, rs.Block) else node
 
 
-def _late_block(block: rs.Block, ranks: Mapping[str, int]) -> rs.Block:
+def _late_block(block: rs.Block, locals_: Collection[str]) -> rs.Block:
     stmts = list(block.stmts)
     changed = False
     # From the last declaration up, so that one moved down is out of the way
     # of the declarations above it.
     for i in reversed(range(len(stmts))):
-        changed |= _move_declaration(stmts, i, block.tail, ranks)
+        changed |= _move_declaration(stmts, i, block.tail, locals_)
     return rs.Block(tuple(stmts), block.tail) if changed else block
 
 
 def _move_declaration(
-    stmts: list[rs.Stmt], i: int, tail: rs.Expr | None, ranks: Mapping[str, int]
+    stmts: list[rs.Stmt], i: int, tail: rs.Expr | None, locals_: Collection[str]
 ) -> bool:
     """Move the declaration `stmts[i]` down if it holds nothing yet; whether
     it moved."""
     let = stmts[i]
-    if not isinstance(let, rs.Let) or let.name not in ranks:
-        return False
-    if let.init is not None and not (
-        let.init == rs.Path("None") and (let.ty or "").startswith("Option<")
-    ):
+    if not isinstance(let, rs.Let) or let.name not in locals_ or not _holds_nothing(let):
         return False
     name = let.name
-    rank = ranks[name]
     first = i + 1
     while first < len(stmts) and not _mentions(stmts[first], name):
-        crossed = stmts[first]
-        if (
-            isinstance(crossed, rs.Let)
-            and _COPY.isdisjoint((let.ty, crossed.ty))
-            and any(ranks.get(other, -1) > rank for other in _pattern_names(crossed.name))
-        ):
-            break
         first += 1
     if first == len(stmts) and (tail is None or not _mentions(tail, name)):
         return False  # never used: leave it
     value = None
-    if first < len(stmts) and _mentions(stmts[first], name):
+    if first < len(stmts):
         value = _assigned_value(stmts[first], name)
     if value is not None:
         later = (*stmts[first + 1 :], tail)
@@ -119,14 +103,25 @@ def _move_declaration(
         stmts[first] = rs.Let(name, let.mutable and _reassigned(later, name), ty, value)
         del stmts[i]
         return True
-    # Before the comments of the statement it moves to.
-    while first > i + 1 and isinstance(stmts[first - 1], rs.Comment):
+    # Before the comments of the statement it moves to, and before the
+    # declarations moved there already, which came after it.
+    while first > i + 1 and (
+        isinstance(stmts[first - 1], rs.Comment)
+        or (isinstance(stmts[first - 1], rs.Let) and _holds_nothing(stmts[first - 1]))
+    ):
         first -= 1
     if first == i + 1:
         return False
     stmts.insert(first, let)
     del stmts[i]
     return True
+
+
+def _holds_nothing(let: rs.Let) -> bool:
+    """`let x: T;` or `let mut x: Option<T> = None;`."""
+    return let.init is None or (
+        let.init == rs.Path("None") and (let.ty or "").startswith("Option<")
+    )
 
 
 def _assigned_value(stmt: rs.Stmt, name: str) -> rs.Expr | None:

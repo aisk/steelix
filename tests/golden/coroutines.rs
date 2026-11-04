@@ -1,7 +1,7 @@
 //! Parts of `coroutines.py` kept as Python source and run in place by
 //! `rt::exec_python!` (steelix does not lower them yet):
 //!
-//! - line 642, `def cancel_in_except`: except-as name used outside its handler
+//! - line 696, `def cancel_in_except`: except-as name used outside its handler
 
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -505,15 +505,58 @@ pub async fn chain<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
     })
 }
 
-// coroutines.py:236
+// The same through generator and coroutine objects (not direct calls).
+// coroutines.py:237
+pub async fn walk_objects<'py>(
+    m: &rt::Module<'py>,
+    n: &Bound<'py, PyAny>,
+    f: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "walk_objects", 237, async |_| {
+        if n.is_truthy()? {
+            let iterable = (if f.is_truthy()? {
+                f.clone()
+            } else {
+                m.global("walk_objects")?
+            })
+            .call1((n.sub(1)?, f))?;
+            rt::yield_from(iterable).await?;
+        }
+        rt::yield_(n).await?;
+        Ok(rt::none(m.py()))
+    })
+}
+
+// coroutines.py:243
+pub async fn chain_objects<'py>(
+    m: &rt::Module<'py>,
+    n: &Bound<'py, PyAny>,
+    f: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "chain_objects", 243, async |_| {
+        if n.eq(0)? {
+            return Ok(rt::int(py, 0));
+        }
+        let awaitable = (if f.is_truthy()? {
+            f.clone()
+        } else {
+            m.global("chain_objects")?
+        })
+        .call1((n.sub(1)?, f))?;
+        rt::int(py, 1).add(rt::await_(awaitable).await?)
+    })
+}
+
+// coroutines.py:249
 pub async fn in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "in_except", 236, async |frame| {
+    rt::frame!(m, "in_except", 249, async |frame| {
         match (|| -> PyResult<()> {
             Err(frame.raise(m.global("KeyError")?.call1(("in_except",))?))
         })() {
             Ok(()) => unreachable!(),
-            Err(err) if frame.matches(&err, 236, || m.global("KeyError"))? => {
+            Err(err) if frame.matches(&err, 249, || m.global("KeyError"))? => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 rt::yield_(rt::str(py, "in except")).await?;
             }
@@ -523,14 +566,14 @@ pub async fn in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
     })
 }
 
-// coroutines.py:243
+// coroutines.py:256
 pub async fn sleep_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "sleep_in_except", 243, async |frame| {
+    rt::frame!(m, "sleep_in_except", 256, async |frame| {
         match (|| -> PyResult<()> {
             Err(frame.raise(m.global("KeyError")?.call1(("sleep_in_except",))?))
         })() {
             Ok(()) => unreachable!(),
-            Err(err) if frame.matches(&err, 243, || m.global("KeyError"))? => {
+            Err(err) if frame.matches(&err, 256, || m.global("KeyError"))? => {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 let sleep = m.global("asyncio")?.method1("sleep", (10,))?;
                 rt::await_(sleep).await?;
@@ -541,23 +584,23 @@ pub async fn sleep_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
     })
 }
 
-// coroutines.py:250
+// coroutines.py:263
 pub async fn native_awaits<'py>(
     m: &rt::Module<'py>,
     awaitable: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "native_awaits", 250, async |_| {
+    rt::frame!(m, "native_awaits", 263, async |_| {
         rt::await_(awaitable).await
     })
 }
 
-// coroutines.py:254
+// coroutines.py:267
 pub async fn owner_values<'py>(
     m: &rt::Module<'py>,
     slf: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "owner_values", 254, async |frame| {
+    rt::frame!(m, "owner_values", 267, async |frame| {
         let result: PyResult<()> = async {
             for value in slf.attr("values")?.try_iter()? {
                 let value = value?;
@@ -575,12 +618,12 @@ pub async fn owner_values<'py>(
     })
 }
 
-// coroutines.py:262
+// coroutines.py:275
 pub async fn owner_run<'py>(
     m: &rt::Module<'py>,
     slf: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "owner_run", 262, async |frame| {
+    rt::frame!(m, "owner_run", 275, async |frame| {
         let result: PyResult<()> = async {
             let wait = slf.attr("event")?.method0("wait")?;
             rt::await_(wait).await?;
@@ -595,15 +638,15 @@ pub async fn owner_run<'py>(
     })
 }
 
-// coroutines.py:269
+// coroutines.py:282
 pub async fn recovered<'py>(
     m: &rt::Module<'py>,
     tag: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "recovered", 269, async |frame| {
+    rt::frame!(m, "recovered", 282, async |frame| {
         match (|| -> PyResult<()> { Err(frame.raise(m.global("KeyError")?.call1((tag,))?)) })() {
             Ok(()) => unreachable!(),
-            Err(err) if frame.matches(&err, 269, || m.global("KeyError"))? => {}
+            Err(err) if frame.matches(&err, 282, || m.global("KeyError"))? => {}
             Err(err) => return Err(err),
         }
         let result: PyResult<()> = async {
@@ -619,10 +662,10 @@ pub async fn recovered<'py>(
     })
 }
 
-// coroutines.py:328
+// coroutines.py:341
 pub fn frames<'py>(m: &rt::Module<'py>, e: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "frames", 328, |_| {
+    rt::frame!(m, "frames", 341, |_| {
         let list = PyList::empty(py);
         for f in m
             .global("traceback")?
@@ -638,10 +681,10 @@ pub fn frames<'py>(m: &rt::Module<'py>, e: &Bound<'py, PyAny>) -> PyResult<Bound
     })
 }
 
-// coroutines.py:332
+// coroutines.py:345
 pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "unraisable", 332, |_| {
+    rt::frame!(m, "unraisable", 345, |_| {
         let message = {
             let sub = m.global("re")?.attr("sub")?;
             let err_msg = u.attr("err_msg")?;
@@ -666,10 +709,10 @@ pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<B
     })
 }
 
-// coroutines.py:340
+// coroutines.py:353
 pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "main", 340, async |frame| {
+    rt::frame!(m, "main", 353, async |frame| {
         {
             let print = m.global("print")?;
             let awaitable = m.global("combine")?.call1((10,))?;
@@ -694,7 +737,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         match rt::await_(&task).await {
             Ok(_) => {}
             Err(err)
-                if frame.matches(&err, 340, || m.global("asyncio")?.attr("CancelledError"))? =>
+                if frame.matches(&err, 353, || m.global("asyncio")?.attr("CancelledError"))? =>
             {
                 let _handling = rt::Handling::new(&frame.catch(err));
                 m.global("print")?
@@ -702,12 +745,12 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        // coroutines.py:351
+        // coroutines.py:364
         fn lambda<'py>(
             m: &rt::Module<'py>,
             log: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "main.<locals>.<lambda>", 351, |_| {
+            rt::frame!(m, "main.<locals>.<lambda>", 364, |_| {
                 m.global("py_awaits")?
                     .call1((m.global("guarded")?.call1((log,))?,))
             })
@@ -734,7 +777,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(_) => {}
                 Err(err)
                     if frame
-                        .matches(&err, 340, || m.global("asyncio")?.attr("CancelledError"))? =>
+                        .matches(&err, 353, || m.global("asyncio")?.attr("CancelledError"))? =>
                 {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
@@ -760,7 +803,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .await
         {
             Ok(_) => {}
-            Err(err) if frame.matches(&err, 340, || m.global("ValueError"))? => {
+            Err(err) if frame.matches(&err, 353, || m.global("ValueError"))? => {
                 let e = frame.catch(err);
                 let _handling = rt::Handling::new(&e);
                 m.global("print")?
@@ -779,13 +822,13 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     })
 }
 
-// coroutines.py:531
+// coroutines.py:544
 pub fn trampoline<'py>(
     m: &rt::Module<'py>,
     coro: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "trampoline", 531, |frame| {
+    rt::frame!(m, "trampoline", 544, |frame| {
         let mut value = rt::none(py);
         let mut request: Bound<'py, PyAny>;
         let mut op: Bound<'py, PyAny>;
@@ -793,7 +836,7 @@ pub fn trampoline<'py>(
         loop {
             match coro.method1("send", (&value,)) {
                 Ok(value2) => request = value2,
-                Err(err) if frame.matches(&err, 531, || m.global("StopIteration"))? => {
+                Err(err) if frame.matches(&err, 544, || m.global("StopIteration"))? => {
                     let e = frame.catch(err);
                     let _handling = rt::Handling::new(&e);
                     return e.attr("value");
@@ -812,19 +855,44 @@ pub fn trampoline<'py>(
     })
 }
 
-// coroutines.py:661
+// A body suspended in an `except` block that is dropped (here it ignores
+// `close()`) leaves the exception handled where it is dropped alone.
+// coroutines.py:674
+pub async fn stubborn_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "stubborn_in_except", 674, async |frame| {
+        match (|| -> PyResult<()> { Err(frame.raise(m.global("KeyError")?.call1(("stubborn",))?)) })(
+        ) {
+            Ok(()) => unreachable!(),
+            Err(err) if frame.matches(&err, 674, || m.global("KeyError"))? => {
+                let _handling = rt::Handling::new(&frame.catch(err));
+                loop {
+                    match rt::yield_(rt::none(py)).await {
+                        Ok(_) => {}
+                        Err(err) if frame.matches(&err, 674, || m.global("GeneratorExit"))? => {}
+                        Err(err) => return Err(err),
+                    }
+                    py.check_signals()?;
+                }
+            }
+            Err(err) => Err(err),
+        }
+    })
+}
+
+// coroutines.py:715
 pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "awaited_already", 661, async |frame| {
-        // coroutines.py:662
+    rt::frame!(m, "awaited_already", 715, async |frame| {
+        // coroutines.py:716
         fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "awaited_already.<locals>.<lambda>", 662, |_| {
+            rt::frame!(m, "awaited_already.<locals>.<lambda>", 716, |_| {
                 m.global("add_later")?.call1((1, 2))
             })
         }
-        // coroutines.py:662
+        // coroutines.py:716
         fn lambda2<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            rt::frame!(m, "awaited_already.<locals>.<lambda>", 662, |_| {
+            rt::frame!(m, "awaited_already.<locals>.<lambda>", 716, |_| {
                 m.global("py_double")?.call1((1,))
             })
         }
@@ -850,7 +918,7 @@ pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
                 let waiter = waiter?;
                 match async { rt::await_(waiter.call1((&c,))?).await }.await {
                     Ok(_) => {}
-                    Err(err) if frame.matches(&err, 661, || m.global("RuntimeError"))? => {
+                    Err(err) if frame.matches(&err, 715, || m.global("RuntimeError"))? => {
                         let e = frame.catch(err);
                         let _handling = rt::Handling::new(&e);
                         m.global("print")?.call1((
@@ -871,22 +939,22 @@ pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
     })
 }
 
-// coroutines.py:699
+// coroutines.py:753
 pub fn report<'py>(
     m: &rt::Module<'py>,
     r#loop: &Bound<'py, PyAny>,
     context: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "report", 699, |_| {
+    rt::frame!(m, "report", 753, |_| {
         m.global("print")?
             .call1(("exception handler:", context.get_item("message")?))?;
         Ok(rt::none(m.py()))
     })
 }
 
-// coroutines.py:703
+// coroutines.py:757
 pub async fn owner_task<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "owner_task", 703, async |_| {
+    rt::frame!(m, "owner_task", 757, async |_| {
         m.global("asyncio")?
             .method0("get_running_loop")?
             .attr("set_exception_handler")?
@@ -955,28 +1023,28 @@ pub mod suspend {
 pub mod manager {
     use super::*;
 
-    // coroutines.py:310
+    // coroutines.py:323
     /// The body of `class Manager`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Manager", 310, |_| {
+        rt::frame!(ns, "Manager", 323, |_| {
             rt::def!(ns, __enter__(slf as "self"))?;
             rt::def!(ns, __exit__(slf as "self", typ, value, tb))?;
             Ok(())
         })
     }
 
-    // coroutines.py:311
+    // coroutines.py:324
     pub fn __enter__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Manager.__enter__", 311, |_| {
+        rt::frame!(m, "Manager.__enter__", 324, |_| {
             m.global("print")?.call1(("enter",))?;
             Ok(rt::int(m.py(), 10))
         })
     }
 
-    // coroutines.py:315
+    // coroutines.py:328
     pub fn __exit__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -985,7 +1053,7 @@ pub mod manager {
         tb: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Manager.__exit__", 315, |_| {
+        rt::frame!(m, "Manager.__exit__", 328, |_| {
             m.global("print")?.call1((
                 "exit",
                 if typ.is_truthy()? {
@@ -1002,34 +1070,34 @@ pub mod manager {
 pub mod request {
     use super::*;
 
-    // coroutines.py:320
+    // coroutines.py:333
     /// The body of `class Request`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Request", 320, |_| {
+        rt::frame!(ns, "Request", 333, |_| {
             rt::def!(ns, __init__(slf as "self", *args))?;
             rt::def!(ns, gen __await__(slf as "self"))?;
             Ok(())
         })
     }
 
-    // coroutines.py:321
+    // coroutines.py:334
     pub fn __init__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         args: &Bound<'py, PyTuple>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Request.__init__", 321, |_| {
+        rt::frame!(m, "Request.__init__", 334, |_| {
             slf.set_attr("args", args)?;
             Ok(rt::none(m.py()))
         })
     }
 
-    // coroutines.py:324
+    // coroutines.py:337
     pub async fn __await__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Request.__await__", 324, async |_| {
+        rt::frame!(m, "Request.__await__", 337, async |_| {
             rt::yield_(slf).await
         })
     }
@@ -1038,16 +1106,16 @@ pub mod request {
 pub mod holder {
     use super::*;
 
-    // coroutines.py:493
+    // coroutines.py:506
     /// The body of `class Holder`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Holder", 493, |_| {
+        rt::frame!(ns, "Holder", 506, |_| {
             rt::def!(ns, __str__(slf as "self"))?;
             Ok(())
         })
     }
 
-    // coroutines.py:494
+    // coroutines.py:507
     pub fn __str__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -1059,10 +1127,10 @@ pub mod holder {
 pub mod owner {
     use super::*;
 
-    // coroutines.py:679
+    // coroutines.py:733
     /// The body of `class Owner`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Owner", 679, |_| {
+        rt::frame!(ns, "Owner", 733, |_| {
             ns.set("values_of", ns.get("owner_values")?)?;
             ns.set("run", ns.get("owner_run")?)?;
             rt::def!(ns, __init__(slf as "self", tag))?;
@@ -1071,26 +1139,26 @@ pub mod owner {
         })
     }
 
-    // coroutines.py:683
+    // coroutines.py:737
     pub fn __init__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         tag: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::frame!(m, "Owner.__init__", 683, |_| {
+        rt::frame!(m, "Owner.__init__", 737, |_| {
             slf.set_attr("tag", tag)?;
             slf.set_attr("values", PyList::new(py, [1, 2])?)?;
             Ok(rt::none(py))
         })
     }
 
-    // coroutines.py:687
+    // coroutines.py:741
     pub fn __del__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Owner.__del__", 687, |_| {
+        rt::frame!(m, "Owner.__del__", 741, |_| {
             m.global("print")?.call1(("del owner", slf.attr("tag")?))?;
             Ok(rt::none(m.py()))
         })
@@ -1100,21 +1168,21 @@ pub mod owner {
 pub mod last {
     use super::*;
 
-    // coroutines.py:721
+    // coroutines.py:775
     /// The body of `class Last`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Last", 721, |_| {
+        rt::frame!(ns, "Last", 775, |_| {
             rt::def!(ns, __del__(slf as "self"))?;
             Ok(())
         })
     }
 
-    // coroutines.py:722
+    // coroutines.py:776
     pub fn __del__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Last.__del__", 722, |_| {
+        rt::frame!(m, "Last.__del__", 776, |_| {
             m.global("print")?.call1(("del last",))?;
             Ok(rt::none(m.py()))
         })
@@ -1178,6 +1246,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, gen outer_items())?;
         rt::def!(m, gen walk(n))?;
         rt::def!(m, async chain(n))?;
+        rt::def!(m, gen walk_objects(n, f = py.None()))?;
+        rt::def!(m, async chain_objects(n, f = py.None()))?;
         rt::def!(m, gen in_except())?;
         rt::def!(m, async sleep_in_except())?;
         rt::def!(m, async native_awaits(awaitable))?;
@@ -1188,7 +1258,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.global("exec")?.call1(("\nasync def py_awaits(awaitable):\n    return await awaitable\n\n\nasync def py_double(x):\n    await asyncio.sleep(0)\n    return x * 2\n\n\ndef py_inner():\n    try:\n        received = yield \"inner 1\"\n        print(\"inner received\", received)\n        try:\n            yield \"inner 2\"\n        except KeyError:\n            print(\"inner caught KeyError\")\n        yield \"inner 3\"\n    finally:\n        print(\"inner finally\")\n    return \"inner result\"\n", m.globals()))?;
         m.set_global(
             "Manager",
-            rt::class!(m, "Manager"(), manager::body, line = 310)?,
+            rt::class!(m, "Manager"(), manager::body, line = 323)?,
         )?;
         m.set_global(
             "Request",
@@ -1196,7 +1266,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m,
                 "Request"(),
                 request::body,
-                line = 320,
+                line = 333,
                 attributes = ["args"]
             )?,
         )?;
@@ -1493,7 +1563,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.global("print")?.call1(("after collect",))?;
         m.set_global(
             "Holder",
-            rt::class!(m, "Holder"(), holder::body, line = 493)?,
+            rt::class!(m, "Holder"(), holder::body, line = 506)?,
         )?;
         m.set_global("holder", m.global("Holder")?.call0()?)?;
         let value = m.global("cleanup")?.call1((m.global("holder")?,))?;
@@ -1749,30 +1819,49 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             Err(err) => return Err(err),
         }
         m.global("print")?.call1(("--- recursion depth",))?;
-        for item5 in PyTuple::new(py, [100, 2000])?.try_iter()? {
+        // Too deep a chain raises `RecursionError`: CPython at the recursion limit,
+        // native code when the C stack runs out (design §12), so only the type is
+        // compared.
+        for item5 in PyTuple::new(py, [100, 100000])?.try_iter()? {
             m.set_global("n", item5?)?;
-            // coroutines.py:624
+            // coroutines.py:640
             fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "<lambda>", 624, |_| {
+                rt::frame!(m, "<lambda>", 640, |_| {
                     m.global("len")?.call1((m
                         .global("list")?
                         .call1((m.global("walk")?.call1((m.global("n")?,))?,))?,))
                 })
             }
-            // coroutines.py:625
+            // coroutines.py:641
             fn lambda2<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "<lambda>", 625, |_| {
+                rt::frame!(m, "<lambda>", 641, |_| {
                     m.global("asyncio")?
                         .attr("run")?
                         .call1((m.global("chain")?.call1((m.global("n")?,))?,))
                 })
             }
-            // coroutines.py:626
+            // coroutines.py:642
             fn lambda3<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-                rt::frame!(m, "<lambda>", 626, |_| {
+                rt::frame!(m, "<lambda>", 642, |_| {
                     m.global("asyncio")?
                         .attr("run")?
                         .call1((m.global("countdown")?.call1((m.global("n")?,))?,))
+                })
+            }
+            // coroutines.py:643
+            fn lambda4<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+                rt::frame!(m, "<lambda>", 643, |_| {
+                    m.global("len")?.call1((m
+                        .global("list")?
+                        .call1((m.global("walk_objects")?.call1((m.global("n")?,))?,))?,))
+                })
+            }
+            // coroutines.py:644
+            fn lambda5<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+                rt::frame!(m, "<lambda>", 644, |_| {
+                    m.global("asyncio")?
+                        .attr("run")?
+                        .call1((m.global("chain_objects")?.call1((m.global("n")?,))?,))
                 })
             }
             for item6 in PyTuple::new(
@@ -1802,6 +1891,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                         ],
                     )?
                     .as_any(),
+                    PyTuple::new(
+                        py,
+                        [
+                            &rt::str(py, "walk_objects"),
+                            &rt::function!(m, lambda4(), qualname = "<lambda>")?,
+                        ],
+                    )?
+                    .as_any(),
+                    PyTuple::new(
+                        py,
+                        [
+                            &rt::str(py, "chain_objects"),
+                            &rt::function!(m, lambda5(), qualname = "<lambda>")?,
+                        ],
+                    )?
+                    .as_any(),
                 ],
             )?
             .try_iter()?
@@ -1827,7 +1932,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                             m.global("type")?
                                 .call1((m.global("e")?,))?
                                 .attr("__name__")?,
-                            m.global("e")?,
                         ))?;
                         m.unbind_global("e")?;
                     }
@@ -1861,10 +1965,73 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        // coroutines.py:642, kept as Python: except-as name used outside its handler at 648:5
+        // A body that handles nothing itself gives what is thrown in no context,
+        // whatever the caller handles.
+        m.set_global("g", m.global("walk")?.call1((0,))?)?;
+        m.global("next")?.call1((m.global("g")?,))?;
+        match (|| -> PyResult<()> {
+            Err(frame.raise(m.global("KeyError")?.call1(("the caller's",))?))
+        })() {
+            Ok(()) => unreachable!(),
+            Err(err) if frame.matches(&err, 1, || m.global("KeyError"))? => {
+                let _handling = rt::Handling::new(&frame.catch(err));
+                match (|| {
+                    m.global("g")?
+                        .attr("throw")?
+                        .call1((m.global("ValueError")?.call1(("thrown",))?,))
+                })() {
+                    Ok(_) => {}
+                    Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
+                        let exception = frame.catch(err);
+                        m.set_global("e", &exception)?;
+                        let _handling = rt::Handling::new(&exception);
+                        m.global("print")?.call1((
+                            "thrown context without a handler",
+                            m.global("repr")?
+                                .call1((m.global("e")?.attr("__context__")?,))?,
+                        ))?;
+                        m.unbind_global("e")?;
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+            Err(err) => return Err(err),
+        }
+        rt::def!(m, gen stubborn_in_except())?;
+        // coroutines.py:685
+        fn lambda6<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+            rt::frame!(m, "<lambda>", 685, |_| {
+                m.global("print")?.call1((
+                    "unraisable:",
+                    m.global("repr")?.call1((u.attr("exc_value")?,))?,
+                ))
+            })
+        }
+        let value = rt::function!(m, lambda6(u), qualname = "<lambda>")?;
+        m.global("sys")?.set_attr("unraisablehook", value)?;
+        m.set_global("g", m.global("stubborn_in_except")?.call0()?)?;
+        m.global("next")?.call1((m.global("g")?,))?;
+        match (|| -> PyResult<()> { Err(frame.raise(m.global("ValueError")?.call1(("mine",))?)) })()
+        {
+            Ok(()) => unreachable!(),
+            Err(err) if frame.matches(&err, 1, || m.global("ValueError"))? => {
+                let _handling = rt::Handling::new(&frame.catch(err));
+                m.del_global("g")?;
+                m.global("print")?.call1((
+                    "handled after the drop",
+                    m.global("repr")?
+                        .call1((m.global("sys")?.method0("exception")?,))?,
+                ))?;
+            }
+            Err(err) => return Err(err),
+        }
+        let __unraisablehook__ = m.global("sys")?.attr("__unraisablehook__")?;
+        m.global("sys")?
+            .set_attr("unraisablehook", __unraisablehook__)?;
+        // coroutines.py:696, kept as Python: except-as name used outside its handler at 702:5
         rt::exec_python!(
             m,
-            line = 642,
+            line = 696,
             r#"
 async def cancel_in_except():
     task = asyncio.create_task(sleep_in_except())
@@ -1895,7 +2062,7 @@ async def cancel_in_except():
                 m,
                 "Owner"(),
                 owner::body,
-                line = 679,
+                line = 733,
                 attributes = ["tag", "values"]
             )?,
         )?;
@@ -1919,7 +2086,7 @@ async def cancel_in_except():
         let __unraisablehook__ = m.global("sys")?.attr("__unraisablehook__")?;
         m.global("sys")?
             .set_attr("unraisablehook", __unraisablehook__)?;
-        m.set_global("Last", rt::class!(m, "Last"(), last::body, line = 721)?)?;
+        m.set_global("Last", rt::class!(m, "Last"(), last::body, line = 775)?)?;
         m.set_global("never_started", m.global("count_up")?.call1((3,))?)?;
         m.set_global("suspended_generator", m.global("with_finally")?.call0()?)?;
         m.global("next")?
