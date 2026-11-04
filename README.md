@@ -46,7 +46,6 @@ pub fn load<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Boun
             Ok(value) => value,
             Err(err) if err.is_instance_of::<PyValueError>(py) => {
                 let e = frame.catch(err);
-                let _handling = rt::Handling::new(&e);
                 rt::builtins::print(
                     py,
                     (rt::fstring(py, ("bad input: ", rt::format(&e, "")?))?,),
@@ -56,46 +55,18 @@ pub fn load<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Boun
             Err(err) => return Err(err),
         };
         let list = PyList::empty(py);
-        for row in rows.try_iter()? {
+        for row in rt::iter(&rows)? {
             let row = row?;
             if row.get_item("qty")?.gt(0)? {
                 list.append(rt::call!(m.global("Item")?, **row)?)?;
             }
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })
 }
-
-pub mod item {
-    use super::*;
-
-    // inventory.py:5
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-        name: &Bound<'py, PyAny>,
-        price: &Bound<'py, PyAny>,
-        qty: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.__init__", 5, |_| {
-            slf.set_attr("name", name)?;
-            slf.set_attr("price", price)?;
-            slf.set_attr("qty", qty)?;
-            Ok(rt::none(m.py()))
-        })
-    }
-
-    // inventory.py:10
-    pub fn total<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Item.total", 10, |_| {
-            slf.attr("price")?.mul(slf.attr("qty")?)
-        })
-    }
-}
 ```
 
-`cargo build` in `out/` produces an executable that embeds libpython and prints `6`, like `python inventory.py`. The class is a real Python class, `load` is a real Python function (`inspect.signature`, pickling and monkeypatching still work), and the generator expression is evaluated lazily as in CPython.
+`cargo build` in `out/` produces an executable that embeds libpython and prints `6`, like `python inventory.py`. `Item` is still a real Python class whose methods are native functions, and `load` is a real Python function (`inspect.signature`, pickling and monkeypatching still work).
 
 ## Installation
 
@@ -110,7 +81,6 @@ uv tool install steelix
 The generated crates depend on the [`steelix-runtime`](https://crates.io/crates/steelix-runtime) crate from crates.io.
 
 ## Usage
-
 
 ```sh
 steelix transpile app.py -o out/               # a crate for app.py and the project modules it imports
@@ -127,24 +97,17 @@ When building a generated crate yourself, point PyO3 at the interpreter whose pa
 
 ## Rewriting
 
-Each generated function keeps its Python calling convention, so it can be rewritten on its own: keep the signature as an adapter, move the logic into plain Rust, convert the arguments at the boundary. The rest of the program, including Python code that calls the function, does not notice. [`examples/logsum`](examples/logsum) shows a small CLI before and after rewriting some of its functions.
+Each generated function keeps its Python calling convention, so it can be rewritten on its own: keep the signature as an adapter, move the logic into plain Rust, convert the arguments at the boundary. Python containers can stay as they are at first. [`examples/logsum`](examples/logsum) shows a small CLI before and after rewriting some of its functions.
 
-Python containers can stay as they are at first (a `PyDict` is fine in Rust code), so the first step only changes the logic, not the data model.
+`steelix test out/ -- tests/` checks each step with the project's own tests: it runs pytest with the generated executable as the interpreter and fails if a transpiled module was imported from source. Before turning a class into a `#[pyclass]`, `steelix attrs` shows which functions, in which modules, touch its attributes, and `--pyclass NAME` prints a draft.
 
-The project's own tests check each step. `steelix test out/ -- tests/` builds the crate and runs `python -m pytest tests/` with the generated executable acting as the Python interpreter: every import of a transpiled module gets the native code, wherever the project directory is, and the run fails if a transpiled module was imported from its Python source instead. pytest comes from the environment of the interpreter the crate is built with (`--python`, default `$PYO3_PYTHON`).
-
-Classes are rewritten the same way, method by method, with the instance state left in `__dict__`. Turning a class into a `#[pyclass]` struct has to wait until every function that reads or writes its attributes is rewritten, and in real projects those are often spread over several modules. `steelix attrs app.py` lists, for every class, each attribute and the functions that read, write or delete it (file and line), the accesses whose receiver's class it can not tell but whose name matches, and dynamic access such as `setattr` with a computed name. `steelix attrs app.py --pyclass pkg.mod.Point` prints a draft `#[pyclass]` for one class, with fields, method stubs and a header listing what complicates the change (subclasses, metaclasses, decorators, class body logic, dynamic access, reassigned class attributes). The draft is advice, never part of the build.
-
-`--mode ext` builds a PyO3 extension module instead of an executable, for publishing a transpiled library. Install a package as `pkg/__init__.so` so that `python -m pkg` works.
+`--mode ext` builds a PyO3 extension module instead of an executable, for publishing a transpiled library.
 
 ## What is missing
 
-- **Async generators** (`async def` with `yield`), async comprehensions and a few rare uses of `await` and `yield` (in a lambda, in an `except` clause, `types.coroutine`) are kept as Python. Coroutines and generator functions are native: they become `async fn`s whose `.await` points are the Python `await` and `yield` expressions, driven by a small runtime object that behaves like CPython's coroutine and generator.
-- **OR patterns with captures** in `match` statements (`case [x] | {"x": x}:`) and a few rarer constructs (custom metaclasses, `exec`/`eval` without a namespace, ...) are kept as Python. Other `match` statements are native: each `case` becomes an `if let .. && ..` chain over small runtime checks that behave like CPython's pattern matching, down to the order of `len()`, `__eq__` and attribute lookups.
-- **Executables for Windows and macOS** are not supported yet, only Linux.
-- **Free-threaded Python** is not supported.
-
-"Kept as Python" means the statement or function stays Python source inside the generated Rust and runs in the same module globals, so any program CPython runs can be transpiled. `steelix transpile` and `steelix coverage` report what was kept and why.
+- Async generators, async comprehensions, `match` OR patterns with captures, custom metaclasses and a few rarer constructs are kept as Python: the statement stays Python source inside the generated Rust, in the same module globals, so any program CPython runs can be transpiled. `steelix coverage` reports what was kept and why.
+- Executables only for Linux, no Windows or macOS yet.
+- No free-threaded Python.
 
 ## Status
 
