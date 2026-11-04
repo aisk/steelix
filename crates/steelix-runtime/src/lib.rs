@@ -8,17 +8,11 @@
 //! never through a glob import, so Python names such as `int` or `print` can
 //! not shadow runtime helpers.
 
-use pyo3::IntoPyObjectExt;
 use pyo3::exceptions::{PyNameError, PyUnboundLocalError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::type_object::PyTypeInfo;
-use pyo3::types::{PyBool, PyBytes, PyComplex, PyFloat, PyInt, PySlice, PyString, PyTuple};
-use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 // The runtime relies on the GIL: attached threads take turns, which the
 // lock-free name table of `interned` and the metadata of `Function` count
@@ -28,6 +22,8 @@ compile_error!(
     "steelix-runtime needs a Python with the GIL; free-threaded builds (3.14t) are not \
      supported, see docs/design.md §6 \"调用的开销\""
 );
+
+mod macros;
 
 mod attr;
 pub mod call;
@@ -48,10 +44,12 @@ mod matching;
 mod module;
 #[cfg(unix)]
 mod multiprocessing;
+mod names;
 mod ops;
 #[doc(hidden)]
 pub mod python;
 mod unpack;
+mod values;
 
 #[cfg(unix)]
 pub mod embed;
@@ -67,7 +65,7 @@ pub use cell::Cell;
 pub use class::{Namespace, super_};
 pub use coroutine::{Coroutine, aiter, anext, await_, delegate, yield_, yield_from};
 pub use function::{Body, Function, FunctionDef, Signature};
-pub use generator::{Generator, next};
+pub use generator::{GenExpr, next};
 pub use import::{import, import_from, import_module, import_names};
 pub use importer::{
     ExecModule, NativeImporter, NativeLoader, NativeModule, init_extension, install_importer,
@@ -82,64 +80,15 @@ pub use ops::{
 };
 pub use python::module_annotate;
 pub use unpack::{unpack, unpack_star};
+pub use values::{
+    ascii, bigint, bool, bytes, complex, float, format, fstring, int, none, slice, slice_step, str,
+    str_surrogatepass,
+};
+
+pub(crate) use names::interned;
 
 /// Re-exported so that macros can name PyO3 items through `$crate`.
 pub use pyo3;
-
-/// Builds a Python `int` from a Rust integer literal.
-pub fn int<'py, T>(py: Python<'py>, value: T) -> Bound<'py, PyAny>
-where
-    T: IntoPyObject<
-            'py,
-            Target = PyInt,
-            Output = Bound<'py, PyInt>,
-            Error = std::convert::Infallible,
-        >,
-{
-    let Ok(obj) = value.into_pyobject(py);
-    obj.into_any()
-}
-
-/// Builds a Python `int` that does not fit in `i128`, from its decimal digits.
-pub fn bigint<'py>(py: Python<'py>, digits: &str) -> PyResult<Bound<'py, PyAny>> {
-    py.get_type::<PyInt>().call1((digits,))
-}
-
-/// Builds a Python `float`.
-pub fn float(py: Python<'_>, value: f64) -> Bound<'_, PyAny> {
-    PyFloat::new(py, value).into_any()
-}
-
-/// Builds a Python `complex`, for an imaginary literal like `2j`.
-pub fn complex(py: Python<'_>, real: f64, imag: f64) -> Bound<'_, PyAny> {
-    PyComplex::from_doubles(py, real, imag).into_any()
-}
-
-/// Builds a Python `str`.
-pub fn str<'py>(py: Python<'py>, value: &str) -> Bound<'py, PyAny> {
-    PyString::new(py, value).into_any()
-}
-
-/// Builds a Python `str` containing lone surrogates, which a Rust `&str` can
-/// not hold. `encoded` is the UTF-8 encoding produced with `surrogatepass`.
-pub fn str_surrogatepass<'py>(py: Python<'py>, encoded: &[u8]) -> PyResult<Bound<'py, PyAny>> {
-    PyBytes::new(py, encoded).call_method1("decode", ("utf-8", "surrogatepass"))
-}
-
-/// Builds a Python `bytes`.
-pub fn bytes<'py>(py: Python<'py>, value: &[u8]) -> Bound<'py, PyAny> {
-    PyBytes::new(py, value).into_any()
-}
-
-/// Returns `True` or `False`.
-pub fn bool(py: Python<'_>, value: bool) -> Bound<'_, PyAny> {
-    PyBool::new(py, value).to_owned().into_any()
-}
-
-/// Returns `None`.
-pub fn none(py: Python<'_>) -> Bound<'_, PyAny> {
-    py.None().into_bound(py)
-}
 
 /// Reads a builtin such as `len`, raising `NameError` if it does not exist.
 ///
@@ -152,111 +101,6 @@ pub fn builtin<'py>(py: Python<'py>, name: &'static str) -> PyResult<Bound<'py, 
         None => Err(raised(PyNameError::new_err(format!(
             "name '{name}' is not defined"
         )))),
-    }
-}
-
-/// The interned Python string for a name spelled in generated code.
-///
-/// Looking a global or an attribute up by `&str` would create (and hash) a
-/// new Python string every time, which costs several times the dictionary
-/// lookup itself (measured: 44 ns per global read, 18 ns with a cache), and
-/// CPython's attribute caches only work with interned names. Names are
-/// `'static`, so their address and length identify them.
-///
-/// Like the strings of `pyo3::intern!`, they are never freed. Most names are
-/// found in a table indexed by their address, read without a lock, which is
-/// only correct with the GIL (see the check for free-threaded builds above).
-/// A name whose entries are all taken by other names goes to a map behind a
-/// lock.
-pub(crate) fn interned<'py>(
-    py: Python<'py>,
-    name: &'static str,
-) -> Borrowed<'static, 'py, PyString> {
-    let first = name_slot(name);
-    for probe in 0..NAME_PROBES {
-        let slot = &NAME_TABLE[(first + probe) % NAME_SLOTS];
-        let mut address = slot.name.load(Ordering::Acquire);
-        if address.is_null() {
-            let string = PyString::intern(py, name);
-            // Creating the string may have run other Python code, which may
-            // have filled the slot. Otherwise no other thread runs until the
-            // slot is written: attached threads take turns.
-            address = slot.name.load(Ordering::Acquire);
-            if address.is_null() {
-                slot.len.store(name.len(), Ordering::Relaxed);
-                slot.string.store(string.into_ptr(), Ordering::Relaxed);
-                slot.name.store(name.as_ptr().cast_mut(), Ordering::Release);
-                address = name.as_ptr().cast_mut();
-            }
-        }
-        if address.cast_const() == name.as_ptr() && slot.len.load(Ordering::Relaxed) == name.len() {
-            let string = slot.string.load(Ordering::Relaxed);
-            // SAFETY: the slot owns a reference to this string, never released.
-            return unsafe { Borrowed::from_ptr(py, string).cast_unchecked() };
-        }
-    }
-    interned_slow(py, name)
-}
-
-/// One name in the table of [`interned`]: written once, `name` last.
-struct NameSlot {
-    name: AtomicPtr<u8>,
-    len: AtomicUsize,
-    string: AtomicPtr<ffi::PyObject>,
-}
-
-const NAME_SLOTS: usize = 4096;
-const NAME_PROBES: usize = 4;
-
-static NAME_TABLE: [NameSlot; NAME_SLOTS] = [const {
-    NameSlot {
-        name: AtomicPtr::new(std::ptr::null_mut()),
-        len: AtomicUsize::new(0),
-        string: AtomicPtr::new(std::ptr::null_mut()),
-    }
-}; NAME_SLOTS];
-
-fn name_slot(name: &'static str) -> usize {
-    let address = (name.as_ptr() as usize ^ name.len().rotate_left(48)) as u64;
-    (address.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize % NAME_SLOTS
-}
-
-fn interned_slow<'py>(py: Python<'py>, name: &'static str) -> Borrowed<'static, 'py, PyString> {
-    type Names = HashMap<(usize, usize), &'static Py<PyString>, BuildHasherDefault<AddressHasher>>;
-    static NAMES: Mutex<Names> = Mutex::new(HashMap::with_hasher(BuildHasherDefault::new()));
-    let names = || {
-        NAMES
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    };
-    let key = (name.as_ptr() as usize, name.len());
-    if let Some(string) = names().get(&key).copied() {
-        return string.bind_borrowed(py);
-    }
-    // Created outside the lock: it may run Python code that looks up names
-    // too. Another thread may have added the name meanwhile; then this
-    // string is just dropped, it is the same interned string anyway.
-    let string = PyString::intern(py, name).unbind();
-    let mut names = names();
-    let string = match names.get(&key) {
-        Some(&existing) => existing,
-        None => *names.entry(key).or_insert(Box::leak(Box::new(string))),
-    };
-    string.bind_borrowed(py)
-}
-
-#[derive(Default)]
-struct AddressHasher(u64);
-
-impl Hasher for AddressHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, _: &[u8]) {
-        unreachable!("only addresses are hashed")
-    }
-    fn write_usize(&mut self, n: usize) {
-        self.0 = self.0.rotate_left(5) ^ n as u64;
     }
 }
 
@@ -333,80 +177,6 @@ fn unbound_local(name: &str) -> PyErr {
     raised(err)
 }
 
-/// `start:stop` in a subscript: a `slice` object whose step is `None`.
-///
-/// `PySlice::new` only takes integers, but Python slices hold any object and
-/// keep omitted parts as `None`, which `__getitem__` implementations can see.
-pub fn slice<'py>(
-    py: Python<'py>,
-    start: impl IntoPyObject<'py>,
-    stop: impl IntoPyObject<'py>,
-) -> PyResult<Bound<'py, PySlice>> {
-    slice_step(py, start, stop, py.None())
-}
-
-/// `start:stop:step` in a subscript.
-pub fn slice_step<'py>(
-    py: Python<'py>,
-    start: impl IntoPyObject<'py>,
-    stop: impl IntoPyObject<'py>,
-    step: impl IntoPyObject<'py>,
-) -> PyResult<Bound<'py, PySlice>> {
-    let start = start.into_bound_py_any(py)?;
-    let stop = stop.into_bound_py_any(py)?;
-    let step = step.into_bound_py_any(py)?;
-    // SAFETY: valid object pointers; `PySlice_New` returns a new reference.
-    unsafe {
-        Bound::from_owned_ptr_or_err(
-            py,
-            ffi::PySlice_New(start.as_ptr(), stop.as_ptr(), step.as_ptr()),
-        )
-        .map(|slice| slice.cast_into_unchecked())
-    }
-}
-
-/// `format(value, spec)`, which an f-string replacement field `{value:spec}`
-/// calls. A field without a spec, `{value}`, passes `""`.
-pub fn format<'py>(
-    value: &Bound<'py, PyAny>,
-    spec: impl IntoPyObject<'py>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let py = value.py();
-    let spec = spec.into_bound_py_any(py)?;
-    if value.is_exact_instance_of::<PyString>() && spec.is_empty()? {
-        // `FORMAT_SIMPLE` returns exact strings unchanged.
-        return Ok(value.clone());
-    }
-    // SAFETY: valid object pointers; the result is a new reference or NULL.
-    unsafe { Bound::from_owned_ptr_or_err(py, ffi::PyObject_Format(value.as_ptr(), spec.as_ptr())) }
-}
-
-/// `ascii(value)`, the `!a` conversion of an f-string.
-pub fn ascii<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyString>> {
-    // SAFETY: valid object pointer; the result is a new `str` reference or NULL.
-    unsafe {
-        Bound::from_owned_ptr_or_err(value.py(), ffi::PyObject_ASCII(value.as_ptr()))
-            .map(|s| s.cast_into_unchecked())
-    }
-}
-
-/// Concatenates the pieces of an f-string, like `"".join(pieces)`.
-///
-/// ```ignore
-/// rt::fstring(py, ("x = ", rt::format(&x, ".2f")?, "!"))?
-/// ```
-pub fn fstring<'py>(
-    py: Python<'py>,
-    pieces: impl IntoPyObject<'py, Target = PyTuple>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let pieces = pieces.into_bound_py_any(py)?;
-    let empty = PyString::new(py, "");
-    // SAFETY: valid object pointers; the result is a new reference or NULL.
-    unsafe {
-        Bound::from_owned_ptr_or_err(py, ffi::PyUnicode_Join(empty.as_ptr(), pieces.as_ptr()))
-    }
-}
-
 /// Guards against unbounded recursion in functions that call each other
 /// directly, turning a would-be stack overflow into `RecursionError`.
 ///
@@ -439,309 +209,4 @@ impl Drop for RecursionGuard<'_> {
         // SAFETY: paired with the successful `Py_EnterRecursiveCall` above.
         unsafe { pyo3::ffi::Py_LeaveRecursiveCall() }
     }
-}
-
-/// Creates a Python function object backed by a Rust function, like
-/// evaluating a `def` statement (without binding the name) or a `lambda`.
-///
-/// The first argument is where the function is defined: the module (also in
-/// function bodies), or the namespace `ns` of a class body. A function
-/// defined in a class body is a method: its `__qualname__` is
-/// `<class qualname>.<name>` and its annotations see the class namespace.
-///
-/// The parameter list is written like the Python one, using the Rust names of
-/// the parameters. Defaults are evaluated right away, in order, and stored in
-/// `__defaults__` / `__kwdefaults__`; annotations are kept as Python source and
-/// evaluated lazily (PEP 649). A Rust name that is not the Python one gets it
-/// with `as`, for the function as for its parameters (`r#` is stripped
-/// without that).
-///
-/// The Rust function takes the module, the captured variables and then one
-/// argument per parameter, all as `&Bound` (`*args` and `**kwargs` as
-/// `&Bound<PyTuple>` and `&Bound<PyDict>`, captured cells as `&rt::Cell`).
-///
-/// ```ignore
-/// rt::function!(m, greet(name, greeting = "Hello"))?;      // fn greet(m, name, greeting)
-/// rt::function!(m, wrap(f, /, *args, **kwargs))?;          // fn wrap(m, f, args, kwargs)
-/// rt::function!(m, area(r: "float") -> "float")?;          // annotations
-/// rt::function!(ns, label_ as "label"(slf as "self"))?;    // Python names differ
-/// // A nested function capturing `n` by value and the shared cell `count`:
-/// rt::function!(m, add[n, &count](x), qualname = "make.<locals>.add")?;
-/// ```
-///
-/// Decorators come before the name, as in Python. `@name` and
-/// `@name.attr.attr` read the name the way code where the function is defined
-/// does (a global, or a name in the class body); any other expression is
-/// written `@(expr)`. The decorator expressions are evaluated first, top to
-/// bottom, then the function is created, then the decorators are applied
-/// bottom-up, and the result is the decorated value:
-///
-/// ```ignore
-/// rt::function!(ns, @property length(slf as "self"))?;
-/// rt::function!(m, @(m.global("functools")?.method1("wraps", (f,))?) wrapper(*args))?;
-/// ```
-///
-/// Options: `qualname = ".."` (defaults to the name, or `<class>.<name>`
-/// for a method), `name = ".."` (like `as`) and `doc = ".."`.
-#[macro_export]
-macro_rules! function {
-    // --- decorators, collected in order: `{name a b}` for `@a.b`,
-    // `{expr e}` for `@(e)` ---
-    (@decorators $h:tt [$($d:tt)*] @ ($e:expr) $($rest:tt)*) => {
-        $crate::function!(@decorators $h [$($d)* {expr $e}] $($rest)*)
-    };
-    (@decorators $h:tt [$($d:tt)*] @ $first:ident $($rest:tt)*) => {
-        $crate::function!(@dotted $h [$($d)*] [$first] $($rest)*)
-    };
-    (@dotted $h:tt [$($d:tt)*] [$($p:ident)*] . $attr:ident $($rest:tt)*) => {
-        $crate::function!(@dotted $h [$($d)*] [$($p)* $attr] $($rest)*)
-    };
-    (@dotted $h:tt [$($d:tt)*] [$($p:ident)*] $($rest:tt)*) => {
-        $crate::function!(@decorators $h [$($d)* {name $($p)*}] $($rest)*)
-    };
-    // --- what kind of function: `async def`, a generator, or plain ---
-    (@decorators $h:tt [$($d:tt)*] async $($rest:tt)*) => {
-        $crate::function!(@signature $h [$($d)*] coroutine $($rest)*)
-    };
-    (@decorators $h:tt [$($d:tt)*] gen $($rest:tt)*) => {
-        $crate::function!(@signature $h [$($d)*] generator $($rest)*)
-    };
-    (@decorators $h:tt [$($d:tt)*] $($rest:tt)*) => {
-        $crate::function!(@signature $h [$($d)*] function $($rest)*)
-    };
-    (@signature ($mode:ident, $definer:expr) [$($d:tt)*] $kind:ident
-        $f:ident $(as $n:literal)? $([$($caps:tt)*])? ($($params:tt)*) $(-> $ret:literal)?
-        $(, $key:ident = $value:literal)* $(,)?) => {{
-        let definer = $definer;
-        $crate::function!(@$mode definer
-            ($kind, $f, [$($n)?], [$($($caps)*)?], [$($params)*], [$($ret)?], [$($key = $value),*])
-            $($d)*)
-    }};
-    (@value $definer:ident $sig:tt $($d:tt)*) => {
-        $crate::function!(@decorate $definer $sig $($d)*)
-    };
-    (@bind $definer:ident ($kind:ident, $f:ident, $n:tt, $caps:tt, $params:tt, $ret:tt, $opts:tt) $($d:tt)*) => {
-        $crate::function::Definer::bind(
-            $definer,
-            $crate::function::def_name(
-                $crate::function!(@pyname $n $opts),
-                $crate::function!(@opt qualname $opts),
-                stringify!($f),
-            ),
-            $crate::function!(@decorate $definer ($kind, $f, $n, $caps, $params, $ret, $opts) $($d)*)?,
-        )
-    };
-    // Evaluates the first decorator, then (recursively) the others and the
-    // function, and applies the first decorator last.
-    (@decorate $definer:ident $sig:tt {$($d:tt)*} $($rest:tt)*) => {{
-        use $crate::pyo3::types::PyAnyMethods as _;
-        let decorator = $crate::function!(@decorator $definer $($d)*);
-        let function = $crate::function!(@decorate $definer $sig $($rest)*)?;
-        decorator.call1((function,))
-    }};
-    (@decorate $definer:ident ($kind:ident, $f:ident, $n:tt, [$($caps:tt)*], [$($params:tt)*], $ret:tt, $opts:tt)) => {
-        $crate::function!(@caps ($definer, $kind, $f, $n, [$($params)*], $ret, $opts) [] $($caps)*)
-    };
-    (@decorator $definer:ident expr $e:expr) => { $e };
-    (@decorator $definer:ident name $first:ident $($attr:ident)*) => {{
-        use $crate::Attributes as _;
-        $crate::function::Definer::lookup($definer, stringify!($first))? $(.attr(stringify!($attr))?)*
-    }};
-    // --- captures: `n` by value, `&count` as a shared cell ---
-    (@caps $h:tt [$($c:tt)*] & $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
-        $crate::function!(@caps $h [$($c)* {cell $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
-    };
-    (@caps $h:tt [$($c:tt)*] $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
-        $crate::function!(@caps $h [$($c)* {value $id, $crate::function!(@name $id $($n)?)}] $($($rest)*)?)
-    };
-    (@caps ($module:expr, $kind:ident, $f:ident, $fname:tt, [$($params:tt)*], $ret:tt, $opts:tt) [$($c:tt)*]) => {
-        $crate::function!(@params ($module, $kind, $f, $fname, [$($c)*], $ret, $opts) [] [] [] [] [] pos $($params)*)
-    };
-    // --- parameters, sorted into positional-only, positional, `*args`,
-    // keyword-only and `**kwargs` ---
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] $mode:ident / $(, $($rest:tt)*)?) => {
-        $crate::function!(@params $h [$($p)*] [] [$($v)*] [$($k)*] [$($vk)*] $mode $($($rest)*)?)
-    };
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [] $mode:ident
-        * * $id:ident $(as $n:literal)? $(: $ann:literal)? $(, $($rest:tt)*)?) => {
-        $crate::function!(@params $h [$($po)*] [$($p)*] [$($v)*] [$($k)*]
-            [{$id, $crate::function!(@name $id $($n)?), [], [$($ann)?]}] $mode $($($rest)*)?)
-    };
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [] [$($k:tt)*] [$($vk:tt)*] pos
-        * $id:ident $(as $n:literal)? $(: $ann:literal)? $(, $($rest:tt)*)?) => {
-        $crate::function!(@params $h [$($po)*] [$($p)*]
-            [{$id, $crate::function!(@name $id $($n)?), [], [$($ann)?]}] [$($k)*] [$($vk)*] kw $($($rest)*)?)
-    };
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [] [$($k:tt)*] [$($vk:tt)*] pos * $(, $($rest:tt)*)?) => {
-        $crate::function!(@params $h [$($po)*] [$($p)*] [] [$($k)*] [$($vk)*] kw $($($rest)*)?)
-    };
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] pos
-        $id:ident $(as $n:literal)? $(: $ann:literal)? $(= $default:expr)? $(, $($rest:tt)*)?) => {
-        $crate::function!(@params $h [$($po)*]
-            [$($p)* {$id, $crate::function!(@name $id $($n)?), [$($default)?], [$($ann)?]}]
-            [$($v)*] [$($k)*] [$($vk)*] pos $($($rest)*)?)
-    };
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] kw
-        $id:ident $(as $n:literal)? $(: $ann:literal)? $(= $default:expr)? $(, $($rest:tt)*)?) => {
-        $crate::function!(@params $h [$($po)*] [$($p)*] [$($v)*]
-            [$($k)* {$id, $crate::function!(@name $id $($n)?), [$($default)?], [$($ann)?]}]
-            [$($vk)*] kw $($($rest)*)?)
-    };
-    (@params $h:tt [$($po:tt)*] [$($p:tt)*] [$($v:tt)*] [$($k:tt)*] [$($vk:tt)*] $mode:ident) => {
-        $crate::function!(@build $h [$($po)*] [$($p)*] [$($v)*] [$($k)*] [$($vk)*])
-    };
-    // --- the function object ---
-    (@build ($module:expr, $kind:ident, $f:ident, $fname:tt, [$({$ck:ident $c:ident, $cn:expr})*], [$($ret:literal)?], [$($key:ident = $value:literal),*])
-        [$({$po:ident, $pon:expr, [$($pod:expr)?], [$($poa:literal)?]})*]
-        [$({$p:ident, $pn:expr, [$($pd:expr)?], [$($pa:literal)?]})*]
-        [$({$v:ident, $vn:expr, [], [$($va:literal)?]})?]
-        [$({$k:ident, $kn:expr, [$($kd:expr)?], [$($ka:literal)?]})*]
-        [$({$vk:ident, $vkn:expr, [], [$($vka:literal)?]})?]
-    ) => {{
-        static SIGNATURE: $crate::Signature = $crate::Signature {
-            names: &[$($pon,)* $($pn,)* $($vn,)? $($kn,)* $($vkn,)?],
-            posonly: <[&str]>::len(&[$($pon),*]),
-            positional: <[&str]>::len(&[$($pon,)* $($pn),*]),
-            varargs: <[&str]>::len(&[$($vn)?]) == 1,
-            kwonly: <[&str]>::len(&[$($kn),*]),
-            varkw: <[&str]>::len(&[$($vkn)?]) == 1,
-        };
-        static ANNOTATIONS: &[(&str, &str)] = &[
-            $($(($pon, $poa),)?)* $($(($pn, $pa),)?)* $($(($vn, $va),)?)?
-            $($(($kn, $ka),)?)* $($(($vkn, $vka),)?)? $(("return", $ret),)?
-        ];
-        let definer = $module;
-        let module: &$crate::Module<'_> = $crate::function::Definer::module(definer);
-        let py = module.py();
-        let defaults = ::std::vec![
-            $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pod, py)?,)?)*
-            $($($crate::pyo3::IntoPyObjectExt::into_bound_py_any($pd, py)?,)?)*
-        ];
-        let kwdefaults = ::std::vec![
-            $($(($kn, $crate::pyo3::IntoPyObjectExt::into_bound_py_any($kd, py)?),)?)*
-        ];
-        let closure = ::std::vec![$($crate::function!(@capture $ck $c),)*];
-        static CLOSURE_NAMES: &[&str] = &[$($cn),*];
-        let body = $crate::function!(@body $kind, $f, [$({$ck $c, $cn})*],
-            [$($po)* $($p)*], [$($v)?], [$($k)*], [$($vk)?]);
-        $crate::Function::create(module, $crate::FunctionDef {
-            name: $crate::function!(@pyname $fname [$($key = $value),*]),
-            qualname: $crate::function!(@opt qualname [$($key = $value),*]),
-            rust_name: stringify!($f),
-            doc: $crate::function!(@opt doc [$($key = $value),*]),
-            signature: &SIGNATURE,
-            defaults,
-            kwdefaults,
-            closure,
-            closure_names: CLOSURE_NAMES,
-            annotations: ANNOTATIONS,
-            classdict: $crate::function::Definer::classdict(definer),
-            class_qualname: $crate::function::Definer::class_qualname(definer),
-            body,
-        })
-    }};
-    // --- the body: a closure that hands the bound arguments to the Rust fn ---
-    (@body function, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*],
-        [$($p:ident)*], [$($v:ident)?], [$($k:ident)*], [$($vk:ident)?]) => {
-        $crate::function::Kind::Function(|module, closure, args| {
-            // Named before the parameters, which may shadow the function.
-            let target = $f;
-            let [$($c),*] = closure else {
-                unreachable!("the closure has one cell per captured variable")
-            };
-            $($crate::function!(@captured $ck $c, $cn);)*
-            let [$($p,)* $($v,)? $($k,)* $($vk,)?] = args else {
-                unreachable!("`Function` binds one value per parameter")
-            };
-            $(let $v = $crate::function::as_tuple($v);)?
-            $(let $vk = $crate::function::as_dict($vk);)?
-            $crate::function!(@call target(module; $($c),*; $($p,)* $($v,)? $($k,)* $($vk,)?))
-        })
-    };
-    // A coroutine or generator: the Rust fn is an `async fn`. At the call,
-    // `capture` reads the captured variables; the coroutine object keeps
-    // them with the module and the arguments (`rt::coroutine::Locals`), and
-    // `start` returns a future that keeps an `Rc` of them and awaits the fn
-    // with references into it.
-    (@body $kind:ident, $f:ident, [$({$ck:ident $c:ident, $cn:expr})*],
-        [$($p:ident)*], [$($v:ident)?], [$($k:ident)*], [$($vk:ident)?]) => {
-        $crate::function!(@kind $kind)($crate::coroutine::AsyncBody {
-            capture: |closure| {
-                let [$($c),*] = closure else {
-                    unreachable!("the closure has one cell per captured variable")
-                };
-                ::std::result::Result::Ok(::std::vec![$($crate::function!(@capture_async $ck $c, $cn)),*])
-            },
-            start: |locals| {
-                let target = $f;
-                ::std::boxed::Box::pin(async move {
-                    let [$($c),*] = &locals.closure[..] else {
-                        unreachable!("one value per captured variable")
-                    };
-                    $(let $c = $crate::function!(@captured_ref $ck $c);)*
-                    let [$($p,)* $($v,)? $($k,)* $($vk,)?] = &locals.args[..] else {
-                        unreachable!("`Function` binds one value per parameter")
-                    };
-                    $(let $v = $crate::function::as_tuple($v);)?
-                    $(let $vk = $crate::function::as_dict($vk);)?
-                    target(&locals.module, $($c,)* $($p,)* $($v,)? $($k,)* $($vk,)?).await
-                })
-            },
-        })
-    };
-    (@kind coroutine) => { $crate::function::Kind::Coroutine };
-    (@kind generator) => { $crate::function::Kind::Generator };
-    (@capture_async value $c:ident, $cn:expr) => {
-        $crate::coroutine::Captured::Value($crate::function::cell_contents($c, $cn)?)
-    };
-    (@capture_async cell $c:ident, $cn:expr) => {
-        $crate::coroutine::Captured::Cell($crate::Cell::free($c, $cn))
-    };
-    (@captured_ref value $c:ident) => { $c.value() };
-    (@captured_ref cell $c:ident) => { $c.cell() };
-    (@name $id:ident) => { stringify!($id) };
-    (@name $id:ident $n:literal) => { $n };
-    (@capture value $c:ident) => { $crate::function::capture(&$c)? };
-    (@capture cell $c:ident) => { $crate::Cell::object(&$c) };
-    (@captured value $c:ident, $cn:expr) => {
-        let $c = $crate::function::cell_contents($c, $cn)?;
-    };
-    (@captured cell $c:ident, $cn:expr) => {
-        let $c = $crate::Cell::free($c, $cn);
-    };
-    // `module` is passed in as a token so that it keeps the hygiene context
-    // of the closure parameter above.
-    (@call $f:ident($module:ident; $($c:ident),*; $($p:ident,)*)) => {
-        $f($module, $(&$c,)* $($p),*)
-    };
-    (@opt name [name = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
-    (@opt qualname [qualname = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
-    (@opt doc [doc = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
-    (@opt $want:ident [$key:ident = $value:literal $(, $($rest:tt)*)?]) => {
-        $crate::function!(@opt $want [$($($rest)*)?])
-    };
-    (@opt $want:ident []) => { ::std::option::Option::None };
-    (@pyname [$n:literal] $opts:tt) => { ::std::option::Option::Some($n) };
-    (@pyname [] $opts:tt) => { $crate::function!(@opt name $opts) };
-    // --- entry point ---
-    ($definer:expr, $($rest:tt)*) => {
-        $crate::function!(@decorators (value, $definer) [] $($rest)*)
-    };
-}
-
-/// Executes a `def` statement: creates the function like [`function!`],
-/// applies its decorators and binds the result to the function's name, in
-/// the module's globals or in the namespace of a class body.
-///
-/// ```ignore
-/// rt::def!(m, fib(n))?;
-/// rt::def!(m, @(trace(m, &rt::str(py, "outer"))?) greet(name), doc = "Say hello.")?;
-/// rt::def!(ns, __init__(slf as "self", x, y = 0))?;          // `Point.__init__`
-/// rt::def!(ns, @label.setter label_ as "label"(slf as "self", value))?;
-/// ```
-#[macro_export]
-macro_rules! def {
-    ($definer:expr, $($rest:tt)*) => {
-        $crate::function!(@decorators (bind, $definer) [] $($rest)*)
-    };
 }

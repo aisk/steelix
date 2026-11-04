@@ -101,8 +101,10 @@ steelix/
 │   ├── rustast/               Rust AST 定义、清理、检查、打印、rustfmt
 │   └── emit/                  生成完整 crate
 ├── crates/
-│   └── steelix-runtime/       生成代码依赖的运行时（`rt::`）：function.rs（Function、rt::def!）、
-│                              frame.rs（帧和异常）、class.rs、coroutine.rs（协程和生成器）、
+│   └── steelix-runtime/       生成代码依赖的运行时（`rt::`）：function.rs（Function）、
+│                              macros.rs（rt::function!、rt::def!）、values.rs（字面量、slice、
+│                              f-string）、names.rs（驻留的名字）、frame.rs（帧和异常）、class.rs、
+│                              coroutine/（协程和生成器：state、channel、awaits、objects、finalize）、
 │                              generator.rs（生成器表达式）、matching.rs（match）、
 │                              python.rs（混合模式）、importer.rs、embed.rs（bin 模式）、
 │                              multiprocessing.rs 等
@@ -692,7 +694,7 @@ rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
 
 - 捕获的变量和嵌套函数一样写在 `genexpr[n, &count](..)` 里（第 6 节），step 的参数是 `&Bound` 或 `&rt::Cell`。迭代器参数按第一个可迭代对象命名（`xs`、`words`），不是名字或属性时叫 `iter`
 - step 在自己的帧里运行，traceback 里有 `<genexpr>` 帧，qualname 是 `f.<locals>.<genexpr>`、`C.<genexpr>` 或 `<genexpr>`，和 CPython 一样；迭代出错报第一个可迭代对象的行
-- 生成器对象（`rt::Generator`，`#[pyclass]`）实现了调用方能看出来的行为：迭代、`send`（未开始时只能 `send(None)`）、`throw`（包括三参数形式的 `DeprecationWarning`）、`close`、`gi_running`、`gi_suspended`，重入时抛 `ValueError: generator already executing`，step 里抛出的 `StopIteration` 换成 `RuntimeError: generator raised StopIteration`（PEP 479，`__cause__` 是原来的异常），`__name__`、`__qualname__` 可写，`repr` 是 `<generator object f.<locals>.<genexpr> at 0x..>`。它支持弱引用，参与循环垃圾回收（`__traverse__`/`__clear__`）。耗尽、出错或关闭之后释放迭代器，所以 `break` 之后 `close()` 或者 `del` 会让底层的 generator 立刻收到 `close()`
+- 生成器对象（`rt::GenExpr`，`#[pyclass]`）实现了调用方能看出来的行为：迭代、`send`（未开始时只能 `send(None)`）、`throw`（包括三参数形式的 `DeprecationWarning`）、`close`、`gi_running`、`gi_suspended`，重入时抛 `ValueError: generator already executing`，step 里抛出的 `StopIteration` 换成 `RuntimeError: generator raised StopIteration`（PEP 479，`__cause__` 是原来的异常），`__name__`、`__qualname__` 可写，`repr` 是 `<generator object f.<locals>.<genexpr> at 0x..>`。它支持弱引用，参与循环垃圾回收（`__traverse__`/`__clear__`）。耗尽、出错或关闭之后释放迭代器，所以 `break` 之后 `close()` 或者 `del` 会让底层的 generator 立刻收到 `close()`
 - 状态放在 `Mutex` 里，锁只在取出、放回迭代器时短暂持有，执行 Python 代码（step、迭代器的析构）时从不持有
 - 只有一个 `for` 的生成器表达式是原生的。多个 `for` 的需要在两次调用之间保存外层循环的元素和内层迭代器（一个小状态机），标准库里只有 3 个，保留为 Python。生成器表达式的变量被它里面的 lambda 或生成器表达式捕获时（cell 要和生成器一样长寿）也保留为 Python
 - 常见的消费者（`sum`、`any`、`all`、`"".join`、`sorted`、`list`、`tuple`、`dict`、`max`/`min` 的 `key`、`next`、`itertools.islice`）不做特化，照常调用 builtin。`list(x for x in xs)` 改写成推导式之类的特化在语义上不等价：少了 `<genexpr>` 帧和 PEP 479 的转换，名字也可能被重新绑定（见下）
@@ -723,6 +725,7 @@ for x in xs.try_iter()? {
 - 每层循环一个 `Box<dyn FnMut>` 闭包：生命周期和 `Send` 的约束带来很多噪音，可读性差
 - 把生成器对象做成 `unsendable` 的 pyclass：在别的线程上使用会 panic，而 CPython 的生成器可以跨线程传递；用 `Mutex` 就够了
 - `list(genexp)`、`"".join(genexp)` 等特化成推导式或直接循环：见上，语义不完全一样，收益只是少创建一个对象
+- 改用生成器函数的机制（`rt::def!(.., gen ..)`、`rt::yield_`，M14 之后的 review 测过）：生成的代码和生成器函数一样，多个 `for` 也不用保留为 Python，但每个元素慢很多。`sum(x * 2 for x in xs)`（release，LTO）用 step 约 35 ns/元素，同样的函数体写成原生生成器约 63 ns（CPython 约 22 ns）。多出来的是每次恢复的固定成本，分散在状态的取出和放回、通道和 waker、C 栈检查、正在处理的异常的保存和恢复、几层 async 状态机里，去掉 C 栈检查、异常状态和状态的 `Mutex` 也只到约 59 ns，所以目前保留 step
 
 ### generator 函数（M8 调研，M13 改了结论）
 
@@ -829,7 +832,7 @@ lowering（`lower/expr.py` 的 `suspension`、`lower/handling.py`、`lower/stmt.
 - **GC 看得到的东西**：future 对 GC 是不透明的，它自己持有的引用 GC 看不见，被这样引用的对象一定活着，经过它的循环永远不会被回收。所以函数体暂停时 runtime 需要的对象都放在协程对象里，由 `__traverse__` 访问：模块的 globals、捕获的变量和参数（`Locals`，future 只借用）、函数体正在处理的异常、`rt::await_` 和 `rt::yield_from` 委托的迭代器、函数体的 traceback 帧对象（后两个在 `Held` 里，runtime 的 future 只拿一个 key，只在这个协程自己的 poll 里取用；`Frame` 也改成借用 globals，不再 clone）。协程对象有 `tp_clear`（PyO3 的 `__clear__`），先 drop future，再 drop 其余的。测试覆盖了模块的 globals 里从没开始的生成器、暂停的生成器和协程，以及处理过异常后暂停的协程在退出时的终结，方法生成器经过 `self` 的循环，以及 `self.task = create_task(self.run())` 这样的循环（任务等着一个只有 `self` 引用的 `asyncio.Event`），结果和 CPython 一样。函数体自己的代码跨过暂停持有的东西仍然看不见（§12）。其中语句的临时值是 lowering 要注意的：Rust 的临时值活到语句结束，也就是跨过这条语句里的 `.await`，`rt::await_(m.global("helper")?.call1((x,))?).await?` 里的函数对象 `helper` 就这样被 future 持有，经过它的 `__globals__` 又回到模块。CPython 在暂停前已经用完了它们。所以 lowering 在被 await 的表达式会留下临时值时先用 `let` 绑定可等待对象（`let helper = ..; rt::await_(helper).await?`，`rt::await_` 按值接收后自己保留），`rt::yield_` 的值和 `rt::yield_from` 的对象同理（上面的规则）。同一条语句里先于 `await` 求值的别的操作数（`f(a) + await g()` 里 `f(a)` 的结果，相当于 CPython 值栈上的东西）和直接 await 的实参仍然跨过暂停，和局部变量一样 GC 看不见（§12）
 - **改写时**（§15）：生成器函数通常会改写成 Rust 的 `Iterator`，适配层把它包成 Python 的迭代器即可，不需要这里的机制。改写过的协程如果 await 了 Rust 生态的 future（例如 tokio 的），那个 future 返回 `Pending` 之后不会被唤醒（waker 什么都不做），runtime 会报 `RuntimeError: coroutine '..' awaited a Rust future that is not driven by Python`。需要的话可以加一个桥接的 helper，用 asyncio 的 future 当 waker：Rust future 返回 `Pending` 时交出一个 asyncio future，waker 被调用时（可能在别的线程）用 `call_soon_threadsafe` 完成它。只有手工改写的代码需要，生成的代码不会用到
 
-**生命周期和 unsafe。** future 存在 Python 对象里，必须是 `'static`，而生成的代码用的是 `Bound<'py, ..>`。runtime 在创建协程时用 `Python::assume_attached()` 得到 `Python<'static>`，把模块、闭包和参数重新绑定到这个 token，再调用存下来的 `for<'py> fn(..)`（`AsyncBody` 的 `capture` 和 `start`），也就是用 `'py = 'static` 实例化函数体。这是唯一的一处，理由是：future 只在 `send`/`throw`/`close` 和终结器里 poll，只在这些地方、对象释放或被 GC 清理时 drop，都是 attach 的线程，free-threaded 的构建本来就编译不过（§6），所以 attach 就是持有 GIL；函数体对所有 `'py` 都成立，不能把这个 token 或对象存到 future 以外的地方，对象离开 future 时是 `Py<PyAny>`（交出的值）或重新绑定到调用方的 token（结果）。其余的 unsafe 也都集中在 `coroutine.rs`，各有 SAFETY 注释：future 的 `Send`（它和 `Locals` 的两个 `Rc` 一起在对象的 `Mutex` 后面，poll 时取出，只在 attach 的线程上使用，和 CPython 一样可以在别的线程上恢复。前提是函数体跨过 `.await` 持有的只有 Python 对象和 `Send` 的值，生成的代码满足，手工改写的代码要遵守，§15）、`Held` 通过当前通道的 owner 找到协程（只在 owner 就是正在 poll 的协程时，它的 `resume` 在栈上）、waker（函数不使用数据指针）、通过 waker 找到通道（先和线程局部的当前通道比较）、`tp_finalize`/`tp_dealloc` 的替换、`PyIter_Send` 和 `PyErr_FormatUnraisable` 的 ffi。
+**生命周期和 unsafe。** future 存在 Python 对象里，必须是 `'static`，而生成的代码用的是 `Bound<'py, ..>`。runtime 在创建协程时用 `Python::assume_attached()` 得到 `Python<'static>`，把模块、闭包和参数重新绑定到这个 token，再调用存下来的 `for<'py> fn(..)`（`AsyncBody` 的 `capture` 和 `start`），也就是用 `'py = 'static` 实例化函数体。这是唯一的一处，理由是：future 只在 `send`/`throw`/`close` 和终结器里 poll，只在这些地方、对象释放或被 GC 清理时 drop，都是 attach 的线程，free-threaded 的构建本来就编译不过（§6），所以 attach 就是持有 GIL；函数体对所有 `'py` 都成立，不能把这个 token 或对象存到 future 以外的地方，对象离开 future 时是 `Py<PyAny>`（交出的值）或重新绑定到调用方的 token（结果）。其余的 unsafe 也都集中在 `coroutine/` 里，各有 SAFETY 注释：future 的 `Send`（它和 `Locals` 的两个 `Rc` 一起在对象的 `Mutex` 后面，poll 时取出，只在 attach 的线程上使用，和 CPython 一样可以在别的线程上恢复。前提是函数体跨过 `.await` 持有的只有 Python 对象和 `Send` 的值，生成的代码满足，手工改写的代码要遵守，§15）、`Held` 通过当前通道的 owner 找到协程（只在 owner 就是正在 poll 的协程时，它的 `resume` 在栈上）、waker（函数不使用数据指针）、通过 waker 找到通道（先和线程局部的当前通道比较）、`tp_finalize`/`tp_dealloc` 的替换、`PyIter_Send` 和 `PyErr_FormatUnraisable` 的 ffi。
 
 否决的方案
 

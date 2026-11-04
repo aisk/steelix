@@ -1,4 +1,4 @@
-//! `Generator`: the Python-visible object of a transpiled generator
+//! `GenExpr`: the Python-visible object of a transpiled generator
 //! expression (design §8).
 //!
 //! A generator expression is a restricted generator: one `for` clause (more
@@ -6,7 +6,7 @@
 //! evaluates the iterable of the `for` clause and calls `iter()` on it when
 //! the expression is evaluated; everything else runs lazily, one item per
 //! `next()`. The generated code mirrors that: the expression creates the
-//! iterator and a `Generator` around it ([`genexpr!`](crate::genexpr)), and
+//! iterator and a `GenExpr` around it ([`genexpr!`](crate::genexpr)), and
 //! the body is a plain Rust fn, the *step*, holding the `for` loop. Each
 //! `next()` calls the step, which goes on iterating where the previous call
 //! left off (the iterator keeps its position) and returns the next value, or
@@ -81,7 +81,7 @@ struct Names {
 /// raised in its body (PEP 479), `__name__`, `__qualname__` and `repr`. It
 /// is not a `types.GeneratorType` (design §12).
 #[pyclass(frozen, weakref, name = "generator")]
-pub struct Generator {
+pub struct GenExpr {
     step: Step,
     globals: Py<PyDict>,
     closure: Option<Py<PyTuple>>,
@@ -91,7 +91,7 @@ pub struct Generator {
     names: Mutex<Names>,
 }
 
-impl Generator {
+impl GenExpr {
     /// Creates the generator of a generator expression whose `for` clause
     /// iterates `iter`. Use it through [`genexpr!`](crate::genexpr).
     #[doc(hidden)]
@@ -107,7 +107,7 @@ impl Generator {
         let closure = (!closure.is_empty())
             .then(|| PyTuple::new(py, closure))
             .transpose()?;
-        let generator = Generator {
+        let generator = GenExpr {
             step,
             globals: module.globals().clone().unbind(),
             closure: closure.map(Bound::unbind),
@@ -117,7 +117,7 @@ impl Generator {
                 qualname: PyString::new(py, qualname).unbind(),
             }),
         };
-        crate::plain_type_name::<Generator>(py, c"generator");
+        crate::plain_type_name::<GenExpr>(py, c"generator");
         Ok(Bound::new(py, generator)?.into_any())
     }
 
@@ -181,7 +181,7 @@ impl Generator {
 }
 
 #[pymethods]
-impl Generator {
+impl GenExpr {
     /// None, like CPython's generator objects, instead of the Rust
     /// documentation above.
     #[classattr]
@@ -437,7 +437,7 @@ pub(crate) fn thrown<'py>(
     Ok(exception)
 }
 
-/// Evaluates a generator expression: creates a [`Generator`] whose `for`
+/// Evaluates a generator expression: creates a [`GenExpr`] whose `for`
 /// clause iterates the given iterator, with the step `f`.
 ///
 /// The step takes the module, the captured variables (like
@@ -474,7 +474,7 @@ macro_rules! genexpr {
             $($crate::function!(@captured $ck $c, $cn);)*
             $crate::genexpr!(@call target(module; $($c),*; iter))
         };
-        $crate::Generator::create(module, $qualname, iter, closure, step)
+        $crate::GenExpr::create(module, $qualname, iter, closure, step)
     }};
     (@call $f:ident($module:ident; $($c:ident),*; $iter:ident)) => {
         $f($module, $(&$c,)* $iter)
