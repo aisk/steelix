@@ -130,6 +130,24 @@ def test_namespace_packages(tmp_path: Path) -> None:
     assert "ns.unused.d" not in project.modules
 
 
+def test_module_names_are_case_sensitive(tmp_path: Path) -> None:
+    """On a case-insensitive file system (macOS, Windows) `pkg/Item.py` and
+    `Pkg/` still do not exist when the files are `pkg/item.py` and `pkg/`:
+    like the path finder, the lookup compares the stored names."""
+    write(
+        tmp_path,
+        {
+            "app.py": "import pkg\nfrom pkg import Item\nimport Pkg.item\nimport Ns.a\n",
+            "pkg/__init__.py": "from .item import Item\n",
+            "pkg/item.py": "class Item: pass\n",
+            "ns/a.py": "",
+        },
+    )
+    project = find_project(tmp_path / "app.py")
+    assert list(project.modules) == ["pkg", "pkg.item"]
+    assert project.namespaces == {}
+
+
 def test_include_modules_and_directories(tmp_path: Path) -> None:
     write(
         tmp_path,

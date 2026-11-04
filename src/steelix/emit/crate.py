@@ -153,6 +153,7 @@ def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> Lo
         (out_dir / "build.rs").write_text(rustfmt(build_rs(project)))
         (src / "main.rs").write_text(rustfmt(main_rs(parsed, rust_mod)))
     else:
+        (out_dir / "build.rs").write_text(rustfmt(EXT_BUILD_RS))
         (src / "lib.rs").write_text(rustfmt(lib_rs(parsed, rust_mod)))
     return lowered
 
@@ -311,6 +312,7 @@ def emit_project(
         (out_dir / "build.rs").write_text(rustfmt(build_rs(project.root)))
         (src / "main.rs").write_text(rustfmt(project_main_rs(project, layout)))
     else:
+        (out_dir / "build.rs").write_text(rustfmt(EXT_BUILD_RS))
         (src / "lib.rs").write_text(rustfmt(project_lib_rs(project, layout)))
     return lowered_modules
 
@@ -442,8 +444,7 @@ def cargo_toml(module_name: str, options: CrateOptions) -> str:
         f"steelix-runtime = {runtime}",
         "",
     ]
-    if options.mode is Mode.BIN:
-        lines += ["[build-dependencies]", f'pyo3-build-config = "{PYO3_VERSION}"', ""]
+    lines += ["[build-dependencies]", f'pyo3-build-config = "{PYO3_VERSION}"', ""]
     if options.standalone:
         # Cargo only reads profiles from the workspace root.
         lines += [DEV_PROFILE, RELEASE_PROFILE, "[workspace]", ""]
@@ -472,8 +473,10 @@ fn main() {{
         return;
     }}
     // Let the executable find the libpython it was linked against, instead
-    // of whichever libpython the system loader would pick.
+    // of whichever libpython the system loader would pick (on macOS also a
+    // framework build's, python.org's or Homebrew's).
     pyo3_build_config::add_libpython_rpath_link_args();
+    pyo3_build_config::add_python_framework_link_args();
     // Run with the interpreter installation (and virtual environment) the
     // crate was built against, and the project's Python files.
     let executable = pyo3_build_config::get()
@@ -482,6 +485,16 @@ fn main() {{
     println!("cargo:rustc-env=STEELIX_PYTHON={{executable}}");
     println!("cargo:rustc-env=STEELIX_PROJECT={{PROJECT}}");
 }}
+"""
+
+
+# The build script of an extension module. On macOS the interpreter that
+# imports it provides the Python symbols (`-undefined dynamic_lookup`), as
+# on Linux; elsewhere it adds nothing.
+EXT_BUILD_RS = """\
+fn main() {
+    pyo3_build_config::add_extension_module_link_args();
+}
 """
 
 

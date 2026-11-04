@@ -89,7 +89,10 @@ struct Paths {
 impl Paths {
     fn locate(script: &Script) -> Self {
         let program = match std::env::current_exe() {
-            Ok(program) => program,
+            // Linux's `/proc/self/exe` has the links resolved already, macOS
+            // gives the path the process was started by: `python/bin/python`
+            // of a distribution, a link to the program.
+            Ok(program) => program.canonicalize().unwrap_or(program),
             Err(err) => fatal(&format!("can not locate the executable: {err}")),
         };
         let dist = program.parent().unwrap_or(Path::new("/"));

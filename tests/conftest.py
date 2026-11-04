@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture
 def update_golden(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption("--update-golden"))
+
+
+def extension_library(name: str) -> Path:
+    """The cdylib cargo built for the extension module crate `name`
+    (`cargo_env(extension=True)`), named as the platform names libraries."""
+    file = f"lib{name}.dylib" if sys.platform == "darwin" else f"lib{name}.so"
+    return E2E_DIR / "target-ext" / "debug" / file
 
 
 def cargo_env(*, extension: bool) -> dict[str, str]:

@@ -26,6 +26,7 @@ from conftest import (
     Workspace,
     cargo_env,
     compiler_warnings,
+    extension_library,
 )
 from test_e2e import Outcome, run
 
@@ -251,7 +252,7 @@ def test_ext_package_matches_python(tmp_path: Path) -> None:
     result = workspace.cargo("build", "--workspace", "--message-format=json", extension=True)
     assert result.returncode == 0, result.stderr + result.stdout
     assert not compiler_warnings(result.stdout, workspace)
-    shutil.copyfile(E2E_DIR / "target-ext" / "debug" / "libstore.so", tmp_path / "store.so")
+    shutil.copyfile(extension_library("store"), tmp_path / "store.so")
     code = (
         "import store\n"
         "from store.reports import render\n"
