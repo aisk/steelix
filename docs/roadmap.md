@@ -400,6 +400,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 
 - [x] PyPI 发布 steelix 0.1.0，git tag `v0.1.0`
 - [x] `steelix-runtime` 0.1.0 发布到 crates.io，从 PyPI 安装的 steelix 生成的 crate 可以直接构建（已验证）
+- [ ] 0.2.0：版本号、`RUNTIME_VERSION = "0.2"` 和 tag `v0.2.0` 已就绪（runtime 的公开接口自 M13 起不兼容，所以不是 0.1.1），待发布到 PyPI 和 crates.io
 - [ ] 以后每次发版：PyPI 和 crates.io 同步，`RUNTIME_VERSION` 与 runtime 的版本一致（design §14）
 
 ## 以后再说

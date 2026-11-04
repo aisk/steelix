@@ -1,6 +1,6 @@
 [project]
 name = "steelix"
-version = "0.1.0"
+version = "0.2.0"
 description = "Transpile Python into readable Rust code built on PyO3"
 readme = "README.md"
 license = "BSD-3-Clause"

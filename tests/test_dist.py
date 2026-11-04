@@ -21,6 +21,7 @@ import pytest
 from conftest import DEV_PROFILE, E2E_DIR, PYTHON, ROOT, RUNTIME, Workspace, cargo_env
 from test_e2e import Outcome, run
 
+import steelix
 from steelix import dist
 from steelix.cli import build_parser, dist_rustflags, main
 from steelix.emit.crate import CrateOptions, Mode, emit_crate
@@ -69,7 +70,7 @@ def test_inspect_python_finds_the_build_interpreter() -> None:
     # steelix itself (an editable install) is a build tool, not part of programs.
     names = {path.name for path in install.excluded}
     assert "steelix.pth" in names
-    assert "steelix-0.1.0.dist-info" in names
+    assert f"steelix-{steelix.__version__}.dist-info" in names
 
 
 def test_inspect_python_rejects_what_it_can_not_run(tmp_path: Path) -> None:
