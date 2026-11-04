@@ -283,12 +283,19 @@ def project_files(project: Project, options: DistOptions) -> list[str]:
     the project directory: the transpiled modules' sources (with
     `options.sources`), every other file of the project's packages (data
     files for `importlib.resources`, and submodules imported by computed
-    names), the modules that import from source (`Project.left_out`), and
+    names) and namespace packages (not in their subdirectories), the
+    modules that import from source (`Project.left_out`), and
     `options.data`."""
     root = project.root
     transpiled = {source.relpath for source in project.sources()}
     files: set[str] = set(transpiled) if options.sources else set()
     packages = {Path(source.relpath).parent for source in project.sources() if source.package}
+    for namespace in project.namespaces.values():
+        # Only its own files: its subdirectories are not all packages.
+        for path in (root / namespace).iterdir():
+            relpath = path.relative_to(root).as_posix()
+            if path.is_file() and relpath not in transpiled:
+                files.add(relpath)
     for package in packages:
         for path in (root / package).rglob("*"):
             relpath = path.relative_to(root).as_posix()
@@ -338,6 +345,9 @@ def unshipped_warnings(project: Project, shipped: Iterable[str]) -> list[str]:
 
 def _copy_project(project: Project, files: Iterable[str], target: Path) -> None:
     target.mkdir()
+    for namespace in project.namespaces.values():
+        # The path finder creates a namespace package from its directory.
+        (target / namespace).mkdir(parents=True, exist_ok=True)
     for relpath in files:
         destination = target / relpath
         destination.parent.mkdir(parents=True, exist_ok=True)

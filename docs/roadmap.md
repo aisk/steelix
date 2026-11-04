@@ -167,7 +167,7 @@
 - [x] 测试：多模块测试应用 `tests/projects/inventory`、标准库 `json` 包（也以 `python -m json` 运行），golden、clippy、与 CPython 比较完整 traceback 的 e2e
 - [x] 发现的问题：Python 参数 `_m` 和上下文参数 `m` 触发 clippy 的 `duplicate_underscore_argument`，这时上下文参数改叫 `module`；类的 mod 和所在模块同名（`module_inception`）时加 `_`；crate 根上 allow `too_many_arguments` 和 `doc_lazy_continuation`（§14）
 - [x] ext 模式下 `python -m pkg`：M7a 给 `NativeLoader` 加了 `get_code`，剩下的问题是扩展模块 `pkg` 的 spec 不是包，runpy 不会去找 `pkg.__main__`。M12 用 `pkg/__init__.so` 的安装方式解决
-- [ ] 命名空间包（没有 `__init__.py` 的目录）里的模块现在不转换
+- [x] 命名空间包（没有 `__init__.py` 的目录）里的模块也转换（M14 之后）：命名空间包的 Rust mod 只声明子模块，包对象仍由 `PathFinder` 创建，finder 对这些模块检查父包的 `__path__`（同名的普通包在 `sys.path` 后面时它优先），分发里保留目录（§7，`tests/projects/namespaces`）
 
 ## M7 分发 ✅
 

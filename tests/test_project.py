@@ -81,14 +81,11 @@ def test_what_is_left_to_python(tmp_path: Path) -> None:
         tmp_path,
         {
             "app.py": (
-                "import sys, broken, nspkg.inner, excluded, plain\n"
-                "import importlib\n"
-                "from plain import thing\n"
+                "import sys, broken, excluded, plain\nimport importlib\nfrom plain import thing\n"
             ),
             # A builtin module takes precedence over the project's.
             "sys.py": "",
             "broken.py": "def f(:\n",
-            "nspkg/inner.py": "",
             "excluded.py": "",
             "plain/__init__.py": "",
             # The package wins over a module of the same name.
@@ -100,8 +97,37 @@ def test_what_is_left_to_python(tmp_path: Path) -> None:
     assert project.modules["plain"].relpath == "plain/__init__.py"
     notes = "\n".join(project.notes)
     assert "broken.py: not transpiled, it does not compile" in notes
-    assert "nspkg/: namespace package, not transpiled" in notes
     assert "excluded.py: excluded, imports from its Python source" in notes
+
+
+def test_namespace_packages(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        {
+            "app.py": "import ns.a, ns.sub.b, mod.x, pkg.y, gone.z\nfrom ns import c\n",
+            "ns/a.py": "",
+            "ns/c.py": "from .sub import b\n",
+            "ns/sub/b.py": "",
+            "ns/unused/d.py": "",
+            # A module beats a namespace package, and so does a package.
+            "mod.py": "",
+            "mod/x.py": "",
+            "pkg/__init__.py": "",
+            "pkg/y.py": "",
+            "gone/z.py": "",
+        },
+    )
+    project = find_project(tmp_path / "app.py", exclude=["gone"])
+    assert list(project.modules) == ["mod", "ns.a", "ns.c", "ns.sub.b", "pkg", "pkg.y"]
+    assert project.namespaces == {"ns": "ns", "ns.sub": "ns/sub"}
+    assert "gone/: excluded, imports from its Python source" in project.notes
+    assert project.left_out == {"gone"}
+    # An included file may be in a namespace package, a directory's
+    # subdirectories only count if they are packages.
+    project = find_project(tmp_path / "app.py", include=[str(tmp_path / "ns" / "unused" / "d.py")])
+    assert "ns.unused.d" in project.modules
+    project = find_project(tmp_path / "app.py", include=[str(tmp_path / "ns")])
+    assert "ns.unused.d" not in project.modules
 
 
 def test_include_modules_and_directories(tmp_path: Path) -> None:
@@ -114,14 +140,22 @@ def test_include_modules_and_directories(tmp_path: Path) -> None:
             "plugins/b.py": "import shared\n",
             "shared.py": "",
             "other.py": "",
-            "notapackage/c.py": "",
+            # A namespace package.
+            "namespace/c.py": "",
         },
     )
     project = find_project(
         tmp_path / "app.py",
-        include=[str(tmp_path / "plugins"), "other", str(tmp_path / "notapackage")],
+        include=[str(tmp_path / "plugins"), "other", str(tmp_path / "namespace")],
     )
-    assert list(project.modules) == ["other", "plugins", "plugins.a", "plugins.b", "shared"]
+    assert list(project.modules) == [
+        "namespace.c",
+        "other",
+        "plugins",
+        "plugins.a",
+        "plugins.b",
+        "shared",
+    ]
     with pytest.raises(ProjectError, match="no such module"):
         find_project(tmp_path / "app.py", include=["missing"])
 

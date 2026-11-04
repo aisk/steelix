@@ -12,9 +12,10 @@ modules are only executed when they are actually imported at run time.
 More modules can be included by name or path (for imports with computed
 names), and modules can be excluded.
 
-Everything else (the standard library, third-party packages, namespace
-packages, project modules that are left out) imports from its Python
-source at run time, as before.
+Modules in namespace packages (directories without `__init__.py`) count
+too; the namespace packages themselves have no code. Everything else (the
+standard library, third-party packages, project modules that are left
+out) imports from its Python source at run time, as before.
 """
 
 from __future__ import annotations
@@ -63,9 +64,13 @@ class Project:
     """The parsed source of the main module and of each module, by `relpath`."""
     notes: list[str] = field(default_factory=list)
     """What was left out and why, for the report."""
+    namespaces: dict[str, str] = field(default_factory=dict)
+    """The namespace packages (directories without `__init__.py`) that
+    modules are in, by name, sorted: their directory relative to the
+    project."""
     left_out: set[str] = field(default_factory=set)
     """Project modules found by the analysis that import from their Python
-    source at run time (excluded, namespace packages, not compiling): their
+    source at run time (excluded, not compiling): their
     file, or their directory for a package, relative to the project."""
 
     @property
@@ -111,8 +116,11 @@ def find_project(
         assert module is not None
         directory = Path(os.path.realpath(root or Path.cwd()))
         finder = _Finder(directory, excluded)
-        found = finder.locate(module)
-        if found is None:
+        found = finder.find(module)
+        if isinstance(found, str) and run_main:
+            # A namespace package runs its `__main__` too.
+            found = SourceModule(module, found, True)
+        if not isinstance(found, SourceModule):
             raise ProjectError(f"no module named {module!r} in {directory}")
         if found.package and run_main:
             main_name = f"{module}.__main__"
@@ -144,6 +152,11 @@ def find_project(
         for name in imported_names(parsed.tree, source):
             finder.add_with_parents(name, queue)
     project.modules = dict(sorted(project.modules.items()))
+    project.namespaces = {
+        name: relpath
+        for name, relpath in sorted(finder.namespaces.items())
+        if any(module.startswith(name + ".") for module in project.modules)
+    }
     return project
 
 
@@ -174,6 +187,7 @@ class _Finder:
         self.project: Project
         self.failed: set[str] = set()
         self.noted: set[str] = set()
+        self.namespaces: dict[str, str] = {}
 
     def is_excluded(self, name: str) -> bool:
         return any(name == e or name.startswith(e + ".") for e in self.exclude)
@@ -182,6 +196,16 @@ class _Finder:
         """The project module `name`, if the path finder would find it in the
         project directory (and builtin and frozen modules do not take
         precedence)."""
+        found = self.find(name)
+        return found if isinstance(found, SourceModule) else None
+
+    def find(self, name: str) -> SourceModule | str | None:
+        """`locate`, or for a namespace package (a directory without
+        `__init__.py`) its directory relative to the project. Like the path
+        finder, a package beats a module of the same name, which beats a
+        namespace package. A namespace package exists only if the rest of
+        `sys.path` has no package or module of that name either, which the
+        runtime checks (design §7)."""
         parts = name.split(".")
         if not all(parts) or _imp.is_builtin(parts[0]) or _imp.is_frozen(parts[0]):
             return None
@@ -198,15 +222,15 @@ class _Finder:
                 continue
             if any((directory / f"{part}{s}").is_file() for s in _EXTENSIONS):
                 return None
-            if last and (directory / f"{part}.py").is_file():
-                return SourceModule(name, self.relpath(directory / f"{part}.py"), False)
-            if (directory / part).is_dir():
-                self.project.left_out.add(self.relpath(directory / part))
-                self.note(
-                    ".".join(parts[: i + 1]),
-                    f"{self.relpath(directory / part)}/: namespace package, not transpiled",
-                )
-            return None
+            if (directory / f"{part}.py").is_file():
+                if last:
+                    return SourceModule(name, self.relpath(directory / f"{part}.py"), False)
+                return None
+            if not (directory / part).is_dir():
+                return None
+            directory = directory / part
+            if last:
+                return self.relpath(directory)
         return None
 
     def relpath(self, path: Path) -> str:
@@ -227,14 +251,21 @@ class _Finder:
                 continue
             if prefix in self.failed:
                 return
-            found = self.locate(prefix)
+            found = self.find(prefix)
             if found is None:
                 return
             if self.is_excluded(prefix):
+                if isinstance(found, str):
+                    self.note(prefix, f"{found}/: excluded, imports from its Python source")
+                    self.project.left_out.add(found)
+                    return
                 self.note(prefix, f"{found.relpath}: excluded, imports from its Python source")
                 excluded = found.relpath.removesuffix("/__init__.py") if found.package else None
                 self.project.left_out.add(excluded or found.relpath)
                 return
+            if isinstance(found, str):
+                self.namespaces[prefix] = found
+                continue
             parsed = self.project.parsed.get(found.relpath)
             if parsed is None:
                 parsed = _parse(self.project, found, required=False)
@@ -254,7 +285,10 @@ class _Finder:
                 raise ProjectError(f"--include {item}: no such file or directory")
             files = sorted(path.rglob("*.py")) if path.is_dir() else [path]
             for file in files:
-                name = self.module_name(Path(os.path.realpath(file)))
+                # Namespace packages count down to the given directory, its
+                # subdirectories only if they are packages.
+                top = os.path.realpath(path if path.is_dir() else path.parent)
+                name = self.module_name(Path(os.path.realpath(file)), namespaces=Path(top))
                 if name is None:
                     if not path.is_dir():
                         raise ProjectError(
@@ -267,9 +301,11 @@ class _Finder:
                 raise ProjectError(f"--include {item}: no such module in {self.root}")
             yield item
 
-    def module_name(self, file: Path) -> str | None:
+    def module_name(self, file: Path, *, namespaces: Path | None = None) -> str | None:
         """The name `file` is imported as from the project directory, if any:
-        every directory on the way must be a package."""
+        every directory on the way must be a package, except that the
+        directory `namespaces` and the ones above it may be namespace
+        packages."""
         try:
             relative = file.relative_to(self.root)
         except ValueError:
@@ -280,7 +316,8 @@ class _Finder:
         directory = self.root
         for part in parts[:-1]:
             directory = directory / part
-            if not (directory / "__init__.py").is_file():
+            namespace_ok = namespaces is not None and namespaces.is_relative_to(directory)
+            if not namespace_ok and not (directory / "__init__.py").is_file():
                 return None
         stem = parts[-1].removesuffix(".py")
         names = parts[:-1] if stem == "__init__" else [*parts[:-1], stem]

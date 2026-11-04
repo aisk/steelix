@@ -102,6 +102,7 @@ CASES = [
             ["sample.json", "lines.jsonl"],
         ],
     ),
+    Case("namespaces", "namespaces", script="app.py", commands=[[], ["crash"]]),
     Case(
         "skime",
         "skime",

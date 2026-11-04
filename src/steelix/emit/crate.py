@@ -25,6 +25,7 @@ from steelix.frontend.parse import ParsedModule
 from steelix.lower.module import LoweredModule, ModuleRole, lower_module
 from steelix.lower.names import Renamer, module_ident
 from steelix.project import Project, SourceModule, cross_module_patches
+from steelix.rustast import nodes as rs
 from steelix.rustast.fmt import config_text, rustfmt
 from steelix.rustast.printer import print_file, string_literal
 from steelix.rustast.verify import verify
@@ -172,6 +173,9 @@ class RustModule:
     """The Rust module path from the crate root: `("pkg", "sub")`."""
     children: tuple[str, ...]
     """The Rust names of a package's submodules."""
+    namespace: bool = False
+    """A namespace package (a directory without `__init__.py`): its file
+    only declares the submodules."""
 
     @property
     def file(self) -> str:
@@ -194,7 +198,10 @@ def rust_layout(project: Project) -> dict[str, RustModule]:
     `my_tool`, `type` is `r#type`, `mod` is `mod_`) and made unique among
     their siblings with a `_` suffix.
     """
-    sources = project.sources()
+    namespaces = {
+        name: SourceModule(name, relpath, True) for name, relpath in project.namespaces.items()
+    }
+    sources = project.sources() + list(namespaces.values())
     by_parent: dict[str, list[SourceModule]] = {}
     for source in sources:
         parent = "" if source is project.main and not project.run_module else _parent(source)
@@ -208,14 +215,16 @@ def rust_layout(project: Project) -> dict[str, RustModule]:
     def path_of(source: SourceModule) -> tuple[str, ...]:
         if source is project.main and not project.run_module or "." not in source.name:
             return (names[source.relpath],)
-        parent = project.modules[source.name.rpartition(".")[0]]
+        package = source.name.rpartition(".")[0]
+        parent = project.modules.get(package) or namespaces[package]
         return (*path_of(parent), names[source.relpath])
 
     for source in sources:
         children = tuple(
             names[child.relpath] for child in by_parent.get(source.name, []) if source.package
         )
-        layout[source.relpath] = RustModule(source, path_of(source), children)
+        namespace = source.name in namespaces
+        layout[source.relpath] = RustModule(source, path_of(source), children, namespace)
     return layout
 
 
@@ -291,6 +300,11 @@ def emit_project(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render(lowered))
         lowered_modules.append(lowered)
+    for rust in layout.values():
+        if rust.namespace:
+            target = src / rust.file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(namespace_mod_rs(rust))
     (out_dir / "Cargo.toml").write_text(cargo_toml(name or project_name(project), options))
     (out_dir / "rustfmt.toml").write_text(config_text())
     if options.mode is Mode.BIN:
@@ -299,6 +313,16 @@ def emit_project(
     else:
         (src / "lib.rs").write_text(rustfmt(project_lib_rs(project, layout)))
     return lowered_modules
+
+
+def namespace_mod_rs(rust: RustModule) -> str:
+    """The file of a namespace package: its submodules. The package object
+    is CPython's, created by the path finder from the directory."""
+    file = rs.File(
+        [rs.ModDecl(child, public=True) for child in rust.children],
+        inner_doc=(f"Namespace package `{rust.source.name}` (`{rust.source.relpath}/`).",),
+    )
+    return rustfmt(print_file(file))
 
 
 def project_name(project: Project) -> str:

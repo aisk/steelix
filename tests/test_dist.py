@@ -231,6 +231,34 @@ def test_package_data_and_unshipped_modules(tmp_path: Path) -> None:
     assert dist.unshipped_warnings(project, dist.project_files(project, dist.DistOptions())) == []
 
 
+def test_namespace_package_files(tmp_path: Path) -> None:
+    """A namespace package's own files are shipped, not those of its
+    subdirectories, and its directory exists even when nothing in it is
+    (`--no-sources`): the path finder creates the package from it."""
+    install = fake_install(tmp_path)
+    binary = tmp_path / "target" / "app"
+    binary.parent.mkdir()
+    binary.write_text("")
+    root = tmp_path / "project"
+    files = {
+        "app.py": "import ns.mod\n",
+        "ns/mod.py": "",
+        "ns/data.txt": "",
+        "ns/other/stray.py": "",
+    }
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    project = find_project(root / "app.py")
+    assert dist.project_files(project, dist.DistOptions(sources=False)) == ["ns/data.txt"]
+    (root / "ns" / "data.txt").unlink()
+    target = tmp_path / "dist" / "app"
+    options = dist.DistOptions(compile=False, sources=False)
+    dist.assemble(binary, "app", install, project, target, options)
+    assert (target / "src" / "ns").is_dir()
+    assert not any((target / "src" / "ns").iterdir())
+
+
 def pyc_flags(pyc: Path) -> int:
     """The flags of a `.pyc` header (PEP 552): 0 for timestamps, 1 for an
     unchecked hash, 3 for a checked hash."""

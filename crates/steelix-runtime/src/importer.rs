@@ -106,6 +106,22 @@ impl NativeImporter {
         format!("{}/{}", self.root, module.path())
     }
 
+    /// Whether [`find_spec`](Self::find_spec) answers for `module` only
+    /// where the path based finder would find its source ([`Scope`]). In
+    /// the program that is also the case for a module of a namespace
+    /// package (a directory without `__init__.py`, not in the table): the
+    /// namespace package exists only if no other `sys.path` entry has a
+    /// regular package or module of that name, so its `__path__` tells.
+    fn checks_path(&self, module: &NativeModule) -> bool {
+        match self.scope {
+            Scope::OnPath => true,
+            Scope::Always => module
+                .name
+                .rsplit_once('.')
+                .is_some_and(|(package, _)| !self.contains(package)),
+        }
+    }
+
     /// Whether the directory the path based finder would find `module` in
     /// is one of `locations`: the `path` that importlib passes to
     /// `find_spec`, which is `sys.path` for a top-level module (`None`) and
@@ -211,7 +227,7 @@ impl NativeImporter {
         let Some(module) = self.get(fullname) else {
             return Ok(None);
         };
-        if self.scope == Scope::OnPath && !self.on_path(py, module, path)? {
+        if self.checks_path(module) && !self.on_path(py, module, path)? {
             return Ok(None);
         }
         let location = self.location(module);
