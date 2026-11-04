@@ -351,6 +351,13 @@ fn awaitable_iter<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>>
         }
         return Ok(value.clone());
     }
+    // A native coroutine is awaited without a Python call of `__await__`:
+    // the call's recursion check could fail before the coroutine starts,
+    // which would leave it never awaited, where CPython starts the
+    // coroutine and fails in its first frame.
+    if let Ok(coroutine) = value.cast::<Coroutine>() {
+        return Ok(Bound::new(value.py(), Coroutine::__await__(coroutine)?)?.into_any());
+    }
     let Some(await_) = crate::frame::lookup_special(value, "__await__")? else {
         return Err(crate::raised(PyTypeError::new_err(format!(
             "'{}' object can't be awaited",

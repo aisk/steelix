@@ -107,7 +107,7 @@ impl Coroutine {
     /// coroutine that is suspended at an `await` already has someone
     /// awaiting it. (CPython checks this in `await`, not in `__await__`,
     /// which `await` calls for this type.)
-    fn __await__(slf: &Bound<'_, Self>) -> PyResult<CoroutineWrapper> {
+    pub(super) fn __await__(slf: &Bound<'_, Self>) -> PyResult<CoroutineWrapper> {
         if slf.get().0.suspended() {
             return Err(being_awaited());
         }
