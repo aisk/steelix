@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -64,7 +65,8 @@ def test_build_parser_defaults() -> None:
 def test_inspect_python_finds_the_build_interpreter() -> None:
     install = dist.inspect_python(PYTHON)
     assert install.version == "3.14"
-    assert install.libpython.name == "libpython3.14.so.1.0"
+    expected = "libpython3.14.dylib" if sys.platform == "darwin" else "libpython3.14.so.1.0"
+    assert install.libpython.name == expected
     assert (install.stdlib / "os.py").is_file()
     assert install.site_packages == (ROOT / ".venv" / "lib" / "python3.14" / "site-packages",)
     # steelix itself (an editable install) is a build tool, not part of programs.
@@ -727,11 +729,15 @@ def test_runtime_unit_tests() -> None:
         text=True,
         check=True,
     ).stdout.strip()
-    search = os.pathsep.join(filter(None, [libdir, os.environ.get("LD_LIBRARY_PATH")]))
+    # `DYLD_LIBRARY_PATH` on macOS.
+    search = {
+        var: os.pathsep.join(filter(None, [libdir, os.environ.get(var)]))
+        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH")
+    }
     result = subprocess.run(
         ["cargo", "test", "-p", "steelix-runtime", "--lib"],
         cwd=ROOT,
-        env={**os.environ, "PYO3_PYTHON": str(PYTHON), "LD_LIBRARY_PATH": search},
+        env={**os.environ, "PYO3_PYTHON": str(PYTHON), **search},
         capture_output=True,
         text=True,
         check=False,

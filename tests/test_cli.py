@@ -103,6 +103,7 @@ def test_transpile_ext_mode(tmp_path: Path) -> None:
     assert main(["transpile", str(source), "-o", str(out), "--mode", "ext"]) == 0
     assert 'crate-type = ["cdylib"]' in (out / "Cargo.toml").read_text()
     assert '#[pymodule(name = "lib_mod")]' in (out / "src" / "lib.rs").read_text()
+    assert "add_extension_module_link_args()" in (out / "build.rs").read_text()
 
 
 def test_no_fallback_reports_unsupported(tmp_path: Path, capsys) -> None:

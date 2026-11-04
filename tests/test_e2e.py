@@ -19,7 +19,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import CASES, CASES_DIR, E2E_DIR, PYTHON, Workspace, make_workspace
+from conftest import (
+    CASES,
+    CASES_DIR,
+    E2E_DIR,
+    PYTHON,
+    Workspace,
+    extension_library,
+    make_workspace,
+)
 
 from steelix.emit.crate import Mode
 
@@ -284,7 +292,7 @@ def test_ext_module_matches_python(tmp_path: Path) -> None:
     workspace = make_workspace("ext", ["fib"], Mode.EXT, from_golden=False)
     result = workspace.cargo("build", "--workspace", extension=True)
     assert result.returncode == 0, result.stderr
-    shutil.copyfile(E2E_DIR / "target-ext" / "debug" / "libfib.so", tmp_path / "fib.so")
+    shutil.copyfile(extension_library("fib"), tmp_path / "fib.so")
     expected = run([str(PYTHON), str(CASES_DIR / "fib.py")], tmp_path)
     actual = run([str(PYTHON), "-c", "import fib"], tmp_path)
     assert (actual.stdout, actual.returncode) == (expected.stdout, expected.returncode)

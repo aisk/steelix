@@ -6,7 +6,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS has no bwrap: the dist tests that run programs in a sandbox
+        # are skipped there.
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -32,6 +38,7 @@ jobs:
           cache-all-crates: true
 
       - name: Install bubblewrap
+        if: runner.os == 'Linux'
         # The dist tests run the built program in a sandbox. Ubuntu 24.04
         # restricts unprivileged user namespaces, which bwrap needs.
         run: |
