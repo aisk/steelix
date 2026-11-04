@@ -30,12 +30,11 @@ pub async fn ticker<'py>(
     n: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "ticker", 33, async |_| {
-        for i in m.global("range")?.call1((n,))?.try_iter()? {
+        for i in rt::iter(&m.global("range")?.call1((n,))?)? {
             let i = i?;
             m.global("print")?.call1(("tick", name, &i))?;
             let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
             rt::await_(sleep).await?;
-            m.py().check_signals()?;
         }
         name.mul(2)
     })
@@ -444,18 +443,16 @@ pub async fn inner_items<'py>(
     m: &rt::Module<'py>,
     n: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "inner_items", 207, async |frame| {
         let result: PyResult<()> = async {
             let mut received: Bound<'py, PyAny>;
-            for i in m.global("range")?.call1((n,))?.try_iter()? {
+            for i in rt::iter(&m.global("range")?.call1((n,))?)? {
                 let i = i?;
                 received = rt::yield_(&i).await?;
                 if !received.is_none() {
                     m.global("print")?
                         .call1(("inner_items received", &received))?;
                 }
-                py.check_signals()?;
             }
             Ok(())
         }
@@ -463,7 +460,7 @@ pub async fn inner_items<'py>(
         let finally = frame.finally(result);
         m.global("print")?.call1(("inner_items finally",))?;
         finally.resume()?;
-        Ok(rt::str(py, "inner_items done"))
+        Ok(rt::str(m.py(), "inner_items done"))
     })
 }
 
@@ -596,13 +593,11 @@ pub async fn owner_values<'py>(
     m: &rt::Module<'py>,
     slf: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "owner_values", 267, async |frame| {
         let result: PyResult<()> = async {
-            for value in slf.attr("values")?.try_iter()? {
+            for value in rt::iter(&slf.attr("values")?)? {
                 let value = value?;
                 rt::yield_(&value).await?;
-                py.check_signals()?;
             }
             Ok(())
         }
@@ -611,7 +606,7 @@ pub async fn owner_values<'py>(
         m.global("print")?
             .call1(("owner_values finally", slf.attr("tag")?))?;
         finally.resume()?;
-        Ok(rt::none(py))
+        Ok(rt::none(m.py()))
     })
 }
 
@@ -664,15 +659,13 @@ pub fn frames<'py>(m: &rt::Module<'py>, e: &Bound<'py, PyAny>) -> PyResult<Bound
     let py = m.py();
     rt::frame!(m, "frames", 341, |_| {
         let list = PyList::empty(py);
-        for f in m
-            .global("traceback")?
-            .attr("extract_tb")?
-            .call1((e.attr("__traceback__")?,))?
-            .try_iter()?
-        {
+        for f in rt::iter(
+            &m.global("traceback")?
+                .attr("extract_tb")?
+                .call1((e.attr("__traceback__")?,))?,
+        )? {
             let f = f?;
             list.append(PyTuple::new(py, [&f.attr("name")?, &f.attr("lineno")?])?)?;
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })
@@ -752,15 +745,16 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     .call1((m.global("guarded")?.call1((log,))?,))
             })
         }
-        for make in PyTuple::new(
-            py,
-            [
-                &m.global("nested_guard")?,
-                &rt::function!(m, lambda(log), qualname = "main.<locals>.<lambda>")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for make in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("nested_guard")?,
+                    &rt::function!(m, lambda(log), qualname = "main.<locals>.<lambda>")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             let make = make?;
             log = PyList::empty(py).into_any();
             task = m
@@ -780,17 +774,15 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     {
                         let print = m.global("print")?;
                         let list = PyList::empty(py);
-                        for item in m.global("frames")?.call1((&e,))?.try_iter()? {
+                        for item in rt::iter(&m.global("frames")?.call1((&e,))?)? {
                             let [name, underscore] = rt::unpack(&item?)?;
                             list.append(&name)?;
-                            py.check_signals()?;
                         }
                         print.call1(("cancelled", &log, list))?;
                     }
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         match async {
             let awaitable = m.global("outer_fail")?.call0()?;
@@ -892,23 +884,24 @@ pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         }
         let mut c: Bound<'py, PyAny>;
         let mut task: Bound<'py, PyAny>;
-        for make in PyTuple::new(
-            py,
-            [
-                &rt::function!(m, lambda(), qualname = "awaited_already.<locals>.<lambda>")?,
-                &rt::function!(m, lambda2(), qualname = "awaited_already.<locals>.<lambda>")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for make in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &rt::function!(m, lambda(), qualname = "awaited_already.<locals>.<lambda>")?,
+                    &rt::function!(m, lambda2(), qualname = "awaited_already.<locals>.<lambda>")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             let make = make?;
             c = make.call0()?;
             task = m.global("asyncio")?.method1("ensure_future", (&c,))?;
             let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
             rt::await_(sleep).await?;
-            for waiter in PyTuple::new(py, [&m.global("py_awaits")?, &m.global("native_awaits")?])?
-                .try_iter()?
-            {
+            for waiter in rt::iter(
+                PyTuple::new(py, [&m.global("py_awaits")?, &m.global("native_awaits")?])?.as_any(),
+            )? {
                 let waiter = waiter?;
                 match async { rt::await_(waiter.call1((&c,))?).await }.await {
                     Ok(_) => {}
@@ -922,11 +915,9 @@ pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
                     }
                     Err(err) => return Err(err),
                 }
-                py.check_signals()?;
             }
             m.global("print")?
                 .call1(("task result", rt::await_(&task).await?))?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -1428,14 +1419,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     Err(err) => return Err(err),
                 }
                 m.global("gc")?.method0("collect")?;
-                for item in m.global("caught")?.try_iter()? {
+                for item in rt::iter(&m.global("caught")?)? {
                     m.set_global("w", item?)?;
                     m.global("print")?.call1((
                         "warning",
                         m.global("w")?.attr("category")?.attr("__name__")?,
                         m.global("w")?.attr("message")?,
                     ))?;
-                    py.check_signals()?;
                 }
                 Ok(())
             },
@@ -1504,7 +1494,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.set_global("c", m.global("add_later")?.call1((1, 2))?)?;
                 m.global("c")?.method0("close")?;
                 m.del_global("c")?;
-                for item2 in m.global("caught")?.try_iter()? {
+                for item2 in rt::iter(&m.global("caught")?)? {
                     m.set_global("w", item2?)?;
                     // The line is 0 for a warning without a Python frame (design §12).
                     m.global("print")?.call1((
@@ -1512,7 +1502,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                         m.global("w")?.attr("category")?.attr("__name__")?,
                         m.global("w")?.attr("message")?,
                     ))?;
-                    py.check_signals()?;
                 }
                 Ok(())
             },
@@ -1637,10 +1626,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.global("print")?.call1((m
             .global("list")?
             .call1((m.global("count_up")?.call1((4,))?,))?,))?;
-        for item3 in m.global("count_up")?.call1((2,))?.try_iter()? {
+        for item3 in rt::iter(&m.global("count_up")?.call1((2,))?)? {
             m.set_global("i", item3?)?;
             m.global("print")?.call1(("for", m.global("i")?))?;
-            py.check_signals()?;
         }
         m.set_global("acc", m.global("accumulate")?.call0()?)?;
         m.global("print")?.call1((
@@ -1785,10 +1773,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     let print = m.global("print")?;
                     let value = m.global("repr")?.call1((m.global("e")?,))?;
                     let list = PyList::empty(py);
-                    for item4 in m.global("frames")?.call1((m.global("e")?,))?.try_iter()? {
+                    for item4 in rt::iter(&m.global("frames")?.call1((m.global("e")?,))?)? {
                         let [name, underscore] = rt::unpack(&item4?)?;
                         list.append(&name)?;
-                        py.check_signals()?;
                     }
                     print.call1(("thrown through", value, list))?;
                 }
@@ -1800,7 +1787,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // Too deep a chain raises `RecursionError`: CPython at the recursion limit,
         // native code when the C stack runs out (design §12), so only the type is
         // compared.
-        for item5 in PyTuple::new(py, [100, 100000])?.try_iter()? {
+        for item5 in rt::iter(PyTuple::new(py, [100, 100000])?.as_any())? {
             m.set_global("n", item5?)?;
             // coroutines.py:640
             fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -1842,53 +1829,54 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                         .call1((m.global("chain_objects")?.call1((m.global("n")?,))?,))
                 })
             }
-            for item6 in PyTuple::new(
-                py,
-                [
-                    PyTuple::new(
-                        py,
-                        [
-                            &rt::str(py, "walk"),
-                            &rt::function!(m, lambda(), qualname = "<lambda>")?,
-                        ],
-                    )?
-                    .as_any(),
-                    PyTuple::new(
-                        py,
-                        [
-                            &rt::str(py, "chain"),
-                            &rt::function!(m, lambda2(), qualname = "<lambda>")?,
-                        ],
-                    )?
-                    .as_any(),
-                    PyTuple::new(
-                        py,
-                        [
-                            &rt::str(py, "countdown"),
-                            &rt::function!(m, lambda3(), qualname = "<lambda>")?,
-                        ],
-                    )?
-                    .as_any(),
-                    PyTuple::new(
-                        py,
-                        [
-                            &rt::str(py, "walk_objects"),
-                            &rt::function!(m, lambda4(), qualname = "<lambda>")?,
-                        ],
-                    )?
-                    .as_any(),
-                    PyTuple::new(
-                        py,
-                        [
-                            &rt::str(py, "chain_objects"),
-                            &rt::function!(m, lambda5(), qualname = "<lambda>")?,
-                        ],
-                    )?
-                    .as_any(),
-                ],
-            )?
-            .try_iter()?
-            {
+            for item6 in rt::iter(
+                PyTuple::new(
+                    py,
+                    [
+                        PyTuple::new(
+                            py,
+                            [
+                                &rt::str(py, "walk"),
+                                &rt::function!(m, lambda(), qualname = "<lambda>")?,
+                            ],
+                        )?
+                        .as_any(),
+                        PyTuple::new(
+                            py,
+                            [
+                                &rt::str(py, "chain"),
+                                &rt::function!(m, lambda2(), qualname = "<lambda>")?,
+                            ],
+                        )?
+                        .as_any(),
+                        PyTuple::new(
+                            py,
+                            [
+                                &rt::str(py, "countdown"),
+                                &rt::function!(m, lambda3(), qualname = "<lambda>")?,
+                            ],
+                        )?
+                        .as_any(),
+                        PyTuple::new(
+                            py,
+                            [
+                                &rt::str(py, "walk_objects"),
+                                &rt::function!(m, lambda4(), qualname = "<lambda>")?,
+                            ],
+                        )?
+                        .as_any(),
+                        PyTuple::new(
+                            py,
+                            [
+                                &rt::str(py, "chain_objects"),
+                                &rt::function!(m, lambda5(), qualname = "<lambda>")?,
+                            ],
+                        )?
+                        .as_any(),
+                    ],
+                )?
+                .as_any(),
+            )? {
                 let [name, run] = rt::unpack(&item6?)?;
                 m.set_global("name", name)?;
                 m.set_global("run", run)?;
@@ -1914,9 +1902,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     }
                     Err(err) => return Err(err),
                 }
-                py.check_signals()?;
             }
-            py.check_signals()?;
         }
         m.global("print")?
             .call1(("--- context of thrown exceptions",))?;

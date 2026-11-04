@@ -18,12 +18,11 @@ use steelix_runtime::Attributes;
 pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "show", 12, |_| {
-        for frame_ in m
-            .global("traceback")?
-            .attr("extract_tb")?
-            .call1((exc.attr("__traceback__")?,))?
-            .try_iter()?
-        {
+        for frame_ in rt::iter(
+            &m.global("traceback")?
+                .attr("extract_tb")?
+                .call1((exc.attr("__traceback__")?,))?,
+        )? {
             let frame_ = frame_?;
             rt::builtins::print(
                 py,
@@ -34,7 +33,6 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
                     frame_.attr("line")?,
                 ),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -53,12 +51,11 @@ pub fn no_carets<'py>(
             iter: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "no_carets.<locals>.<genexpr>", 19, |_| {
-                for line in iter {
+                for line in rt::iter(iter)? {
                     let line = line?;
                     if line.method0("strip")?.method1("strip", ("^~",))?.ne("")? {
                         return Ok(Some(line));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })
@@ -79,13 +76,11 @@ pub fn leaf<'py>(
     values: &Bound<'py, PyAny>,
     key: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "leaf", 24, |_| {
-        let mut total = rt::int(py, 0);
-        for value in values.try_iter()? {
+        let mut total = rt::int(m.py(), 0);
+        for value in rt::iter(values)? {
             let value = value?;
             total = total.add(&value)?;
-            py.check_signals()?;
         }
         values.get_item(key)?.add(&total)
     })
@@ -196,14 +191,13 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<
     let py = m.py();
     rt::frame!(m, "in_loop", 88, |_| {
         let mut count: Option<Bound<'py, PyAny>> = None;
-        for item in items.try_iter()? {
+        for item in rt::iter(items)? {
             let item = item?;
             if item.is_truthy()? {
                 count = Some(rt::int(py, item.len()?));
             } else {
                 count = Some(rt::int(py, 0));
             }
-            py.check_signals()?;
         }
         while rt::local(&count, "count")?.lt(3)? {
             count = Some(rt::local(&count, "count")?.add(1)?);
@@ -305,12 +299,13 @@ def kept_middle(values, key):
             }
             Err(err) => return Err(err),
         }
-        for item in PyList::new(
-            py,
-            [&m.global("raise_again")?, &m.global("raise_from_handler")?],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                py,
+                [&m.global("raise_again")?, &m.global("raise_from_handler")?],
+            )?
+            .as_any(),
+        )? {
             m.set_global("fn", item?)?;
             match (|| m.global("fn")?.call0())() {
                 Ok(_) => {}
@@ -331,7 +326,6 @@ def kept_middle(values, key):
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         match (|| in_loop(m, PyList::new(py, ["ab", ""])?.as_any()))() {
             Ok(_) => {}

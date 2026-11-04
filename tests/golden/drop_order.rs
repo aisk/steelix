@@ -71,13 +71,12 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Boun
     rt::frame!(m, "in_loop", 48, |_| {
         let first = m.global("T")?.call1(("first",))?;
         let mut last: Option<Bound<'py, PyAny>> = None;
-        for i in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
             let i = i?;
             last = Some(
                 m.global("T")?
                     .call1((rt::fstring(py, ("last-", rt::format(&i, "")?))?,))?,
             );
-            py.check_signals()?;
         }
         let after = m.global("T")?.call1(("after",))?;
         rt::builtins::print(
@@ -230,11 +229,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(py, ("--",))?;
         reassigned(m, &rt::none(py))?;
         rt::builtins::print(py, ("--",))?;
-        for item in PyTuple::new(py, [0, 1, 3])?.try_iter()? {
+        for item in rt::iter(PyTuple::new(py, [0, 1, 3])?.as_any())? {
             m.set_global("n", item?)?;
             branches(m, &m.global("n")?)?;
             rt::builtins::print(py, ("--",))?;
-            py.check_signals()?;
         }
         in_loop(m, &rt::int(py, 2))?;
         rt::builtins::print(py, ("--",))?;

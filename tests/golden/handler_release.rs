@@ -77,7 +77,7 @@ pub fn from_callee<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn handler_continue<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "handler_continue", 54, |frame| {
-        for i in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
             let i = i?;
             match (|| -> PyResult<()> {
                 Err(frame.raise(
@@ -86,10 +86,7 @@ pub fn handler_continue<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
                 ))
             })() {
                 Ok(()) => unreachable!(),
-                Err(err) if frame.matches(&err, 54, || m.global("Big"))? => {
-                    py.check_signals()?;
-                    continue;
-                }
+                Err(err) if frame.matches(&err, 54, || m.global("Big"))? => continue,
                 Err(err) => return Err(err),
             }
         }
@@ -202,7 +199,7 @@ pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         // The exception from the callee usually gets the address of the one
         // raised here, which is gone by then; it still gets this frame in its
         // traceback.
-        for i in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
             let i = i?;
             match (|| -> PyResult<()> {
                 Err(frame.raise(
@@ -222,7 +219,6 @@ pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 }
                 Err(err2) => return Err(err2),
             }
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -325,26 +321,26 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, frame_names(err))?;
         rt::def!(m, address_reused())?;
         rt::def!(m, leaves())?;
-        for item in PyTuple::new(
-            py,
-            [
-                &m.global("empty_handler")?,
-                &m.global("builtin_class")?,
-                &m.global("from_callee")?,
-                &m.global("handler_continue")?,
-                &m.global("handler_break")?,
-                &m.global("reraise_caught_outside")?,
-                &m.global("finally_then_handler")?,
-                &m.global("handler_as")?,
-                &m.global("address_reused")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("empty_handler")?,
+                    &m.global("builtin_class")?,
+                    &m.global("from_callee")?,
+                    &m.global("handler_continue")?,
+                    &m.global("handler_break")?,
+                    &m.global("reraise_caught_outside")?,
+                    &m.global("finally_then_handler")?,
+                    &m.global("handler_as")?,
+                    &m.global("address_reused")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("case", item?)?;
             m.global("case")?.call0()?;
             rt::builtins::print(py, ("returned from", m.global("case")?.attr("__name__")?))?;
-            py.check_signals()?;
         }
         match leaves(m) {
             Ok(_) => {}

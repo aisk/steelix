@@ -126,7 +126,7 @@ pub fn class_in_a_local<'py>(
         // The handler expression is evaluated each time, the local stays usable.
         let mut caught = rt::int(py, 0);
         let mut ignored = kinds.get_item(0)?;
-        for kind in kinds.try_iter()? {
+        for kind in rt::iter(kinds)? {
             let kind = kind?;
             ignored = kind.clone();
             match PyDict::new(py).as_any().get_item("k") {
@@ -137,7 +137,6 @@ pub fn class_in_a_local<'py>(
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         Ok(PyTuple::new(py, [&caught, &ignored.attr("__name__")?])?.into_any())
     })
@@ -162,16 +161,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 tuple_with_bad_member(m, &rt::int(m.py(), 0))
             })
         }
-        for item in PyTuple::new(
-            py,
-            [
-                &m.global("bad_class")?,
-                &m.global("missing_name")?,
-                &rt::function!(m, lambda(), qualname = "<lambda>")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("bad_class")?,
+                    &m.global("missing_name")?,
+                    &rt::function!(m, lambda(), qualname = "<lambda>")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("test", item?)?;
             match (|| m.global("test")?.call0())() {
                 Ok(_) => {}
@@ -183,7 +183,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         handled_while_testing(m)?;
         rt::builtins::print(py, (tuple_with_bad_member(m, &rt::int(py, 1))?,))?;

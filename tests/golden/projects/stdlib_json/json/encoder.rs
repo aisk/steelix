@@ -185,7 +185,7 @@ pub fn _make_iterencode<'py>(
                         newline_indent = rt::none(py);
                         separator = _item_separator.clone();
                     }
-                    for item in rt::builtin(py, "enumerate")?.call1((lst,))?.try_iter()? {
+                    for item in rt::iter(&rt::builtin(py, "enumerate")?.call1((lst,))?)? {
                         let [i, value] = rt::unpack(&item?)?;
                         if i.is_truthy()? {
                             buf = separator.clone();
@@ -252,7 +252,6 @@ pub fn _make_iterencode<'py>(
                             }
                             Err(err) => return Err(err),
                         }
-                        py.check_signals()?;
                     }
                     if !newline_indent.is_none() {
                         _current_indent_level = rt::isub(&_current_indent_level, 1)?;
@@ -339,7 +338,7 @@ pub fn _make_iterencode<'py>(
                     };
                     let mut key: Bound<'py, PyAny>;
                     let mut value: Bound<'py, PyAny>;
-                    for item in items.try_iter()? {
+                    for item in rt::iter(&items)? {
                         [key, value] = rt::unpack(&item?)?;
                         if isinstance.call1((&key, str))?.is_truthy()? {
                         } else {
@@ -358,7 +357,6 @@ pub fn _make_iterencode<'py>(
                                 // see comment for int/float in _make_iterencode
                                 key = _intstr.call1((&key,))?;
                             } else if _skipkeys.is_truthy()? {
-                                py.check_signals()?;
                                 continue;
                             } else {
                                 return Err(frame.raise(PyTypeError::new_err((rt::fstring(
@@ -440,7 +438,6 @@ pub fn _make_iterencode<'py>(
                             }
                             Err(err) => return Err(err),
                         }
-                        py.check_signals()?;
                     }
                     if !first && !newline_indent.is_none() {
                         _current_indent_level = rt::isub(&_current_indent_level, 1)?;
@@ -1075,7 +1072,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ]
             .into_py_dict(py)?,
         )?;
-        for item in rt::builtin(py, "range")?.call1((32,))?.try_iter()? {
+        for item in rt::iter(&rt::builtin(py, "range")?.call1((32,))?)? {
             m.set_global("i", item?)?;
             m.global("ESCAPE_DCT")?.attr("setdefault")?.call1((
                 rt::builtin(py, "chr")?.call1((m.global("i")?,))?,
@@ -1083,7 +1080,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     .attr("format")?
                     .call1((m.global("i")?,))?,
             ))?;
-            py.check_signals()?;
         }
         // ESCAPE_DCT.setdefault(chr(i), '\\u%04x' % (i,))
         m.del_global("i")?;

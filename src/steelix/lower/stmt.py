@@ -48,6 +48,10 @@ class _Loop:
     """The line of the loop header, if its next iteration (the test of a
     `while`, the next item of a `for`) can raise: `continue` and the end of
     the body set the traceback line back to it."""
+    signals: bool = True
+    """Whether the next iteration starts with `py.check_signals()?`; a `for`
+    loop's `rt::iter` checks them itself, unless the traceback line has to
+    go back to the header first."""
 
 
 class StmtLowering(HandlingLowering, MatchLowering):
@@ -390,11 +394,17 @@ class StmtLowering(HandlingLowering, MatchLowering):
         return loop.label
 
     def loop_body(
-        self, stmts: list[ast.stmt], else_label: str | None, header: int | None
+        self,
+        stmts: list[ast.stmt],
+        else_label: str | None,
+        header: int | None,
+        *,
+        signals: bool = True,
     ) -> tuple[rs.Block, _Loop]:
         """The body of a loop. With `header`, the line of a header that can
-        raise when the loop goes on, the body ends by going back to it."""
-        loop = _Loop(else_label, self.blocks, header=header)
+        raise when the loop goes on, the body ends by going back to it.
+        Without `signals` the loop's iterator checks for signals."""
+        loop = _Loop(else_label, self.blocks, header=header, signals=signals)
         self.loops.append(loop)
         body = self.block(stmts)
         if not diverges(body.stmts):
@@ -407,6 +417,11 @@ class StmtLowering(HandlingLowering, MatchLowering):
         body or at `continue`): CPython checks for signals there, on the line
         the iteration ended on, then the header line is back."""
         reset = [] if loop.header is None else self.at_line(loop.header)
+        if not loop.signals and not reset:
+            return []
+        # A `for` loop's `rt::iter` checks too, but only after the line is
+        # back on the header (`--traceback-lines`), where CPython reports
+        # the last statement of the body.
         return [self.check_signals(), *reset]
 
     def with_else(
@@ -457,9 +472,11 @@ class StmtLowering(HandlingLowering, MatchLowering):
         return out
 
     def check_signals(self) -> rs.Stmt:
-        """`py.check_signals()?;` at the end of every loop iteration, where
-        CPython's eval loop would run pending signal handlers: without it, a
-        native loop can not be stopped with Ctrl-C (`KeyboardInterrupt`)."""
+        """`py.check_signals()?;` at the end of every iteration of a `while`
+        loop, where CPython's eval loop would run pending signal handlers:
+        without it, a native loop can not be stopped with Ctrl-C
+        (`KeyboardInterrupt`). `for` loops iterate with `rt::iter`, which
+        checks them before each next item."""
         return _try_stmt(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals", ()))
 
     def for_stmt(self, stmt: ast.For) -> list[rs.Stmt]:
@@ -469,7 +486,7 @@ class StmtLowering(HandlingLowering, MatchLowering):
         items = self.flush_items()
         if isinstance(stmt, AsyncFor):
             return items + self.async_for(stmt, iterable, label)
-        iterator = rs.Try(iterable.method("try_iter"))
+        iterator = rs.Try(rs.Call(rs.Path("rt::iter"), (iterable.ref(),)))
         markers = self.markers
         # Getting the iterator and each item can raise.
         self.exprs.prelude[:0] = self.at_line(stmt.lineno)
@@ -491,7 +508,7 @@ class StmtLowering(HandlingLowering, MatchLowering):
             with self.exprs.fresh() as prelude:
                 head = self.store(stmt, target, item, declare=scoped)
             head = prelude + head
-        body, target = self.loop_body(stmt.body, label, stmt.lineno)
+        body, target = self.loop_body(stmt.body, label, stmt.lineno, signals=False)
         loop = rs.For(pat, iterator, rs.Block((*head, *body.stmts)), target.label)
         out = items + self.with_else(stmt, loop, label)
         if self.markers != markers:

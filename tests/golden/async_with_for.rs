@@ -13,10 +13,9 @@ pub async fn with_flow<'py>(
     m: &rt::Module<'py>,
     items: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "with_flow", 92, async |frame| {
-        let found = PyList::empty(py).into_any();
-        for item in items.try_iter()? {
+        let found = PyList::empty(m.py()).into_any();
+        for item in rt::iter(items)? {
             let item = item?;
             match frame
                 .async_with(&m.global("Resource")?.call1((&item,))?, async |value| {
@@ -36,13 +35,9 @@ pub async fn with_flow<'py>(
             {
                 rt::Flow::Return(value2) => return Ok(value2),
                 rt::Flow::Break => break,
-                rt::Flow::Continue => {
-                    py.check_signals()?;
-                    continue;
-                }
+                rt::Flow::Continue => continue,
                 rt::Flow::Next => {}
             }
-            py.check_signals()?;
         }
         Ok(found)
     })
@@ -196,18 +191,19 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "errors", 167, async |frame| {
         let mut cls: Bound<'py, PyAny>;
-        for item in PyTuple::new(
-            py,
-            [
-                &m.global("NoExit")?,
-                &m.global("SyncOnly")?,
-                &m.global("BadEnter")?,
-                &m.global("BadExit")?,
-                &rt::builtin(py, "int")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("NoExit")?,
+                    &m.global("SyncOnly")?,
+                    &m.global("BadEnter")?,
+                    &m.global("BadExit")?,
+                    &rt::builtin(py, "int")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             cls = item?;
             let result: PyResult<()> = async {
                 frame
@@ -235,18 +231,18 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
-        for item2 in PyTuple::new(
-            py,
-            [
-                &m.global("BadNext")?,
-                &m.global("BadIter")?,
-                &m.global("NoIter")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item2 in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("BadNext")?,
+                    &m.global("BadIter")?,
+                    &m.global("NoIter")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             cls = item2?;
             let result: PyResult<()> = async {
                 {
@@ -275,7 +271,6 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         match (|| -> PyResult<()> {
             frame.with(&m.global("Resource")?.call1(("sync",))?, |_| Ok(()))?;
@@ -327,10 +322,9 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) => return Err(err),
         }
         let queue = m.global("asyncio")?.method0("Queue")?;
-        for i in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
             let i = i?;
             queue.method1("put_nowait", (&i,))?;
-            py.check_signals()?;
         }
         // async_with_for.py:201
         async fn drain<'py>(

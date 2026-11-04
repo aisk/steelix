@@ -18,12 +18,11 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
     let py = m.py();
     rt::frame!(m, "show", 11, |_| {
         rt::builtins::print(py, (exc.get_type().attr("__name__")?, exc))?;
-        for frame_ in m
-            .global("traceback")?
-            .attr("extract_tb")?
-            .call1((exc.attr("__traceback__")?,))?
-            .try_iter()?
-        {
+        for frame_ in rt::iter(
+            &m.global("traceback")?
+                .attr("extract_tb")?
+                .call1((exc.attr("__traceback__")?,))?,
+        )? {
             let frame_ = frame_?;
             rt::builtins::print(
                 py,
@@ -34,7 +33,6 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
                     frame_.attr("line")?,
                 ),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -189,10 +187,9 @@ pub fn failing<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<Bou
         )?;
         rt::builtins::print(py, ("created",))?;
         let out = PyList::empty(py).into_any();
-        for value in r#gen.try_iter()? {
+        for value in rt::iter(&r#gen)? {
             let value = value?;
             out.method1("append", (&value,))?;
-            py.check_signals()?;
         }
         Ok(out)
     })
@@ -236,14 +233,12 @@ pub fn failing_condition<'py>(
             m: &rt::Module<'py>,
             xs: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
-            let py = m.py();
             rt::frame!(m, "failing_condition.<locals>.<genexpr>", 76, |_| {
-                for x in xs {
+                for x in rt::iter(xs)? {
                     let x = x?;
-                    if rt::int(py, 10).floor_div(&x)?.is_truthy()? {
+                    if rt::int(m.py(), 10).floor_div(&x)?.is_truthy()? {
                         return Ok(Some(x));
                     }
-                    py.check_signals()?;
                 }
                 Ok(None)
             })
@@ -299,7 +294,7 @@ pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             genexpr(source.call0()?.try_iter()?),
             qualname = "closed_early.<locals>.<genexpr>"
         )?;
-        for value in r#gen.try_iter()? {
+        for value in rt::iter(&r#gen)? {
             let value = value?;
             rt::builtins::print(py, ("got", &value))?;
             break;
@@ -736,22 +731,20 @@ pub fn comprehension_variable<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
         let gens = {
             let x_ = rt::Cell::empty(py, "x")?;
             let list = PyList::empty(py);
-            for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+            for item in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
                 x_.set(item?)?;
                 list.append(rt::genexpr!(
                     m,
                     genexpr[&x_ as "x"](rt::builtin(py, "range")?.call1((1,))?.try_iter()?),
                     qualname = "comprehension_variable.<locals>.<genexpr>"
                 )?)?;
-                py.check_signals()?;
             }
             list.into_any()
         };
         let list = PyList::empty(py);
-        for g in gens.try_iter()? {
+        for g in rt::iter(&gens)? {
             let g = g?;
             list.append(rt::builtin(py, "list")?.call1((&g,))?)?;
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })
@@ -770,12 +763,11 @@ pub fn collected<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             iter: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "collected.<locals>.<genexpr>", 156, |_| {
-                for x in iter {
+                for x in rt::iter(iter)? {
                     let x = x?;
                     if !g.get()?.is_none() {
                         return Ok(Some(x));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })

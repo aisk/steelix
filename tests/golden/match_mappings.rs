@@ -242,10 +242,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 ],
             )?,
         )?;
-        for item in m.global("messages")?.try_iter()? {
+        for item in rt::iter(&m.global("messages")?)? {
             m.set_global("message", item?)?;
             rt::builtins::print(py, (handle(m, &m.global("message")?)?,))?;
-            py.check_signals()?;
         }
         rt::def!(m, counts(mapping))?;
         counts(m, [("a", 1), ("b", 2)].into_py_dict(py)?.as_any())?;

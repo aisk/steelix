@@ -50,7 +50,7 @@ pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "loop", 78, |_| {
         let mut e: Bound<'py, PyAny>;
-        for i in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
             let i = i?;
             e = PyDict::new(py).into_any();
             e.set_item(
@@ -59,7 +59,6 @@ pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?;
             e.del_item(&i)?;
             rt::builtins::print(py, ("after loop", &i))?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -227,10 +226,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // A comprehension's result is dropped once the statement is done with it.
         {
             let list = PyList::empty(py);
-            for i in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
+            for i in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
                 let i = i?;
                 list.append(make(m, &rt::fstring(py, ("comp ", rt::format(&i, "")?))?)?)?;
-                py.check_signals()?;
             }
             m.set_global("n", list.len())?;
         }

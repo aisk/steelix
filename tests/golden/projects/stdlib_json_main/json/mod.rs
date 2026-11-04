@@ -70,7 +70,6 @@ pub fn dump<'py>(
     sort_keys: &Bound<'py, PyAny>,
     kw: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "dump", 123, |_| {
         let mut cls = cls.clone();
         // cached encoder
@@ -107,12 +106,11 @@ pub fn dump<'py>(
         };
         // could accelerate with writelines in some versions of Python, at
         // a debuggability cost
-        for chunk in iterable.try_iter()? {
+        for chunk in rt::iter(&iterable)? {
             let chunk = chunk?;
             fp.method1("write", (&chunk,))?;
-            py.check_signals()?;
         }
-        Ok(rt::none(py))
+        Ok(rt::none(m.py()))
     })
 }
 

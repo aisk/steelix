@@ -47,17 +47,18 @@ def kept(value):
     return "other"
 "#
         )?;
-        for item in PyList::new(
-            py,
-            [
-                PyList::new(py, [1, 2])?.as_any(),
-                [("x", 3)].into_py_dict(py)?.as_any(),
-                &rt::int(py, 0),
-                &rt::int(py, 5),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                py,
+                [
+                    PyList::new(py, [1, 2])?.as_any(),
+                    [("x", 3)].into_py_dict(py)?.as_any(),
+                    &rt::int(py, 0),
+                    &rt::int(py, 5),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("value", item?)?;
             rt::builtins::print(
                 py,
@@ -67,19 +68,19 @@ def kept(value):
                     m.global("kept")?.call1((m.global("value")?,))?,
                 ),
             )?;
-            py.check_signals()?;
         }
         // A module level loop keeps only the `match` that contains the OR pattern.
-        for item2 in PyList::new(
-            py,
-            [
-                PyTuple::new(py, [&rt::str(py, "add"), &rt::int(py, 1)])?.as_any(),
-                PyTuple::new(py, [&rt::str(py, "sub"), &rt::int(py, 2)])?.as_any(),
-                PyTuple::new(py, [&rt::str(py, "mul"), &rt::int(py, 3)])?.as_any(),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item2 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    PyTuple::new(py, [&rt::str(py, "add"), &rt::int(py, 1)])?.as_any(),
+                    PyTuple::new(py, [&rt::str(py, "sub"), &rt::int(py, 2)])?.as_any(),
+                    PyTuple::new(py, [&rt::str(py, "mul"), &rt::int(py, 3)])?.as_any(),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("value", item2?)?;
             // match_kept.py:28, kept as Python: OR pattern with captures at 29:14
             rt::exec_python!(
@@ -94,7 +95,6 @@ def kept(value):
 "#
             )?;
             rt::builtins::print(py, ("native", m.global("value")?))?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (m.global("n")?,))?;
         Ok(())

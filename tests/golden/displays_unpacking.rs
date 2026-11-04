@@ -52,19 +52,17 @@ pub fn lists<'py>(
             *m.global("Noisy")?.call1(("g", "g"))?,
             {
                 let list = PyList::empty(py);
-                for i in rt::builtin(py, "range")?.call1((1,))?.try_iter()? {
+                for i in rt::iter(&rt::builtin(py, "range")?.call1((1,))?)? {
                     let i = i?;
                     list.append(trace(m, &rt::str(py, "comp"), &i)?)?;
-                    py.check_signals()?;
                 }
                 list.into_any()
             },
             *{
                 let list2 = PyList::empty(py);
-                for i in a.try_iter()? {
+                for i in rt::iter(a)? {
                     let i = i?;
                     list2.append(&i)?;
-                    py.check_signals()?;
                 }
                 list2.into_any()
             }
@@ -241,19 +239,20 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::list!(m.py(), 0, *m.global("Noisy")?.call1(("bad", 5))?)?.into_any())
             })
         }
-        for build in PyTuple::new(
-            py,
-            [
-                &rt::function!(m, lambda(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda2(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda3(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda4(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda5(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda6(), qualname = "errors.<locals>.<lambda>")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for build in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &rt::function!(m, lambda(), qualname = "errors.<locals>.<lambda>")?,
+                    &rt::function!(m, lambda2(), qualname = "errors.<locals>.<lambda>")?,
+                    &rt::function!(m, lambda3(), qualname = "errors.<locals>.<lambda>")?,
+                    &rt::function!(m, lambda4(), qualname = "errors.<locals>.<lambda>")?,
+                    &rt::function!(m, lambda5(), qualname = "errors.<locals>.<lambda>")?,
+                    &rt::function!(m, lambda6(), qualname = "errors.<locals>.<lambda>")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             let build = build?;
             match build.call0() {
                 Ok(_) => {}
@@ -263,7 +262,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })

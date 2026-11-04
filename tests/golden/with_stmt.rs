@@ -158,7 +158,7 @@ pub fn jumps<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bo
     let py = m.py();
     rt::frame!(m, "jumps", 98, |frame| {
         let mut found = rt::none(py);
-        for item in items.try_iter()? {
+        for item in rt::iter(items)? {
             let item = item?;
             match frame.with(&m.global("Manager")?.call1((&item,))?, |_| {
                 if item.eq("skip")? {
@@ -175,13 +175,9 @@ pub fn jumps<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bo
             })? {
                 rt::Flow::Return(value) => return Ok(value),
                 rt::Flow::Break => break,
-                rt::Flow::Continue => {
-                    py.check_signals()?;
-                    continue;
-                }
+                rt::Flow::Continue => continue,
                 rt::Flow::Next => {}
             }
-            py.check_signals()?;
         }
         Ok(found)
     })
@@ -205,16 +201,17 @@ pub fn returns_value<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "bad_managers", 117, |frame| {
-        for manager in PyList::new(
-            py,
-            [
-                &m.global("NoExit")?.call0()?,
-                &m.global("Async")?.call0()?,
-                &rt::int(py, 42),
-            ],
-        )?
-        .try_iter()?
-        {
+        for manager in rt::iter(
+            PyList::new(
+                py,
+                [
+                    &m.global("NoExit")?.call0()?,
+                    &m.global("Async")?.call0()?,
+                    &rt::int(py, 42),
+                ],
+            )?
+            .as_any(),
+        )? {
             let manager = manager?;
             match (|| -> PyResult<()> {
                 frame.with(&manager, |_| Ok(()))?;
@@ -227,7 +224,6 @@ pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -281,10 +277,9 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
 
 // with_stmt.py:137
 pub fn suppress_in_loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "suppress_in_loop", 137, |frame| {
-        let mut count = rt::int(py, 0);
-        for i in m.global("range")?.call1((3,))?.try_iter()? {
+        let mut count = rt::int(m.py(), 0);
+        for i in rt::iter(&m.global("range")?.call1((3,))?)? {
             let i = i?;
             frame.with(
                 &rt::call!(
@@ -300,7 +295,6 @@ pub fn suppress_in_loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
                     Ok(())
                 },
             )?;
-            py.check_signals()?;
         }
         Ok(count)
     })

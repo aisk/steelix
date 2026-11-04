@@ -60,20 +60,20 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("inner", rt::import_from(&pkg, "inner")?)?;
         rt::def!(m, relative(path))?;
         rt::def!(m, describe(module))?;
-        for item in PyTuple::new(
-            py,
-            [
-                &m.global("ns")?.attr("tool")?,
-                &m.global("helper")?,
-                &m.global("leaf")?,
-                &m.global("inner")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("ns")?.attr("tool")?,
+                    &m.global("helper")?,
+                    &m.global("leaf")?,
+                    &m.global("inner")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("module", item?)?;
             describe(m, &m.global("module")?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (m.global("ns")?.attr("tool")?.method1("run", (3,))?,))?;
         rt::builtins::print(
@@ -89,10 +89,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .get_type()
             .attr("__name__")?;
         let list = PyList::empty(py);
-        for p in m.global("ns")?.attr("__path__")?.try_iter()? {
+        for p in rt::iter(&m.global("ns")?.attr("__path__")?)? {
             let p = p?;
             list.append(relative(m, &p)?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (__name__, list))?;
         rt::builtins::print(
@@ -108,12 +107,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             iter: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "<genexpr>", 28, |_| {
-                for name in iter {
+                for name in rt::iter(iter)? {
                     let name = name?;
                     if !name.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(name));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })

@@ -264,11 +264,10 @@ def twice():
         // `:=` in a comprehension binds a global, here shadowing a builtin.
         {
             let list = PyList::empty(py);
-            for v in PyTuple::new(py, [3, 7])?.try_iter()? {
+            for v in rt::iter(PyTuple::new(py, [3, 7])?.as_any())? {
                 let v = v?;
                 m.set_global("min", &v)?;
                 list.append(&v)?;
-                py.check_signals()?;
             }
         }
         rt::builtins::print(py, (m.global("min")?,))?;

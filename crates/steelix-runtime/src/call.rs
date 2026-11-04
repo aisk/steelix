@@ -27,6 +27,31 @@ pub fn keyword<'py>(py: Python<'py>, name: &'static str) -> Borrowed<'static, 'p
     crate::interned(py, name)
 }
 
+/// `function(args.., name=value..)` without `*` or `**`: a vectorcall
+/// whose last `kwnames.len()` arguments are the keyword values, so that no
+/// dict is built (and none taken apart again by a Python callee).
+#[doc(hidden)]
+pub fn vectorcall<'py>(
+    function: &Bound<'py, PyAny>,
+    args: &[Bound<'py, PyAny>],
+    kwnames: &Bound<'py, PyTuple>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let positional = args.len() - kwnames.len();
+    // SAFETY: attached; `Bound` is a transparent object pointer, so `args`
+    // is an array of `args.len()` objects, which outlive the call;
+    // `kwnames` is a tuple of strings. The call returns a new reference or
+    // NULL with an exception set.
+    unsafe {
+        let result = ffi::PyObject_Vectorcall(
+            function.as_ptr(),
+            args.as_ptr().cast(),
+            positional,
+            kwnames.as_ptr(),
+        );
+        Bound::from_owned_ptr_or_err(function.py(), result)
+    }
+}
+
 /// Whether `value` can be iterated, by the test CPython uses after an
 /// iteration failed.
 fn is_iterable(value: &Bound<'_, PyAny>) -> bool {
@@ -158,6 +183,32 @@ macro_rules! call {
             kwargs.as_ref(),
         )
     }};
+    // Keyword arguments without `**`: their names are known, a tuple made
+    // once for each call site.
+    (@parse $f:expr, [$((arg $value:expr))*] [$((kw $name:tt $kwvalue:expr))+]) => {{
+        // In two steps, so that `$f` may also be a reference.
+        let function = &$f;
+        let function: &$crate::pyo3::Bound<'_, $crate::pyo3::PyAny> = function;
+        let py = $crate::pyo3::Bound::py(function);
+        let args = [
+            $($crate::pyo3::IntoPyObjectExt::into_bound_py_any($value, py)?,)*
+            $($crate::pyo3::IntoPyObjectExt::into_bound_py_any($kwvalue, py)?,)+
+        ];
+        static KWNAMES: $crate::pyo3::sync::PyOnceLock<
+            $crate::pyo3::Py<$crate::pyo3::types::PyTuple>,
+        > = $crate::pyo3::sync::PyOnceLock::new();
+        let kwnames = KWNAMES.get_or_try_init(py, || {
+            let names = [$($crate::call::keyword(py, $crate::call!(@kwname $name))),+];
+            $crate::pyo3::types::PyTuple::new(py, names).map($crate::pyo3::Bound::unbind)
+        })?;
+        $crate::call::vectorcall(function, &args, kwnames.bind(py))
+    }};
+    (@kwname $name:ident) => {
+        $crate::function::python_name(stringify!($name))
+    };
+    (@kwname $name:literal) => {
+        $name
+    };
     (@parse $f:expr, [$((arg $value:expr))*] [$($k:tt)*]) => {{
         // In two steps, so that `$f` may also be a reference.
         let function = &$f;

@@ -134,7 +134,7 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) if err.is_instance_of::<PyKeyError>(py) => value = rt::none(py),
             Err(err) => return Err(err),
         }
-        for i in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
             let i = i?;
             let result: PyResult<rt::Flow<'py>> = async {
                 if i.eq(1)? {
@@ -152,13 +152,9 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::builtins::print(py, ("loop finally", &i))?;
             match finally.resume()? {
                 rt::Flow::Break => break,
-                rt::Flow::Continue => {
-                    py.check_signals()?;
-                    continue;
-                }
+                rt::Flow::Continue => continue,
                 _ => {}
             }
-            py.check_signals()?;
         }
         loop {
             match rt::delegate(raises(m, &rt::str(py, "in loop"))).await {
@@ -259,12 +255,11 @@ pub async fn outer<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
         }
         let inner = rt::function!(m, async inner[n](k), qualname = "outer.<locals>.inner")?;
         let results = PyList::empty(py).into_any();
-        for k in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+        for k in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
             let k = k?;
             results
                 .attr("append")?
                 .call1((rt::await_(inner.call1((&k,))?).await?,))?;
-            py.check_signals()?;
         }
         Ok(results)
     })

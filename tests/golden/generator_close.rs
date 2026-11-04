@@ -693,14 +693,13 @@ pub mod throwable {
         let py = m.py();
         rt::frame!(m, "Throwable.throw", 276, |frame| {
             let list = PyList::empty(py);
-            for a in args.try_iter()? {
+            for a in rt::iter(args.as_any())? {
                 let a = a?;
                 list.append(if a.is_instance(&rt::builtin(py, "type")?)? {
                     a.clone()
                 } else {
                     a.repr()?.into_any()
                 })?;
-                py.check_signals()?;
             }
             rt::builtins::print(py, ("  throw got", list))?;
             Err(frame.raise(PyStopIteration::new_err("after throw")))
@@ -747,9 +746,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, unraisable(u))?;
         let unraisable2 = m.global("unraisable")?;
         m.global("sys")?.set_attr("unraisablehook", unraisable2)?;
-        for item in
-            PyList::new(py, ["close", "throw GeneratorExit", "throw ValueError"])?.try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(py, ["close", "throw GeneratorExit", "throw ValueError"])?.as_any(),
+        )? {
             m.set_global("how", item?)?;
             // generator_close.py:251
             fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -757,28 +756,28 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     m.global("countdown")?.call1((3,))
                 })
             }
-            for item2 in PyList::new(
-                py,
-                [
-                    &m.global("outer")?,
-                    &m.global("outer_via")?,
-                    &m.global("outer_of_yields_again")?,
-                    &m.global("outer_of_yields_again_via")?,
-                    &m.global("outer_of_keeps_yielding")?,
-                    &m.global("outer_of_raises")?,
-                    &m.global("top")?,
-                    &rt::function!(m, lambda(), qualname = "<lambda>")?,
-                    &m.global("outer_of_catches")?,
-                    &m.global("aouter")?,
-                    &m.global("aouter_via")?,
-                    &m.global("aouter_of_ignores")?,
-                ],
-            )?
-            .try_iter()?
-            {
+            for item2 in rt::iter(
+                PyList::new(
+                    py,
+                    [
+                        &m.global("outer")?,
+                        &m.global("outer_via")?,
+                        &m.global("outer_of_yields_again")?,
+                        &m.global("outer_of_yields_again_via")?,
+                        &m.global("outer_of_keeps_yielding")?,
+                        &m.global("outer_of_raises")?,
+                        &m.global("top")?,
+                        &rt::function!(m, lambda(), qualname = "<lambda>")?,
+                        &m.global("outer_of_catches")?,
+                        &m.global("aouter")?,
+                        &m.global("aouter_via")?,
+                        &m.global("aouter_of_ignores")?,
+                    ],
+                )?
+                .as_any(),
+            )? {
                 m.set_global("make", item2?)?;
                 run(m, &m.global("make")?, &m.global("how")?)?;
-                py.check_signals()?;
             }
             match Err(frame.raise(PyLookupError::new_err("the caller's"))) {
                 Ok(()) => unreachable!(),
@@ -788,7 +787,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         let __unraisablehook__ = m.global("sys")?.attr("__unraisablehook__")?;
         m.global("sys")?
@@ -800,23 +798,26 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         rt::def!(m, gen delegates(it))?;
         rt::def!(m, async awaits(it))?;
-        for item3 in PyList::new(py, [&m.global("delegates")?, &m.global("awaits")?])?.try_iter()? {
+        for item3 in
+            rt::iter(PyList::new(py, [&m.global("delegates")?, &m.global("awaits")?])?.as_any())?
+        {
             m.set_global("make", item3?)?;
-            for item4 in PyList::new(
-                py,
-                [
-                    PyTuple::new(py, [&rt::builtin(py, "ValueError")?])?.as_any(),
-                    PyTuple::new(py, [&rt::builtin(py, "ValueError")?.call1(("instance",))?])?
+            for item4 in rt::iter(
+                PyList::new(
+                    py,
+                    [
+                        PyTuple::new(py, [&rt::builtin(py, "ValueError")?])?.as_any(),
+                        PyTuple::new(py, [&rt::builtin(py, "ValueError")?.call1(("instance",))?])?
+                            .as_any(),
+                        PyTuple::new(
+                            py,
+                            [&rt::builtin(py, "ValueError")?, &rt::str(py, "message")],
+                        )?
                         .as_any(),
-                    PyTuple::new(
-                        py,
-                        [&rt::builtin(py, "ValueError")?, &rt::str(py, "message")],
-                    )?
-                    .as_any(),
-                ],
-            )?
-            .try_iter()?
-            {
+                    ],
+                )?
+                .as_any(),
+            )? {
                 m.set_global("args", item4?)?;
                 m.set_global(
                     "g",
@@ -851,9 +852,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     }
                     Err(err) => return Err(err),
                 }
-                py.check_signals()?;
             }
-            py.check_signals()?;
         }
         rt::def!(m, gen r#gen())?;
         rt::def!(m, async coro())?;
@@ -872,17 +871,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Ok(None)
             })
         }
-        for item5 in PyList::new(
-            py,
-            [
-                &m.global("g")?,
-                &m.global("c")?,
-                &m.global("w")?,
-                &rt::genexpr!(m, genexpr(PyList::empty(py).try_iter()?))?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item5 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    &m.global("g")?,
+                    &m.global("c")?,
+                    &m.global("w")?,
+                    &rt::genexpr!(m, genexpr(PyList::empty(py).try_iter()?))?,
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("obj", item5?)?;
             rt::builtins::print(
                 py,
@@ -903,7 +903,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         rt::builtins::print(py, (m.global("w")?.get_type().attr("__doc__")?,))?;
         m.global("c")?.method0("close")?;

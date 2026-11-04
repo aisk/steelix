@@ -367,12 +367,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             __dict__: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "<genexpr>", 54, |_| {
-                for k in __dict__ {
+                for k in rt::iter(__dict__)? {
                     let k = k?;
                     if !k.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(k));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })
@@ -491,13 +490,12 @@ class WholeKept:
                         .call1((m.global("err")?.attr("__traceback__")?,))?,
                 )?;
                 let list = PyList::empty(py);
-                for f in m.global("tb")?.try_iter()? {
+                for f in rt::iter(&m.global("tb")?)? {
                     let f = f?;
                     list.append(PyTuple::new(
                         py,
                         [&f.attr("name")?, &f.attr("lineno")?, &f.attr("line")?],
                     )?)?;
-                    py.check_signals()?;
                 }
                 rt::builtins::print(py, (list,))?;
                 m.unbind_global("err")?;

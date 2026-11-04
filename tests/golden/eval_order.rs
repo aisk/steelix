@@ -459,16 +459,13 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             .del_item(trace(m, &rt::str(py, "del index"), &rt::int(py, 0))?)?;
         data.del_item(trace(m, &rt::str(py, "again"), &rt::str(py, "k"))?)?;
         rt::builtins::print(py, (&data, &n))?;
-        for item in trace(
+        for item in rt::iter(&trace(
             m,
             &rt::str(py, "iterable"),
             PyList::new(py, [1, 2])?.as_any(),
-        )?
-        .try_iter()?
-        {
+        )?)? {
             let item = item?;
             rt::builtins::print(py, ("item", &item))?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })

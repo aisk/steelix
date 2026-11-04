@@ -94,7 +94,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             Err(err) => return Err(err),
         }
-        for item in PyList::new(py, ["sys", "json", "__main__"])?.try_iter()? {
+        for item in rt::iter(PyList::new(py, ["sys", "json", "__main__"])?.as_any())? {
             m.set_global("module", item?)?;
             match (|| {
                 m.global("exec")?.call1((
@@ -123,7 +123,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         match (|| -> PyResult<()> {
             let __main__ = rt::import_names(m, "__main__", &["nothing"])?;

@@ -104,14 +104,13 @@ pub async fn in_loops<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "in_loops", 50, async |_| {
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             if row.is_none() {
-                py.check_signals()?;
                 continue;
             }
             'for_else: {
-                for item in row.try_iter()? {
+                for item in rt::iter(&row)? {
                     let item = item?;
                     if item.eq("stop")? {
                         break 'for_else;
@@ -120,11 +119,9 @@ pub async fn in_loops<'py>(
                         return Ok(rt::str(py, "ended"));
                     }
                     rt::yield_(&item).await?;
-                    py.check_signals()?;
                 }
                 rt::yield_(rt::str(py, "row done")).await?;
             }
-            py.check_signals()?;
         }
         Ok(rt::str(py, "all done"))
     })
@@ -189,10 +186,9 @@ pub async fn tree<'py>(
     let py = m.py();
     rt::frame!(m, "tree", 100, async |_| {
         if node.is_instance(&rt::builtin(py, "list")?)? {
-            for child in node.try_iter()? {
+            for child in rt::iter(node)? {
                 let child = child?;
                 rt::delegate(Box::pin(tree(m, &child))).await?;
-                py.check_signals()?;
             }
         } else {
             rt::yield_(node).await?;
@@ -296,13 +292,11 @@ pub fn closure_gen<'py>(
             values: &Bound<'py, PyAny>,
             scale: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            let py = m.py();
             rt::frame!(m, "closure_gen.<locals>.<lambda>", 172, |_| {
-                let list = PyList::empty(py);
-                for v in values.try_iter()? {
+                let list = PyList::empty(m.py());
+                for v in rt::iter(values)? {
                     let v = v?;
                     list.append(v.mul(scale)?)?;
-                    py.check_signals()?;
                 }
                 Ok(list.into_any())
             })
@@ -318,7 +312,6 @@ pub fn closure_gen<'py>(
 
 // generators.py:175
 pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "gen_with_nested", 175, async |_| {
         // generators.py:176
         async fn inner<'py>(
@@ -336,12 +329,11 @@ pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             gen inner(x),
             qualname = "gen_with_nested.<locals>.inner"
         )?;
-        for value in inner.call1((5,))?.try_iter()? {
+        for value in rt::iter(&inner.call1((5,))?)? {
             let value = value?;
             rt::yield_(&value).await?;
-            py.check_signals()?;
         }
-        Ok(rt::none(py))
+        Ok(rt::none(m.py()))
     })
 }
 
@@ -440,14 +432,12 @@ pub mod bag {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
         rt::frame!(m, "Bag.__iter__", 125, async |_| {
-            for item in slf.attr("items")?.try_iter()? {
+            for item in rt::iter(&slf.attr("items")?)? {
                 let item = item?;
                 rt::yield_(&item).await?;
-                py.check_signals()?;
             }
-            Ok(rt::none(py))
+            Ok(rt::none(m.py()))
         })
     }
 
@@ -459,13 +449,12 @@ pub mod bag {
         let py = m.py();
         rt::frame!(m, "Bag.pairs", 129, async |_| {
             let mut previous = rt::none(py);
-            for item in slf.try_iter()? {
+            for item in rt::iter(slf)? {
                 let item = item?;
                 if !previous.is_none() {
                     rt::yield_(PyTuple::new(py, [&previous, &item])?).await?;
                 }
                 previous = item.clone();
-                py.check_signals()?;
             }
             Ok(rt::none(py))
         })

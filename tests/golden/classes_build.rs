@@ -71,12 +71,11 @@ pub fn fake_meta<'py>(
             ns: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "fake_meta.<locals>.<genexpr>", 265, |_| {
-                for k in ns {
+                for k in rt::iter(ns)? {
                     let k = k?;
                     if !k.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(k));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })
@@ -187,10 +186,9 @@ pub mod meta {
         let py = m.py();
         rt::frame!(m, "Meta.__prepare__", 44, |_| {
             let list = PyList::empty(py);
-            for b in bases.try_iter()? {
+            for b in rt::iter(bases)? {
                 let b = b?;
                 list.append(b.attr("__name__")?)?;
-                py.check_signals()?;
             }
             rt::builtins::print(py, ("prepare", name, list, kwargs))?;
             m.global("Logged")?.call0()
@@ -697,16 +695,14 @@ pub mod drop_cell {
         bases: &Bound<'py, PyAny>,
         ns: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
         rt::frame!(m, "DropCell.__new__", 240, |_| {
             let mut ns = ns.clone();
-            let dict = PyDict::new(py);
-            for item in ns.method0("items")?.try_iter()? {
+            let dict = PyDict::new(m.py());
+            for item in rt::iter(&ns.method0("items")?)? {
                 let [k, v] = rt::unpack(&item?)?;
                 if k.ne("__classcell__")? {
                     dict.set_item(&k, &v)?;
                 }
-                py.check_signals()?;
             }
             ns = dict.into_any();
             rt::super_(__class__, mcls)?.method1("__new__", (mcls, name, bases, &ns))
@@ -1277,7 +1273,7 @@ def errors():
                     .attr("__qualname__")?,
             ),
         )?;
-        for item in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
+        for item in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
             m.set_global("i", item?)?;
             m.set_global(
                 "InLoop",
@@ -1290,7 +1286,6 @@ def errors():
                     m.global("InLoop")?.attr("__qualname__")?,
                 ),
             )?;
-            py.check_signals()?;
         }
         // classes_build.py:310, kept as Python: class definition in a function at 311:5
         rt::exec_python!(

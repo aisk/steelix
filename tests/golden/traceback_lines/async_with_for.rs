@@ -17,7 +17,7 @@ pub async fn with_flow<'py>(
     rt::frame!(m, "with_flow", 92, async |frame| {
         let found = PyList::empty(py).into_any();
         frame.line(94);
-        for item in items.try_iter()? {
+        for item in rt::iter(items)? {
             let item = item?;
             frame.line(95);
             match frame
@@ -240,18 +240,19 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "errors", 167, async |frame| {
         frame.line(168);
         let mut cls: Bound<'py, PyAny>;
-        for item in PyTuple::new(
-            py,
-            [
-                &m.global("NoExit")?,
-                &m.global("SyncOnly")?,
-                &m.global("BadEnter")?,
-                &m.global("BadExit")?,
-                &rt::builtin(py, "int")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("NoExit")?,
+                    &m.global("SyncOnly")?,
+                    &m.global("BadEnter")?,
+                    &m.global("BadExit")?,
+                    &rt::builtin(py, "int")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             cls = item?;
             let result: PyResult<()> = async {
                 frame.line(170);
@@ -286,16 +287,17 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             frame.line(168);
         }
         frame.line(174);
-        for item2 in PyTuple::new(
-            py,
-            [
-                &m.global("BadNext")?,
-                &m.global("BadIter")?,
-                &m.global("NoIter")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item2 in rt::iter(
+            PyTuple::new(
+                py,
+                [
+                    &m.global("BadNext")?,
+                    &m.global("BadIter")?,
+                    &m.global("NoIter")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             cls = item2?;
             let result: PyResult<()> = async {
                 frame.line(176);
@@ -391,7 +393,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(197);
         let queue = m.global("asyncio")?.method0("Queue")?;
         frame.line(198);
-        for i in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
             let i = i?;
             frame.line(199);
             queue.method1("put_nowait", (&i,))?;

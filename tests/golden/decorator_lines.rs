@@ -35,12 +35,11 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
     let py = m.py();
     rt::frame!(m, "show", 19, |_| {
         rt::builtins::print(py, (exc.get_type().attr("__name__")?, exc))?;
-        for frame_ in m
-            .global("traceback")?
-            .attr("extract_tb")?
-            .call1((exc.attr("__traceback__")?,))?
-            .try_iter()?
-        {
+        for frame_ in rt::iter(
+            &m.global("traceback")?
+                .attr("extract_tb")?
+                .call1((exc.attr("__traceback__")?,))?,
+        )? {
             let frame_ = frame_?;
             rt::builtins::print(
                 py,
@@ -51,7 +50,6 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
                     frame_.attr("line")?,
                 ),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })

@@ -216,17 +216,16 @@ class ComprehensionLowering:
         """The `for` loop of the generator `index` with the loops of the
         following ones inside, and `innermost` in the innermost body.
 
-        `iterable` is the lowered iterable (`try_iter` is called on it), or
-        the path of an iterator (the parameter of a generator expression's
-        step). The loop sets the frame back to the line of the iterable
-        whenever its body moved it, since getting the next item can raise."""
+        `iterable` is the lowered iterable, or the path of an iterator (the
+        parameter of a generator expression's step), which `rt::iter`
+        iterates, checking for signals before each next item. The loop sets
+        the frame back to the line of the iterable whenever its body moved
+        it, since getting the next item can raise."""
         generator = node.generators[index]
         iter_line = generator.iter.lineno
         out: list[rs.Stmt] = []
-        if isinstance(iterable, rs.Path):
-            iterator: rs.Expr = iterable
-        else:
-            iterator = rs.Try(iterable.method("try_iter"))
+        source = iterable if isinstance(iterable, rs.Path) else iterable.ref()
+        iterator = rs.Try(rs.Call(rs.Path("rt::iter"), (source,)))
         markers = self.markers
         pattern, body = self.bind_target(generator.target)
         conditions: list[tuple[list[rs.Stmt], rs.Expr]] = []
@@ -249,8 +248,11 @@ class ComprehensionLowering:
         if not _returns(body):
             if self.markers != markers:
                 self.line = None
+                # Before the line is back on the iterable (see `next_iteration`).
+                body.append(
+                    rs.ExprStmt(rs.Try(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals")))
+                )
                 body += self.at_line(iter_line)
-            body.append(rs.ExprStmt(rs.Try(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals"))))
         self.line = iter_line
         out.append(rs.For(pattern, iterator, rs.Block(tuple(body))))
         return out

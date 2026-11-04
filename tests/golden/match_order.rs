@@ -276,11 +276,10 @@ pub mod seq {
         let py = m.py();
         rt::frame!(m, "Seq.__iter__", 25, async |_| {
             log(m, &PyTuple::new(py, ["iter"])?)?;
-            for item in slf.attr("items")?.try_iter()? {
+            for item in rt::iter(&slf.attr("items")?)? {
                 let item = item?;
                 log(m, &PyTuple::new(py, [&rt::str(py, "next"), &item])?)?;
                 rt::yield_(&item).await?;
-                py.check_signals()?;
             }
             Ok(rt::none(py))
         })

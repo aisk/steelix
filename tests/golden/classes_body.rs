@@ -21,15 +21,13 @@ pub fn show_tb<'py>(m: &rt::Module<'py>, err: &Bound<'py, PyAny>) -> PyResult<Bo
     let py = m.py();
     rt::frame!(m, "show_tb", 7, |_| {
         let list = PyList::empty(py);
-        for f in m
-            .global("traceback")?
-            .attr("extract_tb")?
-            .call1((err.attr("__traceback__")?,))?
-            .try_iter()?
-        {
+        for f in rt::iter(
+            &m.global("traceback")?
+                .attr("extract_tb")?
+                .call1((err.attr("__traceback__")?,))?,
+        )? {
             let f = f?;
             list.append(PyTuple::new(py, [&f.attr("name")?, &f.attr("lineno")?])?)?;
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })
@@ -47,10 +45,9 @@ pub mod body_ {
             let math = rt::import_names(m, "math", &["sqrt"])?;
             ns.set("root", rt::import_from(&math, "sqrt")?)?;
             ns.set("total", 0)?;
-            for item in ns.get("range")?.call1((4,))?.try_iter()? {
+            for item in rt::iter(&ns.get("range")?.call1((4,))?)? {
                 ns.set("i", item?)?;
                 ns.set("total", rt::iadd(&ns.get("total")?, ns.get("i")?)?)?;
-                py.check_signals()?;
             }
             while ns.get("total")?.gt(10)? {
                 ns.set("total", rt::isub(&ns.get("total")?, 1)?)?;
@@ -109,10 +106,9 @@ pub mod body_ {
             }
             ns.set("x", 1)?;
             let list = PyList::empty(py);
-            for x in ns.get("range")?.call1((3,))?.try_iter()? {
+            for x in rt::iter(&ns.get("range")?.call1((3,))?)? {
                 let x = x?;
                 list.append(x.mul(&x)?)?;
-                py.check_signals()?;
             }
             ns.set("squares", list)?;
             ns.set("y", 2)?;
@@ -278,10 +274,9 @@ pub mod failing_kept {
         let py = m.py();
         rt::frame!(ns, "FailingKept", 104, |_| {
             let list = PyList::empty(py);
-            for underscore in rt::str(py, "x").try_iter()? {
+            for underscore in rt::iter(&rt::str(py, "x"))? {
                 let underscore = underscore?;
                 list.append(rt::int(py, 1).div(0)?)?;
-                py.check_signals()?;
             }
             ns.set("values", list)?;
             Ok(())
@@ -321,10 +316,9 @@ pub mod annotated {
         let py = m.py();
         rt::frame!(m, "Annotated.kept", 117, |_| {
             let list = PyList::empty(py);
-            for underscore in rt::str(py, "x").try_iter()? {
+            for underscore in rt::iter(&rt::str(py, "x"))? {
                 let underscore = underscore?;
                 list.append(x)?;
-                py.check_signals()?;
             }
             Ok(list.into_any())
         })

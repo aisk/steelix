@@ -63,10 +63,9 @@ pub async fn handle<'py>(
                 );
             } else if let Some(([first], others, [])) = rt::match_seq_star(&subject)? {
                 total = first.clone();
-                for other in others.try_iter()? {
+                for other in rt::iter(&others)? {
                     let other = other?;
                     total = rt::iadd(&total, rt::delegate(fetch(m, &other)).await?)?;
-                    py.check_signals()?;
                 }
                 return rt::fstring(py, ("sum ", rt::format(&total, "")?));
             }
@@ -100,10 +99,9 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             ],
         )?
         .into_any();
-        for request in requests.try_iter()? {
+        for request in rt::iter(&requests)? {
             let request = request?;
             rt::builtins::print(py, (rt::delegate(handle(m, &request)).await?,))?;
-            py.check_signals()?;
         }
         let mut a: Option<Bound<'py, PyAny>> = None;
         let mut b: Option<Bound<'py, PyAny>> = None;
@@ -141,7 +139,7 @@ pub async fn tokens<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "tokens", 57, async |_| {
-        for word in text.method0("split")?.try_iter()? {
+        for word in rt::iter(&text.method0("split")?)? {
             let word = word?;
             if word.eq("+")? || word.eq("-")? || word.eq("*")? || word.eq("/")? {
                 let op = word.clone();
@@ -168,7 +166,6 @@ pub async fn tokens<'py>(
                 let value = PyTuple::new(py, [&rt::str(py, "len"), &rt::int(py, word.len()?)])?;
                 rt::yield_(value).await?;
             }
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -183,13 +180,12 @@ pub async fn lines<'py>(
     let py = m.py();
     rt::frame!(m, "lines", 75, async |_| {
         let mut received: Bound<'py, PyAny>;
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             if let Some([key, value]) = rt::match_seq(&row)? {
                 received = rt::yield_(&key).await?;
                 rt::builtins::print(py, ("sent", &received, "for", &key, &value))?;
             }
-            py.check_signals()?;
         }
         rt::yield_(rt::str(py, "done")).await?;
         Ok(rt::none(py))

@@ -16,6 +16,7 @@ use pyo3::exceptions::{PyAttributeError, PyNameError, PyNotImplementedError, PyT
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString, PyTuple};
 use pyo3::{IntoPyObjectExt, PyTraverseError, PyVisit, ffi};
+use smallvec::SmallVec;
 
 use crate::Module;
 
@@ -386,8 +387,10 @@ impl Function {
                 && let Some(first) = defaults.len().checked_sub(sig.positional - args.len())
             {
                 // The missing ones are the last parameters, whose defaults
-                // are the last ones.
-                let bound = [args, &defaults.as_slice()[first..]].concat();
+                // are the last ones. On the stack: this is a common call.
+                let defaults = &defaults.as_slice()[first..];
+                let bound: SmallVec<[Bound<'py, PyAny>; 8]> =
+                    args.iter().chain(defaults).cloned().collect();
                 return self.run(&module, closure, &bound);
             }
         }

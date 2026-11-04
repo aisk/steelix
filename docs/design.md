@@ -215,17 +215,17 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 - 循环变量：如果一个名字只被某个 `for` 的目标绑定（可以是嵌套元组），并且只在这个循环体内读取，就在每次迭代开头声明，不提前声明也不需要 `mut`
 
   ```rust
-  for x in xs.try_iter()? {
+  for x in rt::iter(xs)? {
       let x = x?;
       ..
   }
-  for item in pairs.try_iter()? {
+  for item in rt::iter(pairs)? {
       let [key, value] = rt::unpack(&item?)?;
       ..
   }
   ```
 
-  否则（循环后还要读，或者别处也赋值）照常赋值给事先声明的变量：`for item in xs.try_iter()? { x = item?; .. }`
+  否则（循环后还要读，或者别处也赋值）照常赋值给事先声明的变量：`for item in rt::iter(xs)? { x = item?; .. }`
 - 解包赋值的目标都是普通局部变量时，第一次出现写成 `let [a, b] = rt::unpack(&value)?;`，之后写成解构赋值 `[a, b] = rt::unpack(&value)?;`。目标里有属性、下标、全局变量或 `Option` 变量时，先解包到临时变量，再按顺序逐个赋值
 - 函数内的带注解赋值 `x: int = v` 在分析之前改写成 `x = v`（`frontend/desugar.py`），因为局部变量的注解从不求值。没有值的 `x: int` 只让 `x` 成为局部变量，直接去掉
 - 函数顶层第一次出现的 `import` 也直接 `let os = rt::import(m, "os")?;`
@@ -305,11 +305,12 @@ greet(m, &rt::str(py, "Bob"), &rt::str(py, "Hello"), &m.default("greet", "punct"
 M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几倍（`ctx.top()` 206 ns，CPython 43 ns），原因是调用协议和属性名，与函数体无关。M11 只做了不改变语义、不影响生成代码可读性的几项
 
 - **vectorcall（PEP 590）。** 以前只有 `tp_call`，CPython 每次调用都要先建参数 tuple（有关键字参数时还有 dict），PyO3 再解析一遍。现在 `Function` 有 vectorcall 入口，直接拿到参数数组和关键字名字的 tuple，`__call__` 仍然保留（`f.__call__(..)` 走它），两条路径共用同一个绑定函数，报错文字不变
-- **不需要绑定的调用直接传参数。** 只有位置参数的函数用位置参数调用、没有关键字参数时，参数数组本身就是函数体要的参数列表，不复制。参数少于形参时，缺的那些从调用时的 `__defaults__` 末尾补上（和 CPython 一样，默认值不够时交给完整的绑定去报错）。其余情况（关键字参数、`*args`、keyword-only、`**kwargs`）走 `initialize_locals` 的完整算法
+- **不需要绑定的调用直接传参数。** 只有位置参数的函数用位置参数调用、没有关键字参数时，参数数组本身就是函数体要的参数列表，不复制。参数少于形参时，缺的那些从调用时的 `__defaults__` 末尾补上（和 CPython 一样，默认值不够时交给完整的绑定去报错），补齐的参数列表放在栈上（`SmallVec`，M14 之后，以前每次调用都分配一个 `Vec`；skime 的读取器快约 3%，Python 侧的 `p.pop()` 从 105 ns 到 85 ns）。其余情况（关键字参数、`*args`、keyword-only、`**kwargs`）走 `initialize_locals` 的完整算法
 - **`Py_TPFLAGS_METHOD_DESCRIPTOR`。** 表示 `f.__get__(obj)(*args)` 等价于 `f(obj, *args)`，CPython 的 `LOAD_ATTR` 方法优化和 `PyObject_VectorcallMethod`（`method0`/`method1` 用的）因此不再为 `obj.m()` 创建 bound method。取属性 `obj.m` 本身照样经过 `__get__` 得到 bound method，内省看到的东西不变
 - PyO3 的 `#[pyclass]` 不能声明这两项，所以在创建第一个函数时补到类型对象上：`tp_vectorcall_offset` 指向 `Function` 里存放入口指针的字段，`tp_flags` 加上两个标志，再 `PyType_Modified`。`Function` 不能被继承，所有实例布局相同
 - vectorcall 的入口经过 PyO3 自己包装 fastcall 函数用的 trampoline（`pyo3::impl_`，随 PyO3 的版本固定）。它把错误和 panic 变成异常，并且告诉 PyO3 当前线程已经 attach。只用 `Python::assume_attached` 不够：在 Python 自己创建的线程里调用原生函数时 PyO3 不知道已经 attach，函数里释放的 `Py<T>`（例如处理完的异常）会推迟到以后才 decref，`__del__` 的时机就和 CPython 不同（`tests/cases/call_protocols.py` 最后一段检查这一点）
 - CPython 在 `tp_call` 之前检查递归深度，vectorcall 之前不检查，所以入口自己调用 `Py_EnterRecursiveCall`，消息和以前一样
+- **关键字参数直接 vectorcall（M14 之后）。** 没有 `**` 和 `*` 的 `rt::call!(f, x, sep = ", ")` 把位置参数和关键字参数的值放进一个数组，关键字的名字是每个调用点只建一次的 tuple（`static PyOnceLock`），直接 `PyObject_Vectorcall`，不再先建 dict 再由 CPython 拆开。`rt::call!(f, &p, idx = 1)` 从约 208 ns 到约 124 ns。有 `*`、`**` 的仍然建 tuple 和 dict，报错都由被调用的对象产生，两条路径一样（`call_protocols` 的最后一段）
 - **驻留的名字。** `rt::Attributes`（第 4 节）、`m.global`、`rt::builtin` 和 `rt::call!` 的关键字参数都只接受 `'static` 的名字，按字符串字面量的地址和长度找到驻留的 Python 字符串。PyO3 从 `&str` 每次新建字符串，CPython 再算哈希，而且属性缓存只认驻留的名字，这一项在 skime 上就快了一倍。查找用一张 4096 项、按地址索引的表，读取不加锁（attach 的线程轮流运行，写入只在第一次），几个位置都被别的名字占了时退回一张加锁的 `HashMap`（M11a 之前是每个线程一张，每个线程都要为同一个名字泄漏一份）。和 `pyo3::intern!` 一样，这些字符串不释放
   - 不加锁的读取只在有 GIL 时正确：写入一个位置的几个字段之间不会有别的线程运行。free-threaded 的 Python（3.14t）没有这个保证，`Function` 的元信息、`Generator` 的状态和协程的 future（§8）也是按有 GIL 设计的，所以 runtime 在 free-threaded 的构建上直接编译失败（`build.rs` 用 `pyo3-build-config` 得到 `Py_GIL_DISABLED`，`lib.rs` 里 `compile_error!` 指向这一节），而不是生成运行时才出错的代码
 
@@ -318,9 +319,9 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 没有做的
 
 - 参数不纯时的方法调用 `o.attr("m")?.call1((f()?,))?` 仍然先创建 bound method。要避免它得在 runtime 里重新实现 `_PyObject_GetMethod`（类型的 MRO、数据描述符、实例 dict、`__getattr__`），不算低成本
-- `rt::call!` 的关键字参数仍然先建 dict，再由 CPython 拆成 vectorcall 的形式，只是 key 改成了驻留的字符串。直接构造 kwnames 的收益在 skime 上不到 1%
 - 字符串常量 `rt::str(py, "..")` 仍然每次新建。缓存它们会让 `is` 的结果和以前不同（虽然更接近 CPython），而且不在热点上
-- 循环里的 `py.check_signals()`、`rt::frame!` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动
+- 循环里的 `py.check_signals()`、`rt::frame!` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动（M14 之后 `for` 循环的检查挪进了 `rt::iter`，为了可读性）
+- M14 之后的 review 又测过不值得的：字符串常量缓存、`__slots__` 的 inline cache（`roadmap.md` 的性能候选项）；去掉 vectorcall 入口的 `RecursionGuard` 最多快 6.5%，但 Python 侧的递归要靠它抛 `RecursionError`
 - 全局变量的缓存（dict watcher），理由见第 7 节
 
 ### 嵌套函数与 lambda
@@ -631,21 +632,19 @@ CPython 先求值被调用的对象，再按源码顺序求值位置参数（包
 ```rust
 // return [x * x for x in xs]
 let list = PyList::empty(py);
-for x in xs.try_iter()? {
+for x in rt::iter(xs)? {
     let x = x?;
     list.append(x.mul(&x)?)?;
-    py.check_signals()?;
 }
 Ok(list.into_any())
 
 // return {k: v for k, v in d.items() if v % 2 == 0}
 let dict = PyDict::new(py);
-for item in d.method0("items")?.try_iter()? {
+for item in rt::iter(&d.method0("items")?)? {
     let [k, v] = rt::unpack(&item?)?;
     if v.rem(2)?.eq(0)? {
         dict.set_item(&k, &v)?;
     }
-    py.check_signals()?;
 }
 Ok(dict.into_any())
 ```
@@ -653,7 +652,7 @@ Ok(dict.into_any())
 - 作用域和 CPython 一样：第一个 `for` 的可迭代对象在外层求值，其余部分在推导式里。`symtable` 把推导式的变量算作外层函数的局部变量，分析（`frontend/scope.py` 的 `walk_scope`）把推导式里对它们的使用排除在外，所以 `[x for x in x]`、和全局变量同名的推导式变量都是对的。函数里推导式变量的 Rust 名字用函数的重命名表，模块级和类体里另取不冲突的名字，推导式结束后临时变量可以再用这个名字
 - 类体里的推导式看不到类的命名空间（第一个可迭代对象除外），名字直接查 globals 和 builtins，和 CPython 一样抛 `NameError`
 - dict 推导式先求值 key 再求值 value（3.8 起的顺序），重复的 key 后者覆盖前者。set 推导式的 `set.add(..)` 是 `PySet` 自己的方法，生成的方法调用带 `concrete` 标记，检查器（§2）不要求擦除类型
-- 每次迭代结尾 `py.check_signals()?`，和普通循环一样
+- 和普通的 `for` 一样用 `rt::iter` 迭代，取每个后续元素之前检查信号
 - 行号：错误报告在外层帧里。默认（§9）就是外层函数的 `def` 行。`--traceback-lines` 时行号是出错的部分所在的行：推导式跨行时，第一个可迭代对象、条件、元素前面各写 `frame.line(N)`，迭代体改变了行号时在结尾设回 `for` 的行（取下一个元素时出错报这一行），推导式结束后设回语句的行。推导式写在一行里时没有额外的 marker
 - 推导式里定义的 lambda 或生成器表达式捕获推导式的变量时，这个变量是一个在循环之前创建的 `rt::Cell`，所有迭代共用（`[lambda: i for i in range(3)]` 的三个函数都返回 2），和 CPython 内联之后的行为一样
 - `locals()`、`vars()`、`dir()`（不带参数）和不带命名空间的 `exec`/`eval` 在推导式里会看到推导式的变量，所在的函数或语句保留为 Python
@@ -684,12 +683,11 @@ rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
 - 有 `if` 时 step 是一个 `for` 循环，`return` 从循环中间返回，下次调用继续迭代同一个迭代器（位置保存在 Python 的迭代器里），所以不需要状态机：
 
   ```rust
-  for word in words {
+  for word in rt::iter(words)? {
       let word = word?;
       if word.is_truthy()? {
           return Ok(Some(word.method0("upper")?));
       }
-      py.check_signals()?;
   }
   Ok(None)
   ```
@@ -706,14 +704,13 @@ rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
 ```rust
 // ys = [y for x in xs if (y := x * 2) > 2]，y 可能没有赋值
 let list = PyList::empty(py);
-for x in xs.try_iter()? {
+for x in rt::iter(xs)? {
     let x = x?;
     let y2 = x.mul(2)?;
     y = Some(y2.clone());
     if y2.gt(2)? {
         list.append(rt::local(&y, "y")?)?;
     }
-    py.check_signals()?;
 }
 ```
 
@@ -934,11 +931,10 @@ runtime 的 helper（`crates/steelix-runtime/src/matching.rs`）各做 CPython �
   rt::frame!(m, "total_size", 24, |_| {
       let mut text: Bound<'py, PyAny>;
       let mut total = rt::int(py, 0);
-      for path in paths.try_iter()? {
+      for path in rt::iter(paths)? {
           let path = path?;
           text = read_first_line(m, &path)?;
           total = rt::iadd(&total, text.len()?)?;
-          py.check_signals()?;
       }
       Ok(total)
   })
@@ -951,13 +947,12 @@ runtime 的 helper（`crates/steelix-runtime/src/matching.rs`）各做 CPython �
       let mut text: Bound<'py, PyAny>;
       let mut total = rt::int(py, 0);
       frame.line(26);
-      for path in paths.try_iter()? {
+      for path in rt::iter(paths)? {
           let path = path?;
           frame.line(27);
           text = read_first_line(m, &path)?;
           frame.line(28);
           total = rt::iadd(&total, text.len()?)?;
-          py.check_signals()?;
           frame.line(26);
       }
       Ok(total)
@@ -1297,7 +1292,7 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
     - 所以默认的 filter 对它们和 CPython 不同：`DeprecationWarning` 默认只在 `__main__` 里显示，`<sys>:0` 的不显示；同一条文字的警告在同一个位置只显示一次，所有 `<sys>:0` 的都算同一个位置，CPython 里不同行的会各显示一次。原生协程和生成器的 `throw(type, value, tb)` 的 `DeprecationWarning` 和多个 `coroutine '..' was never awaited` 就是这样（`coroutine_warnings` 用例）
   - 从调用方帧推断模块名的 API：三个参数的 `type(name, bases, dict)` 创建的类没有 `__module__`，`enum.Enum("C", "A B")` 这样的函数式 API 得到 `<unknown>`。`collections.namedtuple` 找不到帧时用 `__main__`，bin 模式的主模块碰巧是对的
   - 要修好需要在原生函数运行期间压入真正的解释器帧，CPython 没有公开 API（第 9 节）
-- 原生的 `while`、`for` 循环每次迭代结尾（以及 `continue` 之前）调用 `py.check_signals()?`（`PyErr_CheckSignals`，M3d 加入，M4 从迭代开头移到结尾，traceback 的行号因此和 CPython 一样是最后执行的语句），对应 CPython 在循环回跳处检查信号，所以 Ctrl-C 能打断只调用 C API 的循环，抛出 `KeyboardInterrupt`。它同时会运行已经排上的循环垃圾回收，和解释器的检查点一样。代价实测每次迭代 3 到 5 ns（release，`for i in range(n): total += i` 从 36 ns 到 42 ns，空循环从 6.3 ns 到 9.7 ns），只在几乎什么都不做的循环里明显。bin 模式下未捕获的 `KeyboardInterrupt` 打印 traceback，finalize 之后和 CPython 一样用 `SIGINT` 结束进程（shell 看到的是被中断，`subprocess` 看到的退出码是 `-2`）
+- 原生的 `while` 循环每次迭代结尾（以及 `continue` 之前）调用 `py.check_signals()?`（`PyErr_CheckSignals`，M3d 加入，M4 从迭代开头移到结尾，traceback 的行号因此和 CPython 一样是最后执行的语句）。`for` 循环和推导式（M14 之后）用 `rt::iter(&xs)?` 代替 `xs.try_iter()?`，它在取第二个及以后的元素之前检查，循环体里不用再写这一行。`--traceback-lines` 时循环体结尾要把行号设回 `for` 那一行，`rt::iter` 的检查在那之后，报的会是 `for` 行，而 CPython 报循环体最后执行的语句（检查在回跳的 `JUMP_BACKWARD` 上），所以这时仍在设回行号之前写 `py.check_signals()?;`（`interrupt_for` 用例）。对应 CPython 在循环回跳处检查信号，所以 Ctrl-C 能打断只调用 C API 的循环，抛出 `KeyboardInterrupt`。它同时会运行已经排上的循环垃圾回收，和解释器的检查点一样。代价实测每次迭代 3 到 5 ns（release，`for i in range(n): total += i` 从 36 ns 到 42 ns，空循环从 6.3 ns 到 9.7 ns），只在几乎什么都不做的循环里明显。bin 模式下未捕获的 `KeyboardInterrupt` 打印 traceback，finalize 之后和 CPython 一样用 `SIGINT` 结束进程（shell 看到的是被中断，`subprocess` 看到的退出码是 `-2`）
 - 原生循环里 GIL 不会像解释器那样定期切换，其他 Python 线程要等到原生代码调用会释放 GIL 的 API 时才能运行
 - 直接调用的递归受 C 栈大小限制而不是 `sys.getrecursionlimit()`，`RecursionError` 的信息是 `Stack overflow (used N kB) ...` 而不是 `maximum recursion depth exceeded`
 - 模块级代码里，`def` 执行之前的调用走 globals 查找（会得到 `NameError`）；但函数体里的直接调用不检查被调函数的 `def` 是否已经执行过

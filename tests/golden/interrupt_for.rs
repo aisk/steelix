@@ -4,13 +4,11 @@ use steelix_runtime::Attributes;
 
 // interrupt_for.py:7
 pub fn spin<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "spin", 7, |_| {
-        let mut total = rt::int(py, 0);
-        for i in m.global("itertools")?.method0("count")?.try_iter()? {
+        let mut total = rt::int(m.py(), 0);
+        for i in rt::iter(&m.global("itertools")?.method0("count")?)? {
             let i = i?;
             total = rt::iadd(&total, &i)?;
-            py.check_signals()?;
         }
         Ok(total)
     })

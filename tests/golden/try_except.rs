@@ -462,10 +462,9 @@ pub fn generator_into_native<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
     rt::frame!(m, "generator_into_native", 201, |frame| {
         let mut total = rt::int(py, 0);
         match (|| -> PyResult<()> {
-            for value in m.global("gen")?.call0()?.try_iter()? {
+            for value in rt::iter(&m.global("gen")?.call0()?)? {
                 let value = value?;
                 total = total.add(&value)?;
-                py.check_signals()?;
             }
             Ok(())
         })() {
@@ -486,23 +485,18 @@ pub fn loop_with_try<'py>(
     m: &rt::Module<'py>,
     items: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "loop_with_try", 210, |frame| {
-        let mut total = rt::int(py, 0);
-        for item in items.try_iter()? {
+        let mut total = rt::int(m.py(), 0);
+        for item in rt::iter(items)? {
             let item = item?;
             match (|| total.add(m.global("int")?.call1((&item,))?))() {
                 Ok(value) => total = value,
-                Err(err) if frame.matches(&err, 210, || m.global("ValueError"))? => {
-                    py.check_signals()?;
-                    continue;
-                }
+                Err(err) if frame.matches(&err, 210, || m.global("ValueError"))? => continue,
                 Err(err) => return Err(err),
             }
             if total.gt(10)? {
                 break;
             }
-            py.check_signals()?;
         }
         Ok(total)
     })
@@ -613,11 +607,10 @@ def name_after_handler():
             m.global("parse_or_none")?.call1((py.None(),))?,
             m.global("parse_or_none")?.call1(("y",))?,
         ))?;
-        for item in PyList::new(py, ["value", "key", "app", "class", "fine"])?.try_iter()? {
+        for item in rt::iter(PyList::new(py, ["value", "key", "app", "class", "fine"])?.as_any())? {
             m.set_global("kind", item?)?;
             m.global("print")?
                 .call1((m.global("classify")?.call1((m.global("kind")?,))?,))?;
-            py.check_signals()?;
         }
         m.global("chained")?.call0()?;
         match (|| m.global("reraise")?.call0())() {

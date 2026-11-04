@@ -236,7 +236,7 @@ pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<B
     rt::frame!(m, "counts", 137, |_| {
         let mut seen = rt::int(py, 0);
         let mut n: Option<Bound<'py, PyAny>> = None;
-        for item in items.try_iter()? {
+        for item in rt::iter(items)? {
             let item = item?;
             if let Some([item2, n2]) = rt::match_seq(&item)?
                 && item2.eq("add")?
@@ -256,7 +256,6 @@ pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<B
                 let other = item.clone();
                 rt::builtins::print(py, ("skipping", &other))?;
             }
-            py.check_signals()?;
         }
         rt::builtins::print(py, ("total", &seen, "last n", rt::local(&n, "n")?))?;
         Ok(rt::none(py))
@@ -294,13 +293,12 @@ pub fn loop_jumps<'py>(
     let py = m.py();
     rt::frame!(m, "loop_jumps", 168, |_| {
         let mut total: Bound<'py, PyAny>;
-        'outer: for row in rows.try_iter()? {
+        'outer: for row in rt::iter(rows)? {
             let row = row?;
             if rt::match_seq_min(&row, 1)?
                 && let item = row.get_item(0)?
                 && item.eq("skip")?
             {
-                py.check_signals()?;
                 continue;
             } else if let Some([item]) = rt::match_seq(&row)?
                 && item.eq("stop")?
@@ -315,21 +313,18 @@ pub fn loop_jumps<'py>(
             {
                 total = rt::int(py, 0);
                 'for_else: {
-                    for v in values.try_iter()? {
+                    for v in rt::iter(&values)? {
                         let v = v?;
                         if v.lt(0)? {
                             break 'for_else;
                         }
                         total = rt::iadd(&total, &v)?;
-                        py.check_signals()?;
                     }
                     rt::builtins::print(py, (&name, "sum", &total))?;
-                    py.check_signals()?;
                     continue 'outer;
                 }
                 rt::builtins::print(py, (&name, "has a negative value"))?;
             }
-            py.check_signals()?;
         }
         rt::builtins::print(py, ("done",))?;
         Ok(rt::none(py))
@@ -444,22 +439,23 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         // guards, OR and AS patterns, at module level, in functions and in a class body.
         m.set_global("EXITS", PySet::new(py, ["north", "south", "east"])?)?;
         rt::def!(m, command(text))?;
-        for item in PyList::new(
-            py,
-            [
-                "",
-                "go north",
-                "go west",
-                "look",
-                "take",
-                "take lamp key",
-                "drop a b c",
-                "x y",
-                "z",
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                py,
+                [
+                    "",
+                    "go north",
+                    "go west",
+                    "look",
+                    "take",
+                    "take lamp key",
+                    "drop a b c",
+                    "x y",
+                    "z",
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("line", item?)?;
             rt::builtins::print(
                 py,
@@ -469,57 +465,57 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     command(m, &m.global("line")?)?,
                 ),
             )?;
-            py.check_signals()?;
         }
         rt::def!(
             m,
             stars(value),
             doc = "A named star at each position, and `*_` with the items around it."
         )?;
-        for item2 in PyList::new(
-            py,
-            [
-                PyList::empty(py).as_any(),
-                PyList::new(py, [9])?.as_any(),
-                PyList::new(py, [0])?.as_any(),
-                PyList::new(py, [1, 2])?.as_any(),
-                PyList::new(py, [1, 2, 3])?.as_any(),
-                PyTuple::new(py, [1, 2, 3, 4, 5])?.as_any(),
-                &rt::builtin(py, "range")?.call1((3,))?,
-                &rt::str(py, "abc"),
-                PyList::new(py, [5, 6, 1])?.as_any(),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item2 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    PyList::empty(py).as_any(),
+                    PyList::new(py, [9])?.as_any(),
+                    PyList::new(py, [0])?.as_any(),
+                    PyList::new(py, [1, 2])?.as_any(),
+                    PyList::new(py, [1, 2, 3])?.as_any(),
+                    PyTuple::new(py, [1, 2, 3, 4, 5])?.as_any(),
+                    &rt::builtin(py, "range")?.call1((3,))?,
+                    &rt::str(py, "abc"),
+                    PyList::new(py, [5, 6, 1])?.as_any(),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("value", item2?)?;
             stars(m, &m.global("value")?)?;
-            py.check_signals()?;
         }
         rt::def!(m, literals(value))?;
-        for item3 in PyList::new(
-            py,
-            [
-                &rt::none(py),
-                &rt::bool(py, true),
-                &rt::bool(py, false),
-                &rt::int(py, 1),
-                &rt::float(py, 1.0),
-                &rt::int(py, 0),
-                &rt::float(py, 2.5),
-                &rt::int(py, -3),
-                &rt::float(py, -3.0),
-                &rt::int(py, 1).add(rt::complex(py, 0.0, 2.0))?,
-                &rt::str(py, "text"),
-                &rt::bytes(py, b"bytes"),
-                &rt::str(py, "b"),
-                &rt::int(py, 20),
-                &rt::int(py, 5),
-                &rt::str(py, "x"),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item3 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    &rt::none(py),
+                    &rt::bool(py, true),
+                    &rt::bool(py, false),
+                    &rt::int(py, 1),
+                    &rt::float(py, 1.0),
+                    &rt::int(py, 0),
+                    &rt::float(py, 2.5),
+                    &rt::int(py, -3),
+                    &rt::float(py, -3.0),
+                    &rt::int(py, 1).add(rt::complex(py, 0.0, 2.0))?,
+                    &rt::str(py, "text"),
+                    &rt::bytes(py, b"bytes"),
+                    &rt::str(py, "b"),
+                    &rt::int(py, 20),
+                    &rt::int(py, 5),
+                    &rt::str(py, "x"),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("value", item3?)?;
             rt::builtins::print(
                 py,
@@ -528,32 +524,35 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     literals(m, &m.global("value")?)?,
                 ),
             )?;
-            py.check_signals()?;
         }
         rt::def!(m, nested(point))?;
-        for item4 in PyList::new(
-            py,
-            [
-                PyList::new(py, [PyTuple::new(py, [0, 0])?.as_any(), &rt::str(py, "o")])?.as_any(),
-                PyList::new(py, [PyTuple::new(py, [0, 1])?.as_any(), &rt::str(py, "u")])?.as_any(),
-                PyList::new(
-                    py,
-                    [
-                        PyTuple::new(py, [2, 2])?.as_any(),
-                        PyList::new(py, ["a", "b"])?.as_any(),
-                    ],
-                )?
-                .as_any(),
-                PyList::new(py, [PyList::new(py, [1, 2])?.as_any(), &rt::str(py, "p")])?.as_any(),
-                PyList::new(py, [PyTuple::new(py, [1, 2])?.as_any(), &rt::int(py, 3)])?.as_any(),
-                PyList::new(py, [1, 2])?.as_any(),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item4 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    PyList::new(py, [PyTuple::new(py, [0, 0])?.as_any(), &rt::str(py, "o")])?
+                        .as_any(),
+                    PyList::new(py, [PyTuple::new(py, [0, 1])?.as_any(), &rt::str(py, "u")])?
+                        .as_any(),
+                    PyList::new(
+                        py,
+                        [
+                            PyTuple::new(py, [2, 2])?.as_any(),
+                            PyList::new(py, ["a", "b"])?.as_any(),
+                        ],
+                    )?
+                    .as_any(),
+                    PyList::new(py, [PyList::new(py, [1, 2])?.as_any(), &rt::str(py, "p")])?
+                        .as_any(),
+                    PyList::new(py, [PyTuple::new(py, [1, 2])?.as_any(), &rt::int(py, 3)])?
+                        .as_any(),
+                    PyList::new(py, [1, 2])?.as_any(),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("point", item4?)?;
             rt::builtins::print(py, (nested(m, &m.global("point")?)?,))?;
-            py.check_signals()?;
         }
         rt::def!(
             m,
@@ -620,16 +619,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?;
             }
         }
-        for item5 in PyList::new(
-            py,
-            [
-                PyTuple::new(py, ["hello", "world"])?.as_any(),
-                PyTuple::new(py, ["bye"])?.as_any(),
-                &rt::int(py, 42),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item5 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    PyTuple::new(py, ["hello", "world"])?.as_any(),
+                    PyTuple::new(py, ["bye"])?.as_any(),
+                    &rt::int(py, 42),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("message", item5?)?;
             'match_: {
                 let subject = m.global("message")?;
@@ -648,7 +648,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 }
                 rt::builtins::print(py, ("not a message:", m.global("message")?))?;
             }
-            py.check_signals()?;
         }
         rt::builtins::print(
             py,

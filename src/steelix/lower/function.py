@@ -387,12 +387,11 @@ def lower_genexpr(ctx: Context, node: ast.GeneratorExp, comprehension_names: dic
 
         fn genexpr<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyIterator>) -> ... {
             rt::frame!(m, "<genexpr>", 3, |frame| {
-                for x in xs {
+                for x in rt::iter(xs)? {
                     let x = x?;
                     if x.gt(3)? {
                         return Ok(Some(x));
                     }
-                    py.check_signals()?;
                 }
                 Ok(None)
             })

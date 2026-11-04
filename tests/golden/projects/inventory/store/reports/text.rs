@@ -11,7 +11,7 @@ pub async fn lines<'py>(
     let py = m.py();
     rt::frame!(m, "lines", 4, async |frame| {
         // A generator function.
-        for item in inventory.attr("items")?.method0("values")?.try_iter()? {
+        for item in rt::iter(&inventory.attr("items")?.method0("values")?)? {
             let item = item?;
             if item.attr("quantity")?.lt(0)? {
                 return Err(frame.raise(m.global("errors")?.attr("StoreError")?.call1((
@@ -35,7 +35,6 @@ pub async fn lines<'py>(
                 ),
             )?;
             rt::yield_(value).await?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -49,10 +48,9 @@ pub fn render<'py>(
     let py = m.py();
     rt::frame!(m, "render", 12, |_| {
         let out = PyList::empty(py).into_any();
-        for line in m.global("lines")?.call1((inventory,))?.try_iter()? {
+        for line in rt::iter(&m.global("lines")?.call1((inventory,))?)? {
             let line = line?;
             out.method1("append", (&line,))?;
-            py.check_signals()?;
         }
         rt::str(py, "\n").method1("join", (&out,))
     })

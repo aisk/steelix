@@ -105,10 +105,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             rt::def!(m, describe_ as "describe"(n))?;
             rt::builtins::print(py, ("native branch", m.global("mode")?))?;
         }
-        for item in rt::builtin(py, "range")?.call1((4,))?.try_iter()? {
+        for item in rt::iter(&rt::builtin(py, "range")?.call1((4,))?)? {
             m.set_global("i", item?)?;
             if m.global("i")?.eq(1)? {
-                py.check_signals()?;
                 continue;
             }
             rt::builtins::print(
@@ -125,7 +124,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 "#
             )?;
             rt::builtins::print(py, ("squares", m.global("squares")?))?;
-            py.check_signals()?;
         }
         // `break` in a kept statement: the loop is kept whole.
         m.set_global("n", 0)?;
@@ -145,7 +143,7 @@ while True:
 "#
         )?;
         // A kept loop inside a native one: its `break` is its own.
-        for item2 in PyList::new(py, ["ab", "cde"])?.try_iter()? {
+        for item2 in rt::iter(PyList::new(py, ["ab", "cde"])?.as_any())? {
             m.set_global("word", item2?)?;
             // mixed_nested.py:44, kept as Python: try/except* at 45:9
             rt::exec_python!(
@@ -163,7 +161,6 @@ while True:
         print("no d in", word)
 "#
             )?;
-            py.check_signals()?;
         }
         m.set_global(
             "Point",

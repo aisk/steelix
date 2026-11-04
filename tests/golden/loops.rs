@@ -14,13 +14,12 @@ pub fn find<'py>(
     let py = m.py();
     rt::frame!(m, "find", 4, |_| {
         'for_else: {
-            for item in items.try_iter()? {
+            for item in rt::iter(items)? {
                 let item = item?;
                 if item.eq(target)? {
                     rt::builtins::print(py, ("found", &item))?;
                     break 'for_else;
                 }
-                py.check_signals()?;
             }
             rt::builtins::print(py, ("not found", target))?;
         }
@@ -33,13 +32,11 @@ pub fn first_even<'py>(
     m: &rt::Module<'py>,
     numbers: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "first_even", 13, |_| {
-        let mut result = rt::none(py);
-        for n in numbers.try_iter()? {
+        let mut result = rt::none(m.py());
+        for n in rt::iter(numbers)? {
             let n = n?;
             if n.rem(2)?.is_truthy()? {
-                py.check_signals()?;
                 continue;
             }
             result = n.clone();
@@ -56,9 +53,8 @@ pub fn last_item<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "last_item", 23, |_| {
         let mut item: Option<Bound<'py, PyAny>> = None;
-        for item2 in items.try_iter()? {
+        for item2 in rt::iter(items)? {
             item = Some(item2?);
-            m.py().check_signals()?;
         }
         Ok(rt::local(&item, "item")?.clone())
     })
@@ -89,11 +85,10 @@ pub fn pairs<'py>(m: &rt::Module<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<
     let py = m.py();
     rt::frame!(m, "pairs", 40, |_| {
         let mut total = rt::int(py, 0);
-        for item in mapping.method0("items")?.try_iter()? {
+        for item in rt::iter(&mapping.method0("items")?)? {
             let [key, value] = rt::unpack(&item?)?;
             rt::builtins::print(py, (&key, &value))?;
             total = total.add(&value)?;
-            py.check_signals()?;
         }
         Ok(total)
     })
@@ -103,25 +98,22 @@ pub fn pairs<'py>(m: &rt::Module<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<
 pub fn nested<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "nested", 48, |_| {
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             'for_else: {
-                for cell in row.try_iter()? {
+                for cell in rt::iter(&row)? {
                     let cell = cell?;
                     if cell.lt(0)? {
                         rt::builtins::print(py, ("negative in", &row))?;
                         break 'for_else;
                     }
                     if cell.eq(0)? {
-                        py.check_signals()?;
                         continue;
                     }
                     rt::builtins::print(py, ("cell", &cell))?;
-                    py.check_signals()?;
                 }
                 rt::builtins::print(py, ("row done",))?;
             }
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -137,19 +129,17 @@ pub fn search<'py>(
     rt::frame!(m, "search", 61, |_| {
         let mut i = rt::int(py, 0);
         let mut j: Bound<'py, PyAny>;
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             j = rt::int(py, 0);
-            for cell in row.try_iter()? {
+            for cell in rt::iter(&row)? {
                 let cell = cell?;
                 if cell.eq(target)? {
                     return Ok(PyTuple::new(py, [&i, &j])?.into_any());
                 }
                 j = j.add(1)?;
-                py.check_signals()?;
             }
             i = i.add(1)?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -241,19 +231,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         rt::builtins::print(py, (spin(m, &rt::int(py, 4))?,))?;
         m.set_global("total", 0)?;
-        for item in rt::builtin(py, "range")?.call1((5,))?.try_iter()? {
+        for item in rt::iter(&rt::builtin(py, "range")?.call1((5,))?)? {
             m.set_global("x", item?)?;
             if m.global("x")?.eq(3)? {
-                py.check_signals()?;
                 continue;
             }
             m.set_global("total", m.global("total")?.add(m.global("x")?)?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, ("loop finished with x =", m.global("x")?))?;
         rt::builtins::print(py, (m.global("total")?,))?;
         'for_else: {
-            for item2 in PyList::new(py, ["alpha", "beta"])?.try_iter()? {
+            for item2 in rt::iter(PyList::new(py, ["alpha", "beta"])?.as_any())? {
                 m.set_global("word", item2?)?;
                 rt::builtins::print(py, (m.global("word")?,))?;
                 break 'for_else;

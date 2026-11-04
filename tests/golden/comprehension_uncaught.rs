@@ -20,14 +20,13 @@ pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
             })
         }
         let list = PyList::empty(py);
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             list.append(rt::builtin(py, "sum")?.call1((rt::genexpr!(
                 m,
                 genexpr(row.try_iter()?),
                 qualname = "totals.<locals>.<genexpr>"
             )?,))?)?;
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })

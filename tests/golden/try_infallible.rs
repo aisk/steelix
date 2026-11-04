@@ -24,12 +24,10 @@ pub fn local_copy<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<B
 
 // try_infallible.py:24
 pub fn nothing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "nothing", 24, |_| {
         let mut i: Option<Bound<'py, PyAny>> = None;
-        for item in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+        for item in rt::iter(&rt::builtin(m.py(), "range")?.call1((3,))?)? {
             i = Some(item?);
-            py.check_signals()?;
             continue;
         }
         Ok(rt::local(&i, "i")?.clone())
@@ -90,12 +88,11 @@ pub fn deleted_in_loop<'py>(
     rt::frame!(m, "deleted_in_loop", 62, |_| {
         let mut v = Some(rt::int(py, 0));
         let mut w: Bound<'py, PyAny>;
-        for underscore in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
+        for underscore in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
             let underscore = underscore?;
             w = rt::local(&v, "v")?.clone();
             v = None;
             v = Some(w.clone());
-            py.check_signals()?;
         }
         Ok(rt::local(&v, "v")?.clone())
     })

@@ -78,18 +78,16 @@ pub fn from_loop<'py>(
     m: &rt::Module<'py>,
     names: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "from_loop", 63, |_| {
         let mut item: Bound<'py, PyAny>;
-        for name in names.try_iter()? {
+        for name in rt::iter(names)? {
             let name = name?;
             item = m.global("Tracked")?.call1((&name,))?;
             if name.eq("b")? {
                 return Ok(item);
             }
-            py.check_signals()?;
         }
-        Ok(rt::none(py))
+        Ok(rt::none(m.py()))
     })
 }
 
@@ -276,12 +274,11 @@ def from_with(name):
             iter: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "<genexpr>", 110, |_| {
-                for x in iter {
+                for x in rt::iter(iter)? {
                     let x = x?;
                     if x.attr("name")?.is_truthy()? {
                         return Ok(Some(x));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })

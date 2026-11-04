@@ -125,23 +125,23 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 Ok(())
             },
         )?;
-        for item in PyList::new(
-            py,
-            [
-                &rt::builtin(py, "DeprecationWarning")?,
-                &rt::builtin(py, "RuntimeWarning")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                py,
+                [
+                    &rt::builtin(py, "DeprecationWarning")?,
+                    &rt::builtin(py, "RuntimeWarning")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("category", item?)?;
             let list = PyList::empty(py);
-            for w in m.global("caught")?.try_iter()? {
+            for w in rt::iter(&m.global("caught")?)? {
                 let w = w?;
                 if w.attr("category")?.is(m.global("category")?) {
                     list.append(&w)?;
                 }
-                py.check_signals()?;
             }
             m.set_global("shown", list)?;
             rt::builtins::print(
@@ -152,7 +152,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     m.global("shown")?.len()?,
                 ),
             )?;
-            py.check_signals()?;
         }
         // Everything shown, each time.
         frame.with(

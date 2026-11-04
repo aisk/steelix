@@ -21,23 +21,20 @@ pub fn _colorize_json<'py>(
             theme: &Bound<'py, PyAny>,
             r#match: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            let py = module.py();
             rt::frame!(
                 module,
                 "_colorize_json.<locals>._replace_match_callback",
                 38,
                 |_| {
                     let mut m: Bound<'py, PyAny>;
-                    for item in module
-                        .global("_group_to_theme_color")?
-                        .method0("items")?
-                        .try_iter()?
+                    for item in
+                        rt::iter(&module.global("_group_to_theme_color")?.method0("items")?)?
                     {
                         let [group, color] = rt::unpack(&item?)?;
                         m = r#match.method1("group", (&group,))?;
                         if m.is_truthy()? {
                             return rt::fstring(
-                                py,
+                                module.py(),
                                 (
                                     rt::format(&theme.get_item(&color)?, "")?,
                                     rt::format(&m, "")?,
@@ -45,7 +42,6 @@ pub fn _colorize_json<'py>(
                                 ),
                             );
                         }
-                        py.check_signals()?;
                     }
                     r#match.method0("group")
                 }
@@ -215,21 +211,19 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 let mut json_str: Bound<'py, PyAny>;
                 if rt::call!(m.global("can_colorize")?, file = &outfile)?.is_truthy()? {
                     t = rt::call!(m.global("get_theme")?, tty_file = &outfile)?.attr("syntax")?;
-                    for item in rt::local(&objs, "objs")?.try_iter()? {
+                    for item in rt::iter(rt::local(&objs, "objs")?)? {
                         obj = item?;
                         json_str = rt::call!(m.global("json")?.attr("dumps")?, &obj, **dump_args)?;
                         outfile
                             .attr("write")?
                             .call1((_colorize_json(m, &json_str, &t)?,))?;
                         outfile.method1("write", ("\n",))?;
-                        py.check_signals()?;
                     }
                 } else {
-                    for item2 in rt::local(&objs, "objs")?.try_iter()? {
+                    for item2 in rt::iter(rt::local(&objs, "objs")?)? {
                         obj = item2?;
                         rt::call!(m.global("json")?.attr("dump")?, &obj, &outfile, **dump_args)?;
                         outfile.method1("write", ("\n",))?;
-                        py.check_signals()?;
                     }
                 }
                 Ok(())

@@ -526,10 +526,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         let value = m.global("D")?.call0()?.method0("who")?;
         let list = PyList::empty(py);
-        for k in m.global("D")?.attr("__mro__")?.try_iter()? {
+        for k in rt::iter(&m.global("D")?.attr("__mro__")?)? {
             let k = k?;
             list.append(k.attr("__name__")?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (value, list))?;
         rt::builtins::print(
@@ -713,10 +712,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             "workers",
             if false {
                 let list = PyList::empty(py);
-                for n in PyTuple::new(py, [10, 100])?.try_iter()? {
+                for n in rt::iter(PyTuple::new(py, [10, 100])?.as_any())? {
                     let n = n?;
                     list.append(m.global("Worker")?.call1((&n,))?)?;
-                    py.check_signals()?;
                 }
                 list.into_any()
             } else {
@@ -730,27 +728,23 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .into_any()
             },
         )?;
-        for item in m.global("workers")?.try_iter()? {
+        for item in rt::iter(&m.global("workers")?)? {
             m.set_global("w", item?)?;
             m.global("w")?.method0("start")?;
-            py.check_signals()?;
         }
-        for item2 in m.global("workers")?.try_iter()? {
+        for item2 in rt::iter(&m.global("workers")?)? {
             m.set_global("w", item2?)?;
             m.global("w")?.method0("join")?;
-            py.check_signals()?;
         }
         let list2 = PyList::empty(py);
-        for w in m.global("workers")?.try_iter()? {
+        for w in rt::iter(&m.global("workers")?)? {
             let w = w?;
             list2.append(w.attr("result")?)?;
-            py.check_signals()?;
         }
         let list3 = PyList::empty(py);
-        for w in m.global("workers")?.try_iter()? {
+        for w in rt::iter(&m.global("workers")?)? {
             let w = w?;
             list3.append(w.attr("name")?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (list2, list3))?;
         m.set_global(

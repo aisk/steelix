@@ -122,15 +122,14 @@ pub async fn in_loops<'py>(
     let py = m.py();
     rt::frame!(m, "in_loops", 50, async |frame| {
         frame.line(51);
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             if row.is_none() {
-                py.check_signals()?;
                 continue;
             }
             frame.line(54);
             'for_else: {
-                for item in row.try_iter()? {
+                for item in rt::iter(&row)? {
                     let item = item?;
                     frame.line(55);
                     if item.eq("stop")? {
@@ -226,7 +225,7 @@ pub async fn tree<'py>(
         frame.line(102);
         if node.is_instance(&rt::builtin(py, "list")?)? {
             frame.line(103);
-            for child in node.try_iter()? {
+            for child in rt::iter(node)? {
                 let child = child?;
                 frame.line(104);
                 rt::delegate(Box::pin(tree(m, &child))).await?;
@@ -350,13 +349,11 @@ pub fn closure_gen<'py>(
             values: &Bound<'py, PyAny>,
             scale: &Bound<'py, PyAny>,
         ) -> PyResult<Bound<'py, PyAny>> {
-            let py = m.py();
             rt::frame!(m, "closure_gen.<locals>.<lambda>", 172, |_| {
-                let list = PyList::empty(py);
-                for v in values.try_iter()? {
+                let list = PyList::empty(m.py());
+                for v in rt::iter(values)? {
                     let v = v?;
                     list.append(v.mul(scale)?)?;
-                    py.check_signals()?;
                 }
                 Ok(list.into_any())
             })
@@ -394,7 +391,7 @@ pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
             qualname = "gen_with_nested.<locals>.inner"
         )?;
         frame.line(180);
-        for value in inner.call1((5,))?.try_iter()? {
+        for value in rt::iter(&inner.call1((5,))?)? {
             let value = value?;
             frame.line(181);
             rt::yield_(&value).await?;
@@ -510,7 +507,7 @@ pub mod bag {
         let py = m.py();
         rt::frame!(m, "Bag.__iter__", 125, async |frame| {
             frame.line(126);
-            for item in slf.attr("items")?.try_iter()? {
+            for item in rt::iter(&slf.attr("items")?)? {
                 let item = item?;
                 frame.line(127);
                 rt::yield_(&item).await?;
@@ -530,7 +527,7 @@ pub mod bag {
         rt::frame!(m, "Bag.pairs", 129, async |frame| {
             let mut previous = rt::none(py);
             frame.line(131);
-            for item in slf.try_iter()? {
+            for item in rt::iter(slf)? {
                 let item = item?;
                 if !previous.is_none() {
                     frame.line(133);

@@ -9,21 +9,18 @@ pub fn skip_rows<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "skip_rows", 4, |_| {
-        'outer: for row in rows.try_iter()? {
+        'outer: for row in rt::iter(rows)? {
             let row = row?;
             'for_else: {
-                for cell in row.try_iter()? {
+                for cell in rt::iter(&row)? {
                     let cell = cell?;
                     if cell.lt(0)? {
                         break 'for_else;
                     }
-                    py.check_signals()?;
                 }
-                py.check_signals()?;
                 continue 'outer;
             }
             rt::builtins::print(py, ("row with a negative cell", &row))?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -37,20 +34,18 @@ pub fn first_complete<'py>(
     let py = m.py();
     rt::frame!(m, "first_complete", 14, |_| {
         'for_else: {
-            for row in rows.try_iter()? {
+            for row in rt::iter(rows)? {
                 let row = row?;
                 'for_else2: {
-                    for cell in row.try_iter()? {
+                    for cell in rt::iter(&row)? {
                         let cell = cell?;
                         if cell.is_none() {
                             break 'for_else2;
                         }
-                        py.check_signals()?;
                     }
                     rt::builtins::print(py, ("complete", &row))?;
                     break 'for_else;
                 }
-                py.check_signals()?;
             }
             rt::builtins::print(py, ("none complete",))?;
         }
@@ -90,31 +85,27 @@ pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bo
 pub fn nested<'py>(m: &rt::Module<'py>, groups: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "nested", 40, |_| {
-        'outer2: for group in groups.try_iter()? {
+        'outer2: for group in rt::iter(groups)? {
             let group = group?;
             'for_else: {
-                'outer: for row in group.try_iter()? {
+                'outer: for row in rt::iter(&group)? {
                     let row = row?;
                     'for_else2: {
-                        for cell in row.try_iter()? {
+                        for cell in rt::iter(&row)? {
                             let cell = cell?;
                             if cell.eq(0)? {
                                 break 'for_else2;
                             }
-                            py.check_signals()?;
                         }
-                        py.check_signals()?;
                         continue 'outer;
                     }
                     rt::builtins::print(py, ("zero in", &row))?;
                     break 'for_else;
                 }
                 rt::builtins::print(py, ("no zero in", &group))?;
-                py.check_signals()?;
                 continue 'outer2;
             }
             rt::builtins::print(py, ("done with", &group))?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })

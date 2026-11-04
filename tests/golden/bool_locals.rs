@@ -17,13 +17,12 @@ pub fn find<'py>(
     let py = m.py();
     rt::frame!(m, "find", 26, |_| {
         let mut found = false;
-        for item in items.try_iter()? {
+        for item in rt::iter(items)? {
             let item = item?;
             if item.is(target) || PyTuple::new(py, [target])?.contains(&item)? {
                 found = true;
                 break;
             }
-            py.check_signals()?;
         }
         if !found {
             rt::builtins::print(py, ("not found", target))?;

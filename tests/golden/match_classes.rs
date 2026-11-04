@@ -348,22 +348,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             )?,
         )?;
         rt::def!(m, r#where(point))?;
-        for item in PyList::new(
-            py,
-            [
-                &m.global("Point")?.call1((0, 0))?,
-                &m.global("Point")?.call1((0, 5))?,
-                &m.global("Point")?.call1((3, 0))?,
-                &m.global("Point")?.call1((2, 2))?,
-                &m.global("Point")?.call1((1, 7))?,
-                &rt::str(py, "p"),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                py,
+                [
+                    &m.global("Point")?.call1((0, 0))?,
+                    &m.global("Point")?.call1((0, 5))?,
+                    &m.global("Point")?.call1((3, 0))?,
+                    &m.global("Point")?.call1((2, 2))?,
+                    &m.global("Point")?.call1((1, 7))?,
+                    &rt::str(py, "p"),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("p", item?)?;
             rt::builtins::print(py, (r#where(m, &m.global("p")?)?,))?;
-            py.check_signals()?;
         }
         rt::def!(m, area(shape))?;
         m.set_global(
@@ -397,26 +397,25 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             )?,
         )?;
-        for item2 in m.global("shapes")?.try_iter()? {
+        for item2 in rt::iter(&m.global("shapes")?)? {
             m.set_global("shape", item2?)?;
             rt::builtins::print(py, (area(m, &m.global("shape")?)?,))?;
-            py.check_signals()?;
         }
         rt::def!(m, paint(color))?;
-        for item3 in PyList::new(
-            py,
-            [
-                &m.global("Color")?.attr("RED")?,
-                &m.global("Color")?.attr("BLUE")?,
-                &rt::int(py, 1),
-                &rt::str(py, "red"),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item3 in rt::iter(
+            PyList::new(
+                py,
+                [
+                    &m.global("Color")?.attr("RED")?,
+                    &m.global("Color")?.attr("BLUE")?,
+                    &rt::int(py, 1),
+                    &rt::str(py, "red"),
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("color", item3?)?;
             rt::builtins::print(py, (paint(m, &m.global("color")?)?,))?;
-            py.check_signals()?;
         }
         rt::def!(
             m,
@@ -461,7 +460,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 )?,
             )?,
         )?;
-        for item4 in m.global("values")?.try_iter()? {
+        for item4 in rt::iter(&m.global("values")?)? {
             m.set_global("value", item4?)?;
             rt::builtins::print(
                 py,
@@ -471,7 +470,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     kind(m, &m.global("value")?)?,
                 ),
             )?;
-            py.check_signals()?;
         }
         m.set_global(
             "Sub",

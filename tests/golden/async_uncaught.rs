@@ -11,7 +11,7 @@ pub async fn numbers<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "numbers", 7, async |frame| {
-        for i in rt::builtin(py, "range")?.call1((n,))?.try_iter()? {
+        for i in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
             let i = i?;
             if i.eq(2)? {
                 return Err(frame.raise(PyLookupError::new_err((rt::fstring(
@@ -21,7 +21,6 @@ pub async fn numbers<'py>(
                 .unbind(),))));
             }
             rt::yield_(&i).await?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -35,10 +34,9 @@ pub async fn delegate<'py>(
     let py = m.py();
     rt::frame!(m, "delegate", 14, async |_| {
         let mut total = rt::int(py, 0);
-        for value in m.global("numbers")?.call1((n,))?.try_iter()? {
+        for value in rt::iter(&m.global("numbers")?.call1((n,))?)? {
             let value = value?;
             total = rt::iadd(&total, &value)?;
-            py.check_signals()?;
         }
         rt::yield_(&total).await?;
         rt::delegate(numbers(m, n)).await?;
@@ -48,15 +46,13 @@ pub async fn delegate<'py>(
 
 // async_uncaught.py:31
 pub async fn leaf<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "leaf", 31, async |_| {
         let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
         rt::await_(sleep).await?;
-        let values = PyList::empty(py).into_any();
-        for value in m.global("delegate")?.call1((n,))?.try_iter()? {
+        let values = PyList::empty(m.py()).into_any();
+        for value in rt::iter(&m.global("delegate")?.call1((n,))?)? {
             let value = value?;
             values.method1("append", (&value,))?;
-            py.check_signals()?;
         }
         Ok(values)
     })

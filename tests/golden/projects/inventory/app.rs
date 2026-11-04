@@ -77,7 +77,7 @@ pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::frame!(m, "plugins", 64, |_| {
         let mut plugin: Bound<'py, PyAny>;
         // A computed name: transpiled only with `--include plugins`.
-        for name in PyList::new(py, ["greet", "count"])?.try_iter()? {
+        for name in rt::iter(PyList::new(py, ["greet", "count"])?.as_any())? {
             let name = name?;
             plugin = m
                 .global("importlib")?
@@ -92,7 +92,6 @@ pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     plugin.attr("__loader__")?.attr("name")?,
                 ),
             )?;
-            py.check_signals()?;
         }
         let r#static = m
             .global("importlib")?
@@ -226,17 +225,15 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             module: &rt::Module<'py>,
             modules: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
-            let py = module.py();
             rt::frame!(module, "main.<locals>.<genexpr>", 104, |_| {
-                for m in modules {
+                for m in rt::iter(modules)? {
                     let m = m?;
                     let item = m.method1("split", (".",))?.get_item(0)?;
-                    if PySet::new(py, ["store", "plugins", "config", "lazy", "app"])?
+                    if PySet::new(module.py(), ["store", "plugins", "config", "lazy", "app"])?
                         .contains(&item)?
                     {
                         return Ok(Some(m));
                     }
-                    py.check_signals()?;
                 }
                 Ok(None)
             })

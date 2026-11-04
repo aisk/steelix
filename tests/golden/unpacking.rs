@@ -55,34 +55,26 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         a.method1("append", (6,))?;
         rt::builtins::print(py, (&r#box, &a, &b, a.is(&b)))?;
         let mut total = rt::int(py, 0);
-        for item3 in rt::builtin(py, "enumerate")?
-            .call1((PyList::new(
-                py,
-                [
-                    PyTuple::new(py, [1, 2])?.as_any(),
-                    PyTuple::new(py, [3, 4])?.as_any(),
-                ],
-            )?,))?
-            .try_iter()?
+        for item3 in rt::iter(&rt::builtin(py, "enumerate")?.call1((PyList::new(
+            py,
+            [
+                PyTuple::new(py, [1, 2])?.as_any(),
+                PyTuple::new(py, [3, 4])?.as_any(),
+            ],
+        )?,))?)?
         {
             let [i, items] = rt::unpack(&item3?)?;
             let [x, y] = rt::unpack(&items)?;
             total = total.add(i.mul(x.add(&y)?)?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (&total,))?;
         let mut key: Option<Bound<'py, PyAny>> = None;
         let mut value: Bound<'py, PyAny>;
-        for item4 in [("k", "v")]
-            .into_py_dict(py)?
-            .method0("items")?
-            .try_iter()?
-        {
+        for item4 in rt::iter(&[("k", "v")].into_py_dict(py)?.method0("items")?)? {
             let [key2, value2] = rt::unpack(&item4?)?;
             key = Some(key2);
             value = value2;
             rt::builtins::print(py, (rt::local(&key, "key")?, &value))?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (rt::local(&key, "key")?,))?;
         Ok(rt::none(py))
@@ -127,20 +119,20 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("first", first)?;
         m.set_global("others", others)?;
         rt::builtins::print(py, (m.global("first")?, m.global("others")?))?;
-        for item in PyList::new(
-            py,
-            [
-                PyTuple::new(py, [&rt::str(py, "one"), &rt::int(py, 1)])?.as_any(),
-                PyTuple::new(py, [&rt::str(py, "two"), &rt::int(py, 2)])?.as_any(),
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                py,
+                [
+                    PyTuple::new(py, [&rt::str(py, "one"), &rt::int(py, 1)])?.as_any(),
+                    PyTuple::new(py, [&rt::str(py, "two"), &rt::int(py, 2)])?.as_any(),
+                ],
+            )?
+            .as_any(),
+        )? {
             let [k, v] = rt::unpack(&item?)?;
             m.set_global("k", k)?;
             m.set_global("v", v)?;
             rt::builtins::print(py, (m.global("k")?, m.global("v")?))?;
-            py.check_signals()?;
         }
         Ok(())
     })

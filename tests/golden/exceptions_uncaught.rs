@@ -52,7 +52,7 @@ pub fn process<'py>(m: &rt::Module<'py>, keys: &Bound<'py, PyAny>) -> PyResult<B
     rt::frame!(m, "process", 25, |frame| {
         let mut total = rt::int(py, 0);
         frame.with(&m.global("resource")?.call1(("db",))?, |_| {
-            for key in keys.try_iter()? {
+            for key in rt::iter(keys)? {
                 let key = key?;
                 let result = (|| -> PyResult<()> {
                     total = rt::iadd(&total, lookup(m, &key)?)?;
@@ -61,7 +61,6 @@ pub fn process<'py>(m: &rt::Module<'py>, keys: &Bound<'py, PyAny>) -> PyResult<B
                 let finally = frame.finally(result);
                 rt::builtins::print(py, ("visited", &key))?;
                 finally.resume()?;
-                py.check_signals()?;
             }
             Ok(())
         })?;

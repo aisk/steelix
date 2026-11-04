@@ -40,6 +40,7 @@ pub mod function;
 pub mod generator;
 mod import;
 mod importer;
+mod iter;
 mod matching;
 mod module;
 #[cfg(unix)]
@@ -70,6 +71,7 @@ pub use import::{import, import_from, import_module, import_names};
 pub use importer::{
     ExecModule, NativeImporter, NativeLoader, NativeModule, init_extension, install_importer,
 };
+pub use iter::{Iter, iter};
 pub use matching::{
     item_from_end, match_class, match_instance, match_keys, match_map, match_mapping, match_rest,
     match_seq, match_seq_len, match_seq_min, match_seq_star,

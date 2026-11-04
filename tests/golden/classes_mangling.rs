@@ -159,12 +159,11 @@ pub mod account {
         rt::frame!(m, "Account.names", 41, |_| {
             let _Account__local = rt::int(py, 1);
             let list = PyList::empty(py);
-            for n in rt::builtin(py, "dir")?.call1((slf,))?.try_iter()? {
+            for n in rt::iter(&rt::builtin(py, "dir")?.call1((slf,))?)? {
                 let n = n?;
                 if n.contains("secret")? || n.contains("owner")? {
                     list.append(&n)?;
                 }
-                py.check_signals()?;
             }
             list.add(PyList::new(py, [&_Account__local])?)
         })
@@ -278,12 +277,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             __dict__: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "<genexpr>", 67, |_| {
-                for k in __dict__ {
+                for k in rt::iter(__dict__)? {
                     let k = k?;
                     if k.contains("y")? {
                         return Ok(Some(k));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })

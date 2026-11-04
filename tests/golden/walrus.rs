@@ -105,12 +105,11 @@ pub fn in_comprehension<'py>(
         }
         let list = PyList::empty(py);
         let mut last: Option<Bound<'py, PyAny>> = None;
-        for v in values.try_iter()? {
+        for v in rt::iter(values)? {
             let v = v?;
             let last2 = v.mul(2)?;
             last = Some(last2.clone());
             list.append(&last2)?;
-            py.check_signals()?;
         }
         let total = list.into_any();
         Ok(PyTuple::new(py, [&total, rt::local(&last, "last")?, &found.get()?])?.into_any())
@@ -126,14 +125,13 @@ pub fn filtered<'py>(
     rt::frame!(m, "filtered", 39, |_| {
         let list = PyList::empty(py);
         let mut y: Option<Bound<'py, PyAny>> = None;
-        for x in values.try_iter()? {
+        for x in rt::iter(values)? {
             let x = x?;
             let y2 = x.mul(2)?;
             y = Some(y2.clone());
             if y2.gt(2)? {
                 list.append(rt::local(&y, "y")?)?;
             }
-            py.check_signals()?;
         }
         Ok(PyTuple::new(py, [list.as_any(), rt::local(&y, "y")?])?.into_any())
     })
@@ -206,11 +204,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, global_walrus())?;
         {
             let list = PyList::empty(py);
-            for v in PyTuple::new(py, [3, 7])?.try_iter()? {
+            for v in rt::iter(PyTuple::new(py, [3, 7])?.as_any())? {
                 let v = v?;
                 m.set_global("min", &v)?;
                 list.append(&v)?;
-                py.check_signals()?;
             }
         }
         rt::builtins::print(

@@ -267,7 +267,7 @@ def test_for_loop_variable_scoped_to_the_body() -> None:
                 print(x)
         """
     )
-    assert "for x in xs.try_iter()? {\n            let x = x?;" in out
+    assert "for x in rt::iter(xs)? {\n            let x = x?;" in out
 
 
 def test_imports_bind_names() -> None:
@@ -567,10 +567,18 @@ def test_traceback_lines_marks_statements() -> None:
     assert 'rt::frame!(m, "total", 2, |frame| {' in out
     for line in (4, 5, 9, 10):
         assert f"frame.line({line});" in out
-    # Without the markers the code is the same.
+    # Without the markers the code is the same, except that a `for` loop
+    # checks for signals before its line goes back to the header (and so
+    # may use `py` once more).
     default = render_module(parse_source(textwrap.dedent(TRACEBACK_SOURCE), "m"))
-    stripped = "\n".join(line for line in out.splitlines() if "frame.line(" not in line)
-    assert stripped.replace("|frame|", "|_|") == default.replace("|frame|", "|_|").rstrip("\n")
+
+    def normalized(code: str) -> str:
+        skipped = ("frame.line(", "check_signals", "let py = m.py();")
+        lines = [line for line in code.splitlines() if not any(s in line for s in skipped)]
+        return "\n".join(lines).replace("|frame|", "|_|").replace("m.py()", "py")
+
+    assert "py.check_signals()?;" in out
+    assert normalized(out) == normalized(default)
 
 
 def test_single_expression_frame_keeps_braces() -> None:

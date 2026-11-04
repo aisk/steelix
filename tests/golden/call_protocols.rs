@@ -116,6 +116,60 @@ pub fn catch<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     })
 }
 
+// Calls with keyword arguments (no `**`) through objects: the arguments are
+// evaluated in order, the callee checks the keywords.
+// call_protocols.py:168
+pub fn traced<'py>(
+    m: &rt::Module<'py>,
+    label: &Bound<'py, PyAny>,
+    value: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    rt::frame!(m, "traced", 168, |_| {
+        rt::builtins::print(m.py(), ("evaluating", label))?;
+        Ok(value.clone())
+    })
+}
+
+// call_protocols.py:173
+pub fn keywords<'py>(
+    m: &rt::Module<'py>,
+    callee: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "keywords", 173, |frame| {
+        match (|| {
+            rt::call!(
+                callee,
+                traced(m, &rt::str(py, "x"), &rt::int(py, 1))?,
+                sep = traced(m, &rt::str(py, "sep"), &rt::str(py, "-"))?,
+                end = traced(m, &rt::str(py, "end"), &rt::str(py, "!"))?
+            )
+        })() {
+            Ok(value) => Ok(value),
+            Err(err) if err.is_instance_of::<PyTypeError>(py) => {
+                let err = frame.catch(err);
+                rt::fstring(py, ("TypeError: ", rt::format(&err, "")?))
+            }
+            Err(err2) => Err(err2),
+        }
+    })
+}
+
+// call_protocols.py:180
+pub fn joined<'py>(
+    m: &rt::Module<'py>,
+    args: &Bound<'py, PyTuple>,
+    sep: &Bound<'py, PyAny>,
+    end: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
+    rt::frame!(m, "joined", 180, |_| {
+        sep.attr("join")?
+            .call1((rt::builtin(py, "map")?.call1((rt::builtin(py, "str")?, args))?,))?
+            .add(end)
+    })
+}
+
 pub mod box_ {
     use super::*;
 
@@ -626,6 +680,50 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?;
         m.global("worker")?.method0("start")?;
         m.global("worker")?.method0("join")?;
+        rt::def!(m, traced(label, value))?;
+        rt::def!(m, keywords(callee))?;
+        rt::def!(m, joined(*args, sep, end))?;
+        rt::builtins::print(py, (keywords(m, &m.global("joined")?)?,))?;
+        rt::builtins::print(py, (keywords(m, &rt::builtin(py, "print")?)?,))?;
+        rt::builtins::print(py, (keywords(m, &rt::builtin(py, "int")?)?,))?;
+        rt::builtins::print(py, (keywords(m, &rt::int(py, 42))?,))?;
+        // call_protocols.py:188
+        fn lambda2<'py>(
+            m: &rt::Module<'py>,
+            x: &Bound<'py, PyAny>,
+            kw: &Bound<'py, PyDict>,
+        ) -> PyResult<Bound<'py, PyAny>> {
+            rt::frame!(m, "<lambda>", 188, |_| {
+                rt::builtin(m.py(), "sorted")?.call1((kw.method0("items")?,))
+            })
+        }
+        rt::builtins::print(
+            py,
+            (keywords(
+                m,
+                &rt::function!(m, lambda2(x, **kw), qualname = "<lambda>")?,
+            )?,),
+        )?;
+        rt::builtins::print(
+            py,
+            (keywords(
+                m,
+                &m.global("functools")?
+                    .attr("partial")?
+                    .call1((m.global("joined")?, 0))?,
+            )?,),
+        )?;
+        rt::builtins::print(
+            py,
+            (keywords(
+                m,
+                &rt::call!(
+                    m.global("functools")?.attr("partial")?,
+                    m.global("joined")?,
+                    sep = "+"
+                )?,
+            )?,),
+        )?;
         Ok(())
     })
 }

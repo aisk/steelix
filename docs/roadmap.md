@@ -390,6 +390,12 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] ~~字符串常量缓存~~，不做。在 skime 的读取器上测（release，`parse` 一段 30 万字符的生成的 S 表达式）：生成的代码 622 ms（CPython 261 ms），把 `parser.rs` 里的 `.eq("..")` 和 `rt::str(py, "..")` 都换成 `pyo3::intern!` 之后 620 ms，约 1%。读取器的字面量几乎都是单字符，CPython 对 Latin-1 的单字符字符串本来就有缓存，新建它们不分配内存；差距在 Python 方法调用的开销上（`slf.method0("peak")` 等，M10 §7）
 - [x] ~~`__slots__` 属性的 inline cache~~，不做。单次读取（release）：驻留名字的 `getattr` 约 10 ns，检查 `tp_version_tag` 之后按 member descriptor 的偏移直接读约 1 ns。但 skime 的 fib 22 只有约 20 万次 slot 读取（`CallValue.value`、`CallFrame.context`，热点的 `Context` 没有 `__slots__`），一共省约 1.6 ms，占 1.10 s 的 0.15%，不值得依赖非 limited API 的细节
 
+- [x] 补默认参数时参数列表放在栈上（`SmallVec`），不再每次分配 `Vec`：skime 读取器约 3%，Python 侧调用有默认值的原生函数约 20 ns
+- [x] `rt::call!` 只有关键字参数（没有 `*`/`**`）时直接 vectorcall，关键字名字的 tuple 每个调用点建一次：约 208 ns 到 124 ns（§6）
+- [x] `for` 循环和推导式用 `rt::iter(&xs)?`，它在取后续元素之前检查信号，循环体里不再写 `py.check_signals()?;`，golden 净少约 180 行。`--traceback-lines` 时循环体结尾在把行号设回 `for` 行之前仍写这一行，让信号的异常和 CPython 一样报在循环体最后执行的语句上
+- [ ] `Function` 加 `#[pyclass(immutable_type)]`，让 CPython 的 `LOAD_ATTR` 方法特化对原生函数生效（Python 侧方法调用约 5 到 10 ns），暂不做
+- [ ] 没有返回值的函数返回 `PyResult<()>`，去掉 336 处函数末尾的 `Ok(rt::none(py))`（`rt::def!` 的包装要把 `()` 转成 None，成本中等）
+
 ## 发布
 
 - [x] PyPI 发布 steelix 0.1.0，git tag `v0.1.0`

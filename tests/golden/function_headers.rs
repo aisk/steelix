@@ -15,16 +15,13 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
         ) -> PyResult<Bound<'py, PyAny>> {
             rt::frame!(m, "report.<locals>.<lambda>", 7, |_| { data.get_item(k) })
         }
-        for name in rt::call!(
+        for name in rt::iter(&rt::call!(
             rt::builtin(py, "sorted")?,
             data,
             key = rt::function!(m, lambda[data](k), qualname = "report.<locals>.<lambda>")?
-        )?
-        .try_iter()?
-        {
+        )?)? {
             let name = name?;
             rt::builtins::print(py, (&name, data.get_item(&name)?))?;
-            py.check_signals()?;
         }
         let n = rt::Cell::new(py, "n", 0)?;
         // function_headers.py:10
@@ -110,16 +107,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 m.global("totals")?.get_item(k)?.neg()
             })
         }
-        for item in rt::call!(
+        for item in rt::iter(&rt::call!(
             rt::builtin(py, "sorted")?,
             m.global("totals")?,
             key = rt::function!(m, lambda(k), qualname = "<lambda>")?
-        )?
-        .try_iter()?
-        {
+        )?)? {
             m.set_global("name", item?)?;
             rt::builtins::print(py, (m.global("name")?,))?;
-            py.check_signals()?;
         }
         report(m, &m.global("totals")?)?;
         Ok(())

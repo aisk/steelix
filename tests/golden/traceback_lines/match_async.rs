@@ -81,7 +81,7 @@ pub async fn handle<'py>(
                         if let Some(([first], others, [])) = rt::match_seq_star(&subject)? {
                             total = first.clone();
                             frame.line(30);
-                            for other in others.try_iter()? {
+                            for other in rt::iter(&others)? {
                                 let other = other?;
                                 frame.line(31);
                                 total = rt::iadd(&total, rt::delegate(fetch(m, &other)).await?)?;
@@ -126,7 +126,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         )?
         .into_any();
         frame.line(44);
-        for request in requests.try_iter()? {
+        for request in rt::iter(&requests)? {
             let request = request?;
             frame.line(45);
             rt::builtins::print(py, (rt::delegate(handle(m, &request)).await?,))?;
@@ -174,7 +174,7 @@ pub async fn tokens<'py>(
     let py = m.py();
     rt::frame!(m, "tokens", 57, async |frame| {
         frame.line(59);
-        for word in text.method0("split")?.try_iter()? {
+        for word in rt::iter(&text.method0("split")?)? {
             let word = word?;
             frame.line(61);
             if word.eq("+")? || word.eq("-")? || word.eq("*")? || word.eq("/")? {
@@ -230,7 +230,7 @@ pub async fn lines<'py>(
     rt::frame!(m, "lines", 75, async |frame| {
         frame.line(77);
         let mut received: Bound<'py, PyAny>;
-        for row in rows.try_iter()? {
+        for row in rt::iter(rows)? {
             let row = row?;
             frame.line(79);
             if let Some([key, value]) = rt::match_seq(&row)? {

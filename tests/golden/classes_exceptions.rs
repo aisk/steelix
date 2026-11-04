@@ -113,10 +113,9 @@ pub mod kept {
         let py = m.py();
         rt::frame!(m, "Kept.describe", 43, |_| {
             let list = PyList::empty(py);
-            for a in PyList::new(py, [&slf.attr("args")?])?.try_iter()? {
+            for a in rt::iter(PyList::new(py, [&slf.attr("args")?])?.as_any())? {
                 let a = a?;
                 list.append(a.len()?)?;
-                py.check_signals()?;
             }
             Ok(list.into_any())
         })
@@ -207,7 +206,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             rt::class!(m, "Retry"(m.global("AppError")?), retry::body, line = 15)?,
         )?;
         rt::def!(m, load(key))?;
-        for item in PyList::new(py, ["ok", "missing", "busy"])?.try_iter()? {
+        for item in rt::iter(PyList::new(py, ["ok", "missing", "busy"])?.as_any())? {
             m.set_global("key", item?)?;
             match (|| rt::builtins::print(py, (load(m, &m.global("key")?)?,)))() {
                 Ok(_) => {}
@@ -247,7 +246,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 }
                 Err(err) => return Err(err),
             }
-            py.check_signals()?;
         }
         match (|| -> PyResult<()> {
             Err(frame.raise_from(

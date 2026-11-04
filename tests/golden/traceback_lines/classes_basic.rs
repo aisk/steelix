@@ -499,12 +499,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             __dict__: &Bound<'py, PyIterator>,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             rt::frame!(m, "<genexpr>", 92, |_| {
-                for k in __dict__ {
+                for k in rt::iter(__dict__)? {
                     let k = k?;
                     if !k.method1("startswith", ("__",))?.is_truthy()? {
                         return Ok(Some(k));
                     }
-                    m.py().check_signals()?;
                 }
                 Ok(None)
             })

@@ -161,3 +161,30 @@ def catch():
 worker = threading.Thread(target=catch)
 worker.start()
 worker.join()
+
+
+# Calls with keyword arguments (no `**`) through objects: the arguments are
+# evaluated in order, the callee checks the keywords.
+def traced(label, value):
+    print("evaluating", label)
+    return value
+
+
+def keywords(callee):
+    try:
+        return callee(traced("x", 1), sep=traced("sep", "-"), end=traced("end", "!"))
+    except TypeError as err:
+        return f"TypeError: {err}"
+
+
+def joined(*args, sep, end):
+    return sep.join(map(str, args)) + end
+
+
+print(keywords(joined))
+print(keywords(print))
+print(keywords(int))
+print(keywords(42))
+print(keywords(lambda x, **kw: sorted(kw.items())))
+print(keywords(functools.partial(joined, 0)))
+print(keywords(functools.partial(joined, sep="+")))

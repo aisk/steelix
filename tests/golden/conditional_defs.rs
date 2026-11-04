@@ -73,7 +73,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
             rt::def!(m, helper_ as "helper"(x, scale = 2))?;
         }
-        for item in rt::builtin(py, "range")?.call1((2,))?.try_iter()? {
+        for item in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
             m.set_global("i", item?)?;
             // conditional_defs.py:20
             fn in_loop<'py>(
@@ -91,7 +91,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     m.global("recurse")?.call1((3,))?,
                 ),
             )?;
-            py.check_signals()?;
         }
         let result = (|| -> PyResult<()> {
             // conditional_defs.py:26

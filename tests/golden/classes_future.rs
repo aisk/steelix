@@ -28,12 +28,11 @@ pub mod meta {
         let py = m.py();
         rt::frame!(m, "Meta.__new__", 11, |_| {
             let list = PyList::empty(py);
-            for k in ns.try_iter()? {
+            for k in rt::iter(ns)? {
                 let k = k?;
                 if k.ne("__module__")? {
                     list.append(&k)?;
                 }
-                py.check_signals()?;
             }
             rt::builtins::print(py, (name, list))?;
             rt::super_(__class__, mcls)?.method1("__new__", (mcls, name, bases, ns))

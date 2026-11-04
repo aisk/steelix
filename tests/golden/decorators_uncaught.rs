@@ -361,7 +361,6 @@ pub mod broken {
 
 /// Executes the body of `decorators_uncaught.py` in the module `m`.
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    let py = m.py();
     rt::frame!(m, "<module>", 1, |frame| {
         m.set_global(
             "__doc__",
@@ -421,35 +420,35 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         ))?;
         m.global("print")?
             .call1((m.global("tags")?.attr("seen")?,))?;
-        for item in PyList::new(
-            py,
-            [
-                &m.global("ordered")?,
-                &m.global("Shape")?.attr("area")?,
-                &m.global("Shape")?.attr("label")?.attr("fget")?,
-                &m.global("Shape")?.attr("label")?.attr("fset")?,
-                &m.global("Shape")?.attr("label")?.attr("fdel")?,
-                &m.global("Shape")?.attr("unit")?,
-                &m.global("Shape")?.attr("double")?,
-                &m.global("Shape")?.attr("tagged")?,
-                &m.global("Shape")?.attr("cached")?.attr("__wrapped__")?,
-                &m.global("Shape")?.attr("type")?,
-                &m.global("Shape")?.attr("match")?,
-                &m.global("Shape")?.attr("Inner")?.attr("method")?,
-                &m.global("Shape")?
-                    .attr("Inner")?
-                    .attr("Deepest")?
-                    .attr("method")?,
-            ],
-        )?
-        .try_iter()?
-        {
+        for item in rt::iter(
+            PyList::new(
+                m.py(),
+                [
+                    &m.global("ordered")?,
+                    &m.global("Shape")?.attr("area")?,
+                    &m.global("Shape")?.attr("label")?.attr("fget")?,
+                    &m.global("Shape")?.attr("label")?.attr("fset")?,
+                    &m.global("Shape")?.attr("label")?.attr("fdel")?,
+                    &m.global("Shape")?.attr("unit")?,
+                    &m.global("Shape")?.attr("double")?,
+                    &m.global("Shape")?.attr("tagged")?,
+                    &m.global("Shape")?.attr("cached")?.attr("__wrapped__")?,
+                    &m.global("Shape")?.attr("type")?,
+                    &m.global("Shape")?.attr("match")?,
+                    &m.global("Shape")?.attr("Inner")?.attr("method")?,
+                    &m.global("Shape")?
+                        .attr("Inner")?
+                        .attr("Deepest")?
+                        .attr("method")?,
+                ],
+            )?
+            .as_any(),
+        )? {
             m.set_global("fn", item?)?;
             m.global("print")?.call1((
                 m.global("fn")?.attr("__name__")?,
                 m.global("fn")?.attr("__qualname__")?,
             ))?;
-            py.check_signals()?;
         }
         rt::def!(m, factory(prefix))?;
         let [made, plain] = rt::unpack(&m.global("factory")?.call1(("p",))?)?;

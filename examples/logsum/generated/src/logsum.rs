@@ -110,13 +110,11 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
         let requests = PyList::empty(py).into_any();
         let mut malformed = rt::int(py, 0);
         let mut request: Bound<'py, PyAny>;
-        for line in rt::call!(path.attr("read_text")?, encoding = "utf-8")?
-            .method0("splitlines")?
-            .try_iter()?
-        {
+        for line in rt::iter(
+            &rt::call!(path.attr("read_text")?, encoding = "utf-8")?.method0("splitlines")?,
+        )? {
             let line = line?;
             if !line.method0("strip")?.is_truthy()? {
-                py.check_signals()?;
                 continue;
             }
             match parse_line(m, &line) {
@@ -132,7 +130,6 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
             } else {
                 requests.method1("append", (&request,))?;
             }
-            py.check_signals()?;
         }
         Ok(PyTuple::new(py, [&requests, &malformed])?.into_any())
     })
@@ -178,15 +175,13 @@ pub fn tally<'py>(
     requests: &Bound<'py, PyAny>,
     field: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "tally", 84, |_| {
-        let counts = PyDict::new(py).into_any();
+        let counts = PyDict::new(m.py()).into_any();
         let mut key: Bound<'py, PyAny>;
-        for request in requests.try_iter()? {
+        for request in rt::iter(requests)? {
             let request = request?;
             key = request.get_item(field)?;
             counts.set_item(&key, counts.method1("get", (&key, 0))?.add(1)?)?;
-            py.check_signals()?;
         }
         Ok(counts)
     })
@@ -201,14 +196,13 @@ pub fn print_statuses<'py>(
     rt::frame!(m, "print_statuses", 92, |_| {
         let classes = PyDict::new(py).into_any();
         let mut name: Bound<'py, PyAny>;
-        for request in requests.try_iter()? {
+        for request in rt::iter(requests)? {
             let request = request?;
             name = m
                 .global("STATUS_CLASSES")?
                 .attr("get")?
                 .call1((request.get_item("status")?.floor_div(100)?, "other"))?;
             classes.set_item(&name, classes.method1("get", (&name, 0))?.add(1)?)?;
-            py.check_signals()?;
         }
         let peak = rt::call!(
             rt::builtin(py, "max")?,
@@ -226,7 +220,7 @@ pub fn print_statuses<'py>(
                 Ok(PyTuple::new(m.py(), [&classes.get_item(n)?.neg()?, n])?.into_any())
             })
         }
-        for item in rt::call!(
+        for item in rt::iter(&rt::call!(
             rt::builtin(py, "sorted")?,
             &classes,
             key = rt::function!(
@@ -234,9 +228,7 @@ pub fn print_statuses<'py>(
                 lambda[classes](n),
                 qualname = "print_statuses.<locals>.<lambda>"
             )?
-        )?
-        .try_iter()?
-        {
+        )?)? {
             name = item?;
             rt::builtins::print(
                 py,
@@ -260,7 +252,6 @@ pub fn print_statuses<'py>(
                     ),
                 )?,),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -305,10 +296,7 @@ pub fn print_paths<'py>(
                 ),
             )?,),
         )?;
-        for item in ranked
-            .get_item(rt::slice(py, py.None(), top)?)?
-            .try_iter()?
-        {
+        for item in rt::iter(&ranked.get_item(rt::slice(py, py.None(), top)?)?)? {
             let [path, count] = rt::unpack(&item?)?;
             rt::builtins::print(
                 py,
@@ -322,7 +310,6 @@ pub fn print_paths<'py>(
                     ),
                 )?,),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -338,12 +325,11 @@ pub fn print_latency<'py>(
     rt::frame!(m, "print_latency", 111, |_| {
         let timed = PyList::empty(py).into_any();
         let mut request: Bound<'py, PyAny>;
-        for item in requests.try_iter()? {
+        for item in rt::iter(requests)? {
             request = item?;
             if !request.get_item("ms")?.is_none() {
                 timed.attr("append")?.call1((request.get_item("ms")?,))?;
             }
-            py.check_signals()?;
         }
         timed.method0("sort")?;
         rt::builtins::print(
@@ -357,7 +343,7 @@ pub fn print_latency<'py>(
                 ),
             )?,),
         )?;
-        for pct in m.global("PERCENTILES")?.try_iter()? {
+        for pct in rt::iter(&m.global("PERCENTILES")?)? {
             let pct = pct?;
             rt::builtins::print(
                 py,
@@ -372,15 +358,13 @@ pub fn print_latency<'py>(
                     ),
                 )?,),
             )?;
-            py.check_signals()?;
         }
         let slow_requests = PyList::empty(py).into_any();
-        for item2 in requests.try_iter()? {
+        for item2 in rt::iter(requests)? {
             request = item2?;
             if !request.get_item("ms")?.is_none() && request.get_item("ms")?.ge(slow)? {
                 slow_requests.method1("append", (&request,))?;
             }
-            py.check_signals()?;
         }
         rt::builtins::print(
             py,
@@ -401,14 +385,14 @@ pub fn print_latency<'py>(
                 r.get_item("ms")?.neg()
             })
         }
-        for item3 in rt::call!(
-            rt::builtin(py, "sorted")?,
-            &slow_requests,
-            key = rt::function!(m, lambda(r), qualname = "print_latency.<locals>.<lambda>")?
-        )?
-        .get_item(rt::slice(py, py.None(), 3)?)?
-        .try_iter()?
-        {
+        for item3 in rt::iter(
+            &rt::call!(
+                rt::builtin(py, "sorted")?,
+                &slow_requests,
+                key = rt::function!(m, lambda(r), qualname = "print_latency.<locals>.<lambda>")?
+            )?
+            .get_item(rt::slice(py, py.None(), 3)?)?,
+        )? {
             request = item3?;
             rt::builtins::print(
                 py,
@@ -424,7 +408,6 @@ pub fn print_latency<'py>(
                     ),
                 )?,),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -444,7 +427,7 @@ pub fn print_hours<'py>(
             default = 0
         )?;
         rt::builtins::print(py, ("requests per hour",))?;
-        for hour in rt::builtin(py, "sorted")?.call1((&hours,))?.try_iter()? {
+        for hour in rt::iter(&rt::builtin(py, "sorted")?.call1((&hours,))?)? {
             let hour = hour?;
             rt::builtins::print(
                 py,
@@ -463,7 +446,6 @@ pub fn print_hours<'py>(
                     ),
                 )?,),
             )?;
-            py.check_signals()?;
         }
         Ok(rt::none(py))
     })
@@ -486,11 +468,10 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
         let [requests, malformed] = rt::unpack(&load(m, &path)?)?;
         let mut total_bytes = rt::int(py, 0);
         let clients = rt::builtin(py, "set")?.call0()?;
-        for request in requests.try_iter()? {
+        for request in rt::iter(&requests)? {
             let request = request?;
             total_bytes = rt::iadd(&total_bytes, request.get_item("bytes")?)?;
             clients.attr("add")?.call1((request.get_item("ip")?,))?;
-            py.check_signals()?;
         }
         rt::call!(
             rt::builtin(py, "print")?,

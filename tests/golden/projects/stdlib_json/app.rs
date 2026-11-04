@@ -173,12 +173,13 @@ pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::frame!(m, "errors", 80, |frame| {
-        for text in PyList::new(
-            py,
-            ["{\"a\": }", "[1, 2", "{\"a\" 1}", "\"\\x\"", "", "[1] x"],
-        )?
-        .try_iter()?
-        {
+        for text in rt::iter(
+            PyList::new(
+                py,
+                ["{\"a\": }", "[1, 2", "{\"a\" 1}", "\"\\x\"", "", "[1] x"],
+            )?
+            .as_any(),
+        )? {
             let text = text?;
             match (|| m.global("json")?.method1("loads", (&text,)))() {
                 Ok(_) => {}
@@ -197,7 +198,6 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 }
                 Err(err2) => return Err(err2),
             }
-            py.check_signals()?;
         }
         match (|| {
             m.global("json")?

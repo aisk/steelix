@@ -256,15 +256,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 CompareOp::Eq,
             )?;
         let list = PyList::empty(py);
-        for f in m
-            .global("dataclasses")?
-            .attr("fields")?
-            .call1((m.global("Version")?,))?
-            .try_iter()?
-        {
+        for f in rt::iter(
+            &m.global("dataclasses")?
+                .attr("fields")?
+                .call1((m.global("Version")?,))?,
+        )? {
             let f = f?;
             list.append(f.attr("name")?)?;
-            py.check_signals()?;
         }
         rt::builtins::print(py, (value, list))?;
         rt::builtins::print(

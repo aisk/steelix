@@ -11,10 +11,9 @@ pub fn describe<'py>(
     rt::frame!(m, "describe", 4, |_| {
         let count = rt::int(py, items.len()?);
         let mut total = rt::int(py, 0);
-        for item in items.try_iter()? {
+        for item in rt::iter(items)? {
             let item = item?;
             total = rt::iadd(&total, &item)?;
-            py.check_signals()?;
         }
         let mut label: Option<Bound<'py, PyAny>> = None;
         if count.is_truthy()? {
