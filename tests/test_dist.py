@@ -687,11 +687,22 @@ def test_multiprocessing_in_development(method: str, tmp_path: Path) -> None:
 @pytest.mark.cargo
 def test_runtime_unit_tests() -> None:
     """The runtime's Rust unit tests (recognizing the command lines of
-    `multiprocessing` children)."""
+    `multiprocessing` children, `Module::error`).
+
+    Tests that use Python link the test binary against libpython, which has
+    no rpath: the dynamic linker has to find the interpreter's own library
+    (CI's uv-managed Python is not on the default search path)."""
+    libdir = subprocess.run(
+        [str(PYTHON), "-c", "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    search = os.pathsep.join(filter(None, [libdir, os.environ.get("LD_LIBRARY_PATH")]))
     result = subprocess.run(
         ["cargo", "test", "-p", "steelix-runtime", "--lib"],
         cwd=ROOT,
-        env={**os.environ, "PYO3_PYTHON": str(PYTHON)},
+        env={**os.environ, "PYO3_PYTHON": str(PYTHON), "LD_LIBRARY_PATH": search},
         capture_output=True,
         text=True,
         check=False,
