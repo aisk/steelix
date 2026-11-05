@@ -356,7 +356,6 @@ pub fn multiline<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<B
             if x.ne(1)? {
                 list.append(rt::int(py, 10).floor_div(&x)?)?;
             }
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })
@@ -375,7 +374,6 @@ pub fn failing_condition<'py>(
             if rt::int(py, 10).floor_div(&x)?.is_truthy()? {
                 list.append(&x)?;
             }
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })
@@ -383,13 +381,11 @@ pub fn failing_condition<'py>(
 
 // comprehensions.py:125
 pub fn failing_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
     rt::frame!(m, "failing_iteration", 125, |_| {
-        let list = PyList::empty(py);
+        let list = PyList::empty(m.py());
         for x in rt::iter(&m.global("Bad")?.call0()?)? {
             let x = x?;
             list.append(&x)?;
-            py.check_signals()?;
         }
         Ok(list.into_any())
     })

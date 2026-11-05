@@ -349,7 +349,7 @@ pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<B
         let mut seen = rt::int(py, 0);
         frame.line(140);
         let mut n: Option<Bound<'py, PyAny>> = None;
-        for item in rt::iter(items)? {
+        for item in items.try_iter()? {
             let item = item?;
             frame.line(142);
             if let Some([item2, n2]) = rt::match_seq(&item)?
@@ -423,7 +423,7 @@ pub fn loop_jumps<'py>(
     rt::frame!(m, "loop_jumps", 168, |frame| {
         frame.line(169);
         let mut total: Bound<'py, PyAny>;
-        'outer: for row in rt::iter(rows)? {
+        'outer: for row in rows.try_iter()? {
             let row = row?;
             frame.line(171);
             if rt::match_seq_min(&row, 1)?
@@ -454,7 +454,7 @@ pub fn loop_jumps<'py>(
                             total = rt::int(py, 0);
                             frame.line(179);
                             'for_else: {
-                                for v in rt::iter(&values)? {
+                                for v in values.try_iter()? {
                                     let v = v?;
                                     frame.line(180);
                                     if v.lt(0)? {
@@ -607,23 +607,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("EXITS", PySet::new(py, ["north", "south", "east"])?)?;
         rt::def!(m, command(text))?;
         frame.line(27);
-        for item in rt::iter(
-            PyList::new(
-                py,
-                [
-                    "",
-                    "go north",
-                    "go west",
-                    "look",
-                    "take",
-                    "take lamp key",
-                    "drop a b c",
-                    "x y",
-                    "z",
-                ],
-            )?
-            .as_any(),
-        )? {
+        for item in PyList::new(
+            py,
+            [
+                "",
+                "go north",
+                "go west",
+                "look",
+                "take",
+                "take lamp key",
+                "drop a b c",
+                "x y",
+                "z",
+            ],
+        )?
+        .try_iter()?
+        {
             m.set_global("line", item?)?;
             frame.line(28);
             rt::builtins::print(
@@ -643,23 +642,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             doc = "A named star at each position, and `*_` with the items around it."
         )?;
         frame.line(59);
-        for item2 in rt::iter(
-            PyList::new(
-                py,
-                [
-                    PyList::empty(py).as_any(),
-                    PyList::new(py, [9])?.as_any(),
-                    PyList::new(py, [0])?.as_any(),
-                    PyList::new(py, [1, 2])?.as_any(),
-                    PyList::new(py, [1, 2, 3])?.as_any(),
-                    PyTuple::new(py, [1, 2, 3, 4, 5])?.as_any(),
-                    &rt::builtin(py, "range")?.call1((3,))?,
-                    &rt::str(py, "abc"),
-                    PyList::new(py, [5, 6, 1])?.as_any(),
-                ],
-            )?
-            .as_any(),
-        )? {
+        for item2 in PyList::new(
+            py,
+            [
+                PyList::empty(py).as_any(),
+                PyList::new(py, [9])?.as_any(),
+                PyList::new(py, [0])?.as_any(),
+                PyList::new(py, [1, 2])?.as_any(),
+                PyList::new(py, [1, 2, 3])?.as_any(),
+                PyTuple::new(py, [1, 2, 3, 4, 5])?.as_any(),
+                &rt::builtin(py, "range")?.call1((3,))?,
+                &rt::str(py, "abc"),
+                PyList::new(py, [5, 6, 1])?.as_any(),
+            ],
+        )?
+        .try_iter()?
+        {
             m.set_global("value", item2?)?;
             frame.line(60);
             stars(m, &m.global("value")?)?;
@@ -668,30 +666,29 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         rt::def!(m, literals(value))?;
         frame.line(92);
-        for item3 in rt::iter(
-            PyList::new(
-                py,
-                [
-                    &rt::none(py),
-                    &rt::bool(py, true),
-                    &rt::bool(py, false),
-                    &rt::int(py, 1),
-                    &rt::float(py, 1.0),
-                    &rt::int(py, 0),
-                    &rt::float(py, 2.5),
-                    &rt::int(py, -3),
-                    &rt::float(py, -3.0),
-                    &rt::int(py, 1).add(rt::complex(py, 0.0, 2.0))?,
-                    &rt::str(py, "text"),
-                    &rt::bytes(py, b"bytes"),
-                    &rt::str(py, "b"),
-                    &rt::int(py, 20),
-                    &rt::int(py, 5),
-                    &rt::str(py, "x"),
-                ],
-            )?
-            .as_any(),
-        )? {
+        for item3 in PyList::new(
+            py,
+            [
+                &rt::none(py),
+                &rt::bool(py, true),
+                &rt::bool(py, false),
+                &rt::int(py, 1),
+                &rt::float(py, 1.0),
+                &rt::int(py, 0),
+                &rt::float(py, 2.5),
+                &rt::int(py, -3),
+                &rt::float(py, -3.0),
+                &rt::int(py, 1).add(rt::complex(py, 0.0, 2.0))?,
+                &rt::str(py, "text"),
+                &rt::bytes(py, b"bytes"),
+                &rt::str(py, "b"),
+                &rt::int(py, 20),
+                &rt::int(py, 5),
+                &rt::str(py, "x"),
+            ],
+        )?
+        .try_iter()?
+        {
             m.set_global("value", item3?)?;
             frame.line(93);
             rt::builtins::print(
@@ -706,31 +703,26 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         rt::def!(m, nested(point))?;
         frame.line(111);
-        for item4 in rt::iter(
-            PyList::new(
-                py,
-                [
-                    PyList::new(py, [PyTuple::new(py, [0, 0])?.as_any(), &rt::str(py, "o")])?
-                        .as_any(),
-                    PyList::new(py, [PyTuple::new(py, [0, 1])?.as_any(), &rt::str(py, "u")])?
-                        .as_any(),
-                    PyList::new(
-                        py,
-                        [
-                            PyTuple::new(py, [2, 2])?.as_any(),
-                            PyList::new(py, ["a", "b"])?.as_any(),
-                        ],
-                    )?
-                    .as_any(),
-                    PyList::new(py, [PyList::new(py, [1, 2])?.as_any(), &rt::str(py, "p")])?
-                        .as_any(),
-                    PyList::new(py, [PyTuple::new(py, [1, 2])?.as_any(), &rt::int(py, 3)])?
-                        .as_any(),
-                    PyList::new(py, [1, 2])?.as_any(),
-                ],
-            )?
-            .as_any(),
-        )? {
+        for item4 in PyList::new(
+            py,
+            [
+                PyList::new(py, [PyTuple::new(py, [0, 0])?.as_any(), &rt::str(py, "o")])?.as_any(),
+                PyList::new(py, [PyTuple::new(py, [0, 1])?.as_any(), &rt::str(py, "u")])?.as_any(),
+                PyList::new(
+                    py,
+                    [
+                        PyTuple::new(py, [2, 2])?.as_any(),
+                        PyList::new(py, ["a", "b"])?.as_any(),
+                    ],
+                )?
+                .as_any(),
+                PyList::new(py, [PyList::new(py, [1, 2])?.as_any(), &rt::str(py, "p")])?.as_any(),
+                PyList::new(py, [PyTuple::new(py, [1, 2])?.as_any(), &rt::int(py, 3)])?.as_any(),
+                PyList::new(py, [1, 2])?.as_any(),
+            ],
+        )?
+        .try_iter()?
+        {
             m.set_global("point", item4?)?;
             frame.line(112);
             rt::builtins::print(py, (nested(m, &m.global("point")?)?,))?;
@@ -813,17 +805,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             }
         }
         frame.line(198);
-        for item5 in rt::iter(
-            PyList::new(
-                py,
-                [
-                    PyTuple::new(py, ["hello", "world"])?.as_any(),
-                    PyTuple::new(py, ["bye"])?.as_any(),
-                    &rt::int(py, 42),
-                ],
-            )?
-            .as_any(),
-        )? {
+        for item5 in PyList::new(
+            py,
+            [
+                PyTuple::new(py, ["hello", "world"])?.as_any(),
+                PyTuple::new(py, ["bye"])?.as_any(),
+                &rt::int(py, 42),
+            ],
+        )?
+        .try_iter()?
+        {
             m.set_global("message", item5?)?;
             frame.line(199);
             'match_: {

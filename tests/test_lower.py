@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import textwrap
 
 import pytest
@@ -568,14 +569,15 @@ def test_traceback_lines_marks_statements() -> None:
     for line in (4, 5, 9, 10):
         assert f"frame.line({line});" in out
     # Without the markers the code is the same, except that a `for` loop
-    # checks for signals before its line goes back to the header (and so
-    # may use `py` once more).
+    # checks for signals in its body, before the line goes back to the
+    # header, instead of in `rt::iter` (and so may use `py` once more).
     default = render_module(parse_source(textwrap.dedent(TRACEBACK_SOURCE), "m"))
 
     def normalized(code: str) -> str:
         skipped = ("frame.line(", "check_signals", "let py = m.py();")
         lines = [line for line in code.splitlines() if not any(s in line for s in skipped)]
-        return "\n".join(lines).replace("|frame|", "|_|").replace("m.py()", "py")
+        code = "\n".join(lines).replace("|frame|", "|_|").replace("m.py()", "py")
+        return re.sub(r"rt::iter\(&?([\w.]+)\)\?", r"\1.try_iter()?", code)
 
     assert "py.check_signals()?;" in out
     assert normalized(out) == normalized(default)

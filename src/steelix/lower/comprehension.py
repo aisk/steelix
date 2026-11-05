@@ -224,8 +224,18 @@ class ComprehensionLowering:
         generator = node.generators[index]
         iter_line = generator.iter.lineno
         out: list[rs.Stmt] = []
-        source = iterable if isinstance(iterable, rs.Path) else iterable.ref()
-        iterator = rs.Try(rs.Call(rs.Path("rt::iter"), (source,)))
+        # Like a `for` statement's (`StmtLowering.for_iterator`): with
+        # `--traceback-lines` the body checks for signals itself.
+        traceback_lines = self.ctx.module.traceback_lines
+        if isinstance(iterable, rs.Path):
+            # Already an iterator.
+            iterator: rs.Expr = iterable
+            if not traceback_lines:
+                iterator = rs.Try(rs.Call(rs.Path("rt::iter"), (iterable,)))
+        elif traceback_lines:
+            iterator = rs.Try(iterable.method("try_iter"))
+        else:
+            iterator = rs.Try(rs.Call(rs.Path("rt::iter"), (iterable.ref(),)))
         markers = self.markers
         pattern, body = self.bind_target(generator.target)
         conditions: list[tuple[list[rs.Stmt], rs.Expr]] = []
@@ -246,12 +256,11 @@ class ComprehensionLowering:
             innermost_stmts = innermost()
         body += _guarded(conditions, innermost_stmts)
         if not _returns(body):
+            if traceback_lines:
+                check = rs.MethodCall(rs.Path(self.ctx.py()), "check_signals")
+                body.append(rs.ExprStmt(rs.Try(check)))
             if self.markers != markers:
                 self.line = None
-                # Before the line is back on the iterable (see `next_iteration`).
-                body.append(
-                    rs.ExprStmt(rs.Try(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals")))
-                )
                 body += self.at_line(iter_line)
         self.line = iter_line
         out.append(rs.For(pattern, iterator, rs.Block(tuple(body))))

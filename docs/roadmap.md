@@ -392,7 +392,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 
 - [x] 补默认参数时参数列表放在栈上（`SmallVec`），不再每次分配 `Vec`：skime 读取器约 3%，Python 侧调用有默认值的原生函数约 20 ns
 - [x] `rt::call!` 只有关键字参数（没有 `*`/`**`）时直接 vectorcall，关键字名字的 tuple 每个调用点建一次：约 208 ns 到 124 ns（§6）
-- [x] `for` 循环和推导式用 `rt::iter(&xs)?`，它在取后续元素之前检查信号，循环体里不再写 `py.check_signals()?;`，golden 净少约 180 行。`--traceback-lines` 时循环体结尾在把行号设回 `for` 行之前仍写这一行，让信号的异常和 CPython 一样报在循环体最后执行的语句上
+- [x] `for` 循环和推导式用 `rt::iter(&xs)?`，它在取后续元素之前检查信号，循环体里不再写 `py.check_signals()?;`，golden 净少约 180 行。`--traceback-lines` 时仍是 `xs.try_iter()?` 和循环体里的这一行（在把行号设回 `for` 行之前），让信号的异常和 CPython 一样报在循环体最后执行的语句上
 - [ ] `Function` 加 `#[pyclass(immutable_type)]`，让 CPython 的 `LOAD_ATTR` 方法特化对原生函数生效（Python 侧方法调用约 5 到 10 ns），暂不做
 - [ ] 没有返回值的函数返回 `PyResult<()>`，去掉 336 处函数末尾的 `Ok(rt::none(py))`（`rt::def!` 的包装要把 `()` 转成 None，成本中等）
 

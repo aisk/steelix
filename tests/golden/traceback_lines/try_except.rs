@@ -530,7 +530,7 @@ pub fn generator_into_native<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         let mut total = rt::int(py, 0);
         match (|| -> PyResult<()> {
             frame.line(204);
-            for value in rt::iter(&m.global("gen")?.call0()?)? {
+            for value in m.global("gen")?.call0()?.try_iter()? {
                 let value = value?;
                 frame.line(205);
                 total = total.add(&value)?;
@@ -561,7 +561,7 @@ pub fn loop_with_try<'py>(
     rt::frame!(m, "loop_with_try", 210, |frame| {
         let mut total = rt::int(py, 0);
         frame.line(212);
-        for item in rt::iter(items)? {
+        for item in items.try_iter()? {
             let item = item?;
             frame.line(214);
             match (|| total.add(m.global("int")?.call1((&item,))?))() {
@@ -695,7 +695,7 @@ def name_after_handler():
             m.global("parse_or_none")?.call1(("y",))?,
         ))?;
         frame.line(246);
-        for item in rt::iter(PyList::new(py, ["value", "key", "app", "class", "fine"])?.as_any())? {
+        for item in PyList::new(py, ["value", "key", "app", "class", "fine"])?.try_iter()? {
             m.set_global("kind", item?)?;
             frame.line(247);
             m.global("print")?
