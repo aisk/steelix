@@ -11,7 +11,7 @@ class TestIO(HelperVM):
         source.write_text("(define loaded-value 42) loaded-value")
         vm = VM()
 
-        assert vm.eval_string('(load "%s")' % source) == 42
+        assert vm.eval_string('(load "%s")' % source.as_posix()) == 42
 
     def test_default_output_procedures(self, capsys):
         self.eval("""

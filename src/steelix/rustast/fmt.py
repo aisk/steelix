@@ -27,6 +27,7 @@ def rustfmt(source: str) -> str:
         input=source,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if proc.returncode != 0:
@@ -35,4 +36,4 @@ def rustfmt(source: str) -> str:
 
 
 def config_text() -> str:
-    return CONFIG.read_text()
+    return CONFIG.read_text(encoding="utf-8")

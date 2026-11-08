@@ -21,7 +21,11 @@ CORPUS_DIR = ROOT / "tests" / "corpus"
 APPS_DIR = ROOT / "tests" / "apps"
 GOLDEN_DIR = ROOT / "tests" / "golden"
 RUNTIME = ROOT / "crates" / "steelix-runtime"
-PYTHON = ROOT / ".venv" / "bin" / "python"
+PYTHON = (
+    ROOT / ".venv" / "Scripts" / "python.exe"
+    if sys.platform == "win32"
+    else ROOT / ".venv" / "bin" / "python"
+)
 E2E_DIR = ROOT / "target" / "e2e"
 
 CASES = sorted(p.stem for p in CASES_DIR.glob("*.py"))
@@ -48,8 +52,18 @@ def update_golden(request: pytest.FixtureRequest) -> bool:
 def extension_library(name: str) -> Path:
     """The cdylib cargo built for the extension module crate `name`
     (`cargo_env(extension=True)`), named as the platform names libraries."""
-    file = f"lib{name}.dylib" if sys.platform == "darwin" else f"lib{name}.so"
+    if sys.platform == "win32":
+        file = f"{name}.dll"
+    elif sys.platform == "darwin":
+        file = f"lib{name}.dylib"
+    else:
+        file = f"lib{name}.so"
     return E2E_DIR / "target-ext" / "debug" / file
+
+
+# The file name suffix that installs an extension module: `fib.so`, or
+# `fib.pyd` on Windows.
+EXTENSION_SUFFIX = ".pyd" if sys.platform == "win32" else ".so"
 
 
 def cargo_env(*, extension: bool) -> dict[str, str]:
@@ -117,7 +131,7 @@ def make_workspace(
             shutil.copyfile(GOLDEN_DIR / f"{case}.rs", crate / "src" / module_file)
     members = ", ".join(f'"{case}"' for case in cases)
     manifest = f'[workspace]\nresolver = "3"\nmembers = [{members}]\n\n{DEV_PROFILE}'
-    (root / "Cargo.toml").write_text(manifest)
+    (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
     # Reuse the repository lock file so PyO3 resolves to the same version offline.
     shutil.copyfile(ROOT / "Cargo.lock", root / "Cargo.lock")
     return Workspace(root, cases)

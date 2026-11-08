@@ -44,9 +44,9 @@ def test_generated_is_the_transpiler_output(update_golden: bool) -> None:
     actual = render_module(parse_file(EXAMPLE / "logsum.py"))
     generated = EXAMPLE / "generated" / "src" / "logsum.rs"
     if update_golden:
-        generated.write_text(actual)
+        generated.write_text(actual, encoding="utf-8")
         return
-    assert actual == generated.read_text(), (
+    assert actual == generated.read_text(encoding="utf-8"), (
         "examples/logsum/generated is out of date; rerun with --update-golden if the change"
         " is intended, and check that examples/logsum/rewritten still builds"
     )
@@ -68,11 +68,13 @@ def example_workspace() -> Workspace:
         emit_crate(parsed, crate, options)
         shutil.copytree(EXAMPLE / variant / "src", crate / "src", dirs_exist_ok=True)
         manifest = crate / "Cargo.toml"
-        text = manifest.read_text().replace('name = "logsum"', f'name = "logsum-{variant}"')
-        manifest.write_text(text)
+        text = manifest.read_text(encoding="utf-8").replace(
+            'name = "logsum"', f'name = "logsum-{variant}"'
+        )
+        manifest.write_text(text, encoding="utf-8")
         members.append(f'"{variant}"')
     manifest = f'[workspace]\nresolver = "3"\nmembers = [{", ".join(members)}]\n\n{DEV_PROFILE}'
-    (root / "Cargo.toml").write_text(manifest)
+    (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
     shutil.copyfile(ROOT / "Cargo.lock", root / "Cargo.lock")
     workspace = Workspace(root, VARIANTS)
     result = workspace.cargo("build", "--workspace", "--message-format=json")

@@ -24,7 +24,7 @@ def kept_step(n):
 
 
 def show_warning(message, category, filename, lineno, file=None, line=None):
-    print(f"{category.__name__} {filename.rsplit('/', 1)[-1]}:{lineno}: {message}")
+    print(f"{category.__name__} {filename.replace('\\', '/').rsplit('/', 1)[-1]}:{lineno}: {message}")
 
 
 warnings.showwarning = show_warning

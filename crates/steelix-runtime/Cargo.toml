@@ -9,9 +9,7 @@ repository.workspace = true
 [dependencies]
 pyo3.workspace = true
 smallvec = "1"
+libc = "0.2"
 
 [build-dependencies]
 pyo3-build-config = "0.30"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"

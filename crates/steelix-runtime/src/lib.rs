@@ -43,7 +43,6 @@ mod importer;
 mod iter;
 mod matching;
 mod module;
-#[cfg(unix)]
 mod multiprocessing;
 mod names;
 mod ops;
@@ -52,7 +51,6 @@ pub mod python;
 mod unpack;
 mod values;
 
-#[cfg(unix)]
 pub mod embed;
 
 pub mod builtins;

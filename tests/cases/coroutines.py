@@ -343,7 +343,7 @@ def frames(e):
 
 
 def unraisable(u):
-    message = re.sub(r" at 0x[0-9a-f]+", "", u.err_msg or "")
+    message = re.sub(r" at 0x[0-9a-fA-F]+", "", u.err_msg or "")
     print("unraisable:", u.exc_type.__name__, u.exc_value, "|", message)
 
 

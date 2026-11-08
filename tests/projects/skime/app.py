@@ -25,7 +25,7 @@ def repl(path):
             main()
         finally:
             sys.stdin, sys.stdout = sys.__stdin__, sys.__stdout__
-            print(re.sub(r" at 0x[0-9a-f]+", "", out.getvalue()), end="")
+            print(re.sub(r" at 0x[0-9a-fA-F]+", "", out.getvalue()), end="")
 
 
 def evaluate(how, argument):

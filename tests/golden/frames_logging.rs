@@ -37,7 +37,13 @@ pub fn show_warning<'py>(
                 (
                     rt::format(&category.attr("__name__")?, "")?,
                     " ",
-                    rt::format(&filename.method1("rsplit", ("/", 1))?.get_item(-1)?, "")?,
+                    rt::format(
+                        &filename
+                            .method1("replace", ("\\", "/"))?
+                            .method1("rsplit", ("/", 1))?
+                            .get_item(-1)?,
+                        "",
+                    )?,
                     ":",
                     rt::format(lineno, "")?,
                     ": ",

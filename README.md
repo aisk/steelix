@@ -91,7 +91,7 @@ steelix coverage app.py                        # how much of the code becomes Ru
 steelix attrs app.py --class Point             # who reads and writes the attributes of a class
 ```
 
-When building a generated crate yourself, point PyO3 at the interpreter whose packages the program uses: `PYO3_PYTHON=/path/to/venv/bin/python cargo build`.
+When building a generated crate yourself, point PyO3 at the interpreter whose packages the program uses: `PYO3_PYTHON=/path/to/venv/bin/python cargo build` (`\path\to\venv\Scripts\python.exe` on Windows).
 
 `steelix build` bundles the Python runtime and the site-packages of the build environment next to the executable, so the result runs on a machine without Python (Linux, glibc at least as new as the build machine's).
 
@@ -106,7 +106,7 @@ Each generated function keeps its Python calling convention, so it can be rewrit
 ## What is missing
 
 - Async generators, async comprehensions, `match` OR patterns with captures, custom metaclasses and a few rarer constructs are kept as Python: the statement stays Python source inside the generated Rust, in the same module globals, so any program CPython runs can be transpiled. `steelix coverage` reports what was kept and why.
-- Executables only for Linux, no Windows or macOS yet.
+- Relocatable distributions (`steelix build`) only for Linux. On macOS and Windows the generated crates build and run on the machine they were built on.
 - No free-threaded Python.
 
 ## Status

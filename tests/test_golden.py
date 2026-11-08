@@ -31,11 +31,11 @@ TRACEBACK_LINES_CASES = [
 def check_golden(actual: str, golden: Path, update_golden: bool) -> None:
     if update_golden or not golden.exists():
         golden.parent.mkdir(exist_ok=True)
-        golden.write_text(actual)
+        golden.write_text(actual, encoding="utf-8")
         if not update_golden:
             pytest.fail(f"created missing golden {golden.name}; review and commit it")
         return
-    assert actual == golden.read_text(), (
+    assert actual == golden.read_text(encoding="utf-8"), (
         f"{golden.name} is out of date; rerun with --update-golden if the change is intended"
     )
 

@@ -679,7 +679,7 @@ pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<B
             let sub = m.global("re")?.attr("sub")?;
             let err_msg = u.attr("err_msg")?;
             sub.call1((
-                " at 0x[0-9a-f]+",
+                " at 0x[0-9a-fA-F]+",
                 "",
                 if err_msg.is_truthy()? {
                     err_msg

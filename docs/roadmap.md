@@ -177,7 +177,7 @@
 - [x] 运行时按相对于二进制的路径定位 Python 安装（`PyConfig.home`，rpath `$ORIGIN/python/lib`）和项目目录，不再写死构建时路径。`main.rs` 里只有 `steelix_runtime::script!("app.py")`，开发构建的路径由 build.rs 给出，golden 不再需要替换 `$ROOT`。`sys.argv[0]` 改成和 `__file__` 一样的绝对路径
 - [x] `steelix build` 一条命令转换、`cargo build --release`、组装 `dist/<name>/`（程序、Python 运行时、构建解释器的 site-packages、可选的源文件、`--add-data`），`--archive` 打成 tar.gz，`--python` 选择解释器或 venv
 - [x] 在干净环境里验证：测试用 `bwrap` 只挂载 `/usr` 和分发目录运行 hello、json 项目、`-m json` 和 multiprocessing（容器的 podman 在本机不可用，`bwrap` 起到同样的隔离作用）
-- 只做了 Linux x86_64，macOS 和 Windows 需要的改动记在 §11。标准库 zip 暂不做（文件数少了，但启动慢 6 到 11 ms）
+- 只做了 Linux x86_64，macOS 和 Windows 需要的改动记在 §11（两者的开发构建、ext 模式和测试后来都支持了，分发还没有）。标准库 zip 暂不做（文件数少了，但启动慢 6 到 11 ms）
 
 ## M7a M6/M7 之后的修复 ✅
 
