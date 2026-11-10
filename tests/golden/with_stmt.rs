@@ -221,26 +221,12 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
     fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::none(m.py()))
     }
-    m.set_attr(
-        "__enter__",
-        rt::function!(
-            module,
-            lambda(),
-            qualname = "lookup_on_type.<locals>.<lambda>"
-        )?,
-    )?;
+    m.set_attr("__enter__", rt::function!(frame, lambda as "<lambda>"())?)?;
     // with_stmt.py:129
     fn lambda2<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyTuple>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::none(m.py()))
     }
-    m.set_attr(
-        "__exit__",
-        rt::function!(
-            module,
-            lambda2(*a),
-            qualname = "lookup_on_type.<locals>.<lambda>"
-        )?,
-    )?;
+    m.set_attr("__exit__", rt::function!(frame, lambda2 as "<lambda>"(*a))?)?;
     match (|| -> PyResult<()> {
         frame.with(&m, |_| Ok(()))?;
         Ok(())

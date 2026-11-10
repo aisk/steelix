@@ -126,7 +126,7 @@ pub mod color {
         )
     }
 
-    // classes_inherit.py:43
+    // classes_inherit.py:42
     #[rt::frame(m, "Color.default", 42)]
     pub fn default<'py>(
         m: &rt::Module<'py>,
@@ -135,7 +135,7 @@ pub mod color {
         cls.attr("GREEN")
     }
 
-    // classes_inherit.py:47
+    // classes_inherit.py:46
     #[rt::frame(m, "Color.is_warm", 46)]
     pub fn is_warm<'py>(
         m: &rt::Module<'py>,
@@ -173,7 +173,7 @@ pub mod planet {
         Ok(rt::none(m.py()))
     }
 
-    // classes_inherit.py:64
+    // classes_inherit.py:63
     #[rt::frame(m, "Planet.gravity", 63)]
     pub fn gravity<'py>(
         m: &rt::Module<'py>,
@@ -278,7 +278,7 @@ pub mod shape {
         Ok(())
     }
 
-    // classes_inherit.py:116
+    // classes_inherit.py:115
     pub fn area<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::none(m.py()))
     }

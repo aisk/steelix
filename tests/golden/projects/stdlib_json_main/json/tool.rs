@@ -9,7 +9,7 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // json/tool.py:37
-#[rt::frame(m, "_colorize_json", 37)]
+#[rt::frame(m, "_colorize_json", 37, frame)]
 pub fn _colorize_json<'py>(
     m: &rt::Module<'py>,
     json_str: &Bound<'py, PyAny>,
@@ -39,11 +39,7 @@ pub fn _colorize_json<'py>(
         }
         r#match.method0("group")
     }
-    let _replace_match_callback = rt::function!(
-        m,
-        _replace_match_callback[theme](r#match),
-        qualname = "_colorize_json.<locals>._replace_match_callback"
-    )?;
+    let _replace_match_callback = rt::function!(frame, _replace_match_callback[theme](r#match))?;
     m.global("re")?.attr("sub")?.call1((
         m.global("_color_pattern")?,
         &_replace_match_callback,
@@ -167,11 +163,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     }
                     Ok(None)
                 }
-                objs = Some(rt::genexpr!(
-                    m,
-                    genexpr(lines.try_iter()?),
-                    qualname = "main.<locals>.<genexpr>"
-                )?);
+                objs = Some(rt::genexpr!(frame, genexpr(lines.try_iter()?))?);
             } else {
                 objs = Some(
                     PyTuple::new(py, [&m.global("json")?.method1("load", (&infile,))?])?.into_any(),

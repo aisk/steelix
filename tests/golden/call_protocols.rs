@@ -206,7 +206,7 @@ pub mod box_ {
         slf.attr("value")?.add(n.mul(times)?)
     }
 
-    // call_protocols.py:92
+    // call_protocols.py:91
     #[rt::frame(m, "Box.make", 91)]
     pub fn make<'py>(
         m: &rt::Module<'py>,
@@ -216,7 +216,7 @@ pub mod box_ {
         cls.call1((value,))
     }
 
-    // call_protocols.py:96
+    // call_protocols.py:95
     #[rt::frame(m, "Box.twice", 95)]
     pub fn twice<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::int(m.py(), 2).mul(x)

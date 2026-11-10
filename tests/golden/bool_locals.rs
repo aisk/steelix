@@ -128,7 +128,7 @@ pub fn flip<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'
 }
 
 // bool_locals.py:86
-#[rt::frame(m, "captured", 86)]
+#[rt::frame(m, "captured", 86, frame)]
 pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     // Captured by a nested function: stays a Python object in a cell.
     let seen = rt::Cell::new(m.py(), "seen", false)?;
@@ -138,7 +138,7 @@ pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         seen.set(true)?;
         Ok(rt::none(m.py()))
     }
-    let mark = rt::function!(m, mark[&seen](), qualname = "captured.<locals>.mark")?;
+    let mark = rt::function!(frame, mark[&seen]())?;
     mark.call0()?;
     seen.get()
 }

@@ -326,7 +326,7 @@ pub fn loop_jumps<'py>(
 // match_basic.py:226
 /// A generator expression or a lambda in a guard is a nested `fn` item
 /// that the guard calls.
-#[rt::frame(m, "nested_functions", 226)]
+#[rt::frame(m, "nested_functions", 226, frame)]
 pub fn nested_functions<'py>(
     m: &rt::Module<'py>,
     value: &Bound<'py, PyAny>,
@@ -355,11 +355,7 @@ pub fn nested_functions<'py>(
     }
     if let Some([items]) = rt::match_class(value, &rt::builtin(py, "list")?, 1, [])?
         && rt::builtin(py, "all")?
-            .call1((rt::genexpr!(
-                m,
-                genexpr(items.try_iter()?),
-                qualname = "nested_functions.<locals>.<genexpr>"
-            )?,))?
+            .call1((rt::genexpr!(frame, genexpr(items.try_iter()?))?,))?
             .is_truthy()?
     {
         return Ok(rt::str(py, "strings"));
@@ -368,13 +364,9 @@ pub fn nested_functions<'py>(
         && let first2 = value.get_item(0)?
     {
         first.set(&first2)?;
-        if rt::function!(
-            m,
-            lambda[&first](),
-            qualname = "nested_functions.<locals>.<lambda>"
-        )?
-        .call0()?
-        .is_truthy()?
+        if rt::function!(frame, lambda as "<lambda>"[&first]())?
+            .call0()?
+            .is_truthy()?
         {
             return Ok(rt::str(py, "starts positive"));
         }

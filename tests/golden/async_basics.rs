@@ -163,9 +163,9 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // async_basics.py:77
-#[rt::frame(m, "traced", 77)]
+#[rt::frame(m, "traced", 77, frame)]
 pub fn traced<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    // async_basics.py:79
+    // async_basics.py:78
     #[rt::frame(m, "traced.<locals>.wrapper", 78)]
     async fn wrapper<'py>(
         m: &rt::Module<'py>,
@@ -180,15 +180,14 @@ pub fn traced<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bo
         Ok(result)
     }
     let wrapper = rt::function!(
-        m,
+        frame,
         @(m.global("functools")?.method1("wraps", (r#fn,))?)
-        async wrapper[r#fn](*args),
-        qualname = "traced.<locals>.wrapper"
+        async wrapper[r#fn](*args)
     )?;
     Ok(wrapper)
 }
 
-// async_basics.py:89
+// async_basics.py:88
 #[rt::frame(m, "add", 88)]
 pub async fn add<'py>(
     m: &rt::Module<'py>,
@@ -201,7 +200,7 @@ pub async fn add<'py>(
 }
 
 // async_basics.py:94
-#[rt::frame(m, "make_accumulator", 94)]
+#[rt::frame(m, "make_accumulator", 94, frame)]
 pub fn make_accumulator<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let total = rt::Cell::new(m.py(), "total", 0)?;
     // async_basics.py:97
@@ -216,16 +215,12 @@ pub fn make_accumulator<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
         total.set(rt::iadd(&total.get()?, x)?)?;
         total.get()
     }
-    let add_to = rt::function!(
-        m,
-        async add_to[&total](x),
-        qualname = "make_accumulator.<locals>.add_to"
-    )?;
+    let add_to = rt::function!(frame, async add_to[&total](x))?;
     Ok(add_to)
 }
 
 // async_basics.py:106
-#[rt::frame(m, "outer", 106)]
+#[rt::frame(m, "outer", 106, frame)]
 pub async fn outer<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // async_basics.py:107
@@ -239,7 +234,7 @@ pub async fn outer<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
         rt::await_(sleep).await?;
         n.mul(k)
     }
-    let inner = rt::function!(m, async inner[n](k), qualname = "outer.<locals>.inner")?;
+    let inner = rt::function!(frame, async inner[n](k))?;
     let results = PyList::empty(py).into_any();
     for k in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
         let k = k?;
@@ -411,13 +406,13 @@ pub mod base {
         slf.attr("_value")
     }
 
-    // async_basics.py:126
+    // async_basics.py:125
     #[rt::frame(m, "Base.value", 125)]
     pub fn value<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         slf.method0("get")
     }
 
-    // async_basics.py:130
+    // async_basics.py:129
     #[rt::frame(m, "Base.static", 129)]
     pub async fn r#static<'py>(
         m: &rt::Module<'py>,
@@ -426,7 +421,7 @@ pub mod base {
         x.add(1)
     }
 
-    // async_basics.py:134
+    // async_basics.py:133
     #[rt::frame(m, "Base.make", 133)]
     pub async fn make<'py>(
         m: &rt::Module<'py>,

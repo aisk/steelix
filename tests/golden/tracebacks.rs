@@ -38,7 +38,7 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
 }
 
 // tracebacks.py:17
-#[rt::frame(m, "no_carets", 17)]
+#[rt::frame(m, "no_carets", 17, frame)]
 pub fn no_carets<'py>(
     m: &rt::Module<'py>,
     text: &Bound<'py, PyAny>,
@@ -60,11 +60,7 @@ pub fn no_carets<'py>(
     }
     let join = rt::str(m.py(), "\n").attr("join")?;
     let iter = text.method0("splitlines")?.try_iter()?;
-    join.call1((rt::genexpr!(
-        m,
-        genexpr(iter),
-        qualname = "no_carets.<locals>.<genexpr>"
-    )?,))
+    join.call1((rt::genexpr!(frame, genexpr(iter))?,))
 }
 
 // tracebacks.py:24
@@ -99,7 +95,7 @@ pub fn decorate<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<
     Ok(r#fn.clone())
 }
 
-// tracebacks.py:47
+// tracebacks.py:46
 #[rt::frame(m, "decorated", 46)]
 pub fn decorated<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::int(m.py(), 1).div(x)
@@ -114,13 +110,13 @@ pub fn outer<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     fn inner<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         PyList::new(m.py(), [1])?.as_any().get_item(n)
     }
-    let inner = rt::function!(m, inner(n), qualname = "outer.<locals>.inner")?;
+    let inner = rt::function!(frame, inner(n))?;
     // tracebacks.py:55
     #[rt::frame(m, "outer.<locals>.<lambda>", 55)]
     fn lambda<'py>(m: &rt::Module<'py>, v: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         v.mul(v)
     }
-    let square = rt::function!(m, lambda(v), qualname = "outer.<locals>.<lambda>")?;
+    let square = rt::function!(frame, lambda as "<lambda>"(v))?;
     match inner.call1((5,)) {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyIndexError>(py) => {

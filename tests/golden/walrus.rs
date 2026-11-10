@@ -68,7 +68,7 @@ pub fn order<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // walrus.py:31
-#[rt::frame(m, "in_comprehension", 31)]
+#[rt::frame(m, "in_comprehension", 31, frame)]
 pub fn in_comprehension<'py>(
     m: &rt::Module<'py>,
     values: &Bound<'py, PyAny>,
@@ -89,11 +89,7 @@ pub fn in_comprehension<'py>(
         Ok(None)
     }
     if rt::builtin(py, "any")?
-        .call1((rt::genexpr!(
-            m,
-            genexpr[&found](values.try_iter()?),
-            qualname = "in_comprehension.<locals>.<genexpr>"
-        )?,))?
+        .call1((rt::genexpr!(frame, genexpr[&found](values.try_iter()?))?,))?
         .is_truthy()?
     {
         rt::builtins::print(py, ("found", found.get()?))?;
@@ -131,7 +127,7 @@ pub fn filtered<'py>(
 }
 
 // walrus.py:43
-#[rt::frame(m, "captured", 43)]
+#[rt::frame(m, "captured", 43, frame)]
 pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let value = rt::Cell::empty(m.py(), "value")?;
     // walrus.py:44
@@ -139,7 +135,7 @@ pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     fn get<'py>(m: &rt::Module<'py>, value: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
         value.get()
     }
-    let get = rt::function!(m, get[&value](), qualname = "captured.<locals>.get")?;
+    let get = rt::function!(frame, get[&value]())?;
     value.set(0)?;
     value.set(5)?;
     get.call0()

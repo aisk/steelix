@@ -502,11 +502,7 @@ pub fn nested_functions<'py>(
     frame.line(230);
     if let Some([items]) = rt::match_class(value, &rt::builtin(py, "list")?, 1, [])?
         && rt::builtin(py, "all")?
-            .call1((rt::genexpr!(
-                m,
-                genexpr(items.try_iter()?),
-                qualname = "nested_functions.<locals>.<genexpr>"
-            )?,))?
+            .call1((rt::genexpr!(frame, genexpr(items.try_iter()?))?,))?
             .is_truthy()?
     {
         return Ok(rt::str(py, "strings"));
@@ -516,13 +512,9 @@ pub fn nested_functions<'py>(
         && let first2 = value.get_item(0)?
     {
         first.set(&first2)?;
-        if rt::function!(
-            m,
-            lambda[&first](),
-            qualname = "nested_functions.<locals>.<lambda>"
-        )?
-        .call0()?
-        .is_truthy()?
+        if rt::function!(frame, lambda as "<lambda>"[&first]())?
+            .call0()?
+            .is_truthy()?
         {
             return Ok(rt::str(py, "starts positive"));
         }

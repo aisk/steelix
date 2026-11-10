@@ -164,7 +164,7 @@ pub mod fresh {
         m.global("T")?.call1((slf.attr("names")?.get_item(index)?,))
     }
 
-    // match_release.py:37
+    // match_release.py:36
     #[rt::frame(m, "Fresh.item", 36)]
     pub fn item<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         m.global("T")?.call1(("attribute",))

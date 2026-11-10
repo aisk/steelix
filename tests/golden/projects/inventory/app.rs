@@ -106,7 +106,7 @@ pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // app.py:73
-#[rt::frame(m, "state", 73)]
+#[rt::frame(m, "state", 73, frame)]
 pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     rt::builtins::print(
@@ -138,7 +138,7 @@ pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     fn lambda<'py>(m: &rt::Module<'py>, price: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::fstring(m.py(), ("<", rt::format(price, "")?, ">"))
     }
-    let value = rt::function!(m, lambda(price), qualname = "state.<locals>.<lambda>")?;
+    let value = rt::function!(frame, lambda as "<lambda>"(price))?;
     m.global("store")?
         .attr("items")?
         .set_attr("fmt_price", value)?;
@@ -189,7 +189,7 @@ pub fn lazy<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // app.py:93
-#[rt::frame(m, "main", 93)]
+#[rt::frame(m, "main", 93, frame)]
 pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let inventory = build(m)?;
@@ -233,9 +233,8 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         (
             "app: modules",
             rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-                m,
-                genexpr(m.global("sys")?.attr("modules")?.try_iter()?),
-                qualname = "main.<locals>.<genexpr>"
+                frame,
+                genexpr(m.global("sys")?.attr("modules")?.try_iter()?)
             )?,))?,
         ),
     )?;

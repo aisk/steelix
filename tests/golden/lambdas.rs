@@ -6,7 +6,7 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // lambdas.py:7
-#[rt::frame(m, "make_adder", 7)]
+#[rt::frame(m, "make_adder", 7, frame)]
 pub fn make_adder<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     // lambdas.py:8
     #[rt::frame(m, "make_adder.<locals>.<lambda>", 8)]
@@ -17,7 +17,7 @@ pub fn make_adder<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
     ) -> PyResult<Bound<'py, PyAny>> {
         x.add(n)
     }
-    rt::function!(m, lambda[n](x), qualname = "make_adder.<locals>.<lambda>")
+    rt::function!(frame, lambda as "<lambda>"[n](x))
 }
 
 /// Executes the body of `lambdas.py` in the module `m`.

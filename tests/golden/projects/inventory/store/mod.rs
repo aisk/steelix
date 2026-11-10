@@ -11,7 +11,7 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // store/__init__.py:12
-#[rt::frame(m, "total_value", 12)]
+#[rt::frame(m, "total_value", 12, frame)]
 pub fn total_value<'py>(
     m: &rt::Module<'py>,
     inventory: &Bound<'py, PyAny>,
@@ -28,9 +28,8 @@ pub fn total_value<'py>(
         Ok(None)
     }
     rt::builtin(m.py(), "sum")?.call1((rt::genexpr!(
-        m,
-        genexpr(inventory.attr("items")?.method0("values")?.try_iter()?),
-        qualname = "total_value.<locals>.<genexpr>"
+        frame,
+        genexpr(inventory.attr("items")?.method0("values")?.try_iter()?)
     )?,))
 }
 

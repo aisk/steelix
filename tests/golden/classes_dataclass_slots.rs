@@ -19,7 +19,7 @@ pub mod base {
         Ok(rt::str(m.py(), "base"))
     }
 
-    // classes_dataclass_slots.py:15
+    // classes_dataclass_slots.py:14
     pub fn name<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::str(m.py(), "base"))
     }
@@ -28,7 +28,7 @@ pub mod base {
 pub mod p {
     use super::*;
 
-    // classes_dataclass_slots.py:20
+    // classes_dataclass_slots.py:19
     /// The body of `class P`, run in its namespace `ns`.
     #[rt::frame(ns, "P", 19)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
@@ -38,7 +38,7 @@ pub mod p {
         Ok(())
     }
 
-    // classes_dataclass_slots.py:24
+    // classes_dataclass_slots.py:23
     pub fn name<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::str(m.py(), "p"))
     }

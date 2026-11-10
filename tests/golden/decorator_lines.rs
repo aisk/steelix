@@ -53,18 +53,17 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
 }
 
 // decorator_lines.py:101
-#[rt::frame(m, "nested", 101)]
+#[rt::frame(m, "nested", 101, frame)]
 pub fn nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    // decorator_lines.py:104
+    // decorator_lines.py:102
     fn inner<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::none(m.py()))
     }
     let inner = rt::function!(
-        m,
+        frame,
         @ok
         @(fails(m, &rt::str(m.py(), "in nested"))?)
-        inner(),
-        qualname = "nested.<locals>.inner"
+        inner()
     )?;
     Ok(inner)
 }
@@ -92,7 +91,7 @@ pub mod in_body {
         Ok(())
     }
 
-    // decorator_lines.py:80
+    // decorator_lines.py:78
     pub fn method<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -113,12 +112,12 @@ pub mod single {
         Ok(())
     }
 
-    // decorator_lines.py:90
+    // decorator_lines.py:89
     pub fn fine<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::none(m.py()))
     }
 
-    // decorator_lines.py:94
+    // decorator_lines.py:93
     pub fn method<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -140,7 +139,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::def!(m, ok(r#fn))?;
     rt::def!(m, show(exc))?;
     match (|| -> PyResult<()> {
-        // decorator_lines.py:30
+        // decorator_lines.py:27
         fn evaluated<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::none(m.py()))
         }
@@ -157,7 +156,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         Err(err) => return Err(err),
     }
     match (|| -> PyResult<()> {
-        // decorator_lines.py:40
+        // decorator_lines.py:38
         fn defaulted<'py>(
             m: &rt::Module<'py>,
             x: &Bound<'py, PyAny>,
@@ -177,7 +176,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         Err(err) => return Err(err),
     }
     match (|| -> PyResult<()> {
-        // decorator_lines.py:51
+        // decorator_lines.py:48
         fn applied<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::none(m.py()))
         }
@@ -194,7 +193,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         Err(err) => return Err(err),
     }
     match (|| -> PyResult<()> {
-        // decorator_lines.py:60
+        // decorator_lines.py:59
         fn single<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::none(m.py()))
         }

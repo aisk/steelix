@@ -269,19 +269,15 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
 rt::def!(m, greet(name, greeting = "Hello", *, punct = "!"))?;
 rt::def!(m, span(start, stop = py.None(), /, step = 1))?;
 rt::def!(m, collect(first, *rest, sep = "-", **options))?;
-let increment = rt::function!(
-    m,
-    increment[&count](step = 1),
-    qualname = "make_counter.<locals>.increment"
-)?;
+let increment = rt::function!(frame, increment[&count](step = 1))?;
 ```
 
-- `rt::function!` 返回函数对象，`rt::def!` 再把它绑定到函数名，模块代码里是 globals，类体里是类的命名空间（§10）。第一个参数是模块上下文（类体里是 `ns`），函数对象保存它的 globals，经过 Python 调用时再用它构造 `rt::Module` 传给 Rust fn。装饰器写在名字前面（下面的装饰器一节）
+- `rt::function!` 返回函数对象，`rt::def!` 再把它绑定到函数名，模块代码里是 globals，类体里是类的命名空间（§10）。第一个参数是定义它的地方：模块代码里是模块上下文 `m`，类体里是 `ns`，函数体里是帧 `frame`（外层函数的属性因此写出 `frame`）。函数对象保存它的 globals，经过 Python 调用时再用它构造 `rt::Module` 传给 Rust fn。装饰器写在名字前面（下面的装饰器一节）
 - 签名里 `/`、`*`、`*args`、`**kwargs` 与 Python 相同。默认值是 Rust 表达式，在宏展开处（也就是 `def` 执行时）按 Python 顺序求值一次。Rust 名字与 Python 名字不同的参数写成 `py_ as "py"`，报错信息和 `inspect.signature` 里显示 Python 名字
 - 注解写成 `x: "int"`、`-> "str"`，是 Python 源码文本（见下面的注解一节）
 - 方括号里是闭包捕获的变量，`&count` 是 cell，不带 `&` 的是值（见闭包一节）
 - Rust 名字和 Python 名字不同的函数和参数一样写成 `helper_ as "helper"(x)`，`r#type` 这样的关键字不用写，宏去掉 `r#`
-- 可选的 `qualname = ".."`、`doc = ".."`（还有和 `as` 一样的 `name = ".."`，生成的代码不用）。qualname 默认就是名字，类体里定义的函数是 `<类的 qualname>.<名字>`（§10），只在不同的时候写出来，比如嵌套函数是 `outer.<locals>.inner`，lambda 是 `<lambda>`
+- 可选的 `qualname = ".."`、`doc = ".."`（还有和 `as` 一样的 `name = ".."`，生成的代码不用）。qualname 由 runtime 从第一个参数推出：`m` 是名字本身，`ns` 是 `<类的 qualname>.<名字>`（§10），`frame` 是 `<外层函数的 qualname>.<locals>.<名字>`（帧知道外层函数的 qualname，嵌套函数、lambda 和生成器表达式不用再写一遍那个长字符串）。只在不同的时候写出来，比如函数体里 `global g` 之后的 `def g`。lambda 的 Rust 名字是 `lambda`、`lambda2`，函数体里写成 `lambda as "<lambda>"`，模块级的写 `qualname = "<lambda>"`
 - 生成的 Rust fn 参数顺序：`m`、捕获的变量、Python 参数。`*args` 的类型是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`，可以直接用 tuple/dict 的方法
 
 ### 直接调用与默认参数
@@ -343,6 +339,7 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 - 其余的（从不重新绑定的参数，以及只在捕获之前的顶层语句里赋值一次的变量）在外层函数里仍然是普通的 `Bound`，捕获时把当前值放进一个新的 cell，内层函数直接收到 `&Bound`。这类变量占大多数，生成代码和普通变量一样可读，语义也完全相同，因为捕获之后它的值不会再变
 
 ```rust
+#[rt::frame(m, "make_counter", 4, frame)]
 pub fn make_counter<'py>(
     m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
@@ -358,11 +355,7 @@ pub fn make_counter<'py>(
         count.set(rt::iadd(&count.get()?, step)?)?;
         count.get()
     }
-    let increment = rt::function!(
-        m,
-        increment[&count](step = 1),
-        qualname = "make_counter.<locals>.increment"
-    )?;
+    let increment = rt::function!(frame, increment[&count](step = 1))?;
     ..
 }
 ```
@@ -670,11 +663,7 @@ fn genexpr<'py>(
     }
     Ok(None)
 }
-rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
-    m,
-    genexpr(xs.try_iter()?),
-    qualname = "has_big.<locals>.<genexpr>"
-)?,))
+rt::builtin(m.py(), "any")?.call1((rt::genexpr!(frame, genexpr(xs.try_iter()?))?,))
 ```
 
 - 有 `if` 时 step 是一个 `for` 循环，`return` 从循环中间返回，下次调用继续迭代同一个迭代器（位置保存在 Python 的迭代器里），所以不需要状态机：

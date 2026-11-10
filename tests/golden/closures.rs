@@ -5,7 +5,7 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // closures.py:4
-#[rt::frame(m, "make_counter", 4)]
+#[rt::frame(m, "make_counter", 4, frame)]
 pub fn make_counter<'py>(
     m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
@@ -22,22 +22,18 @@ pub fn make_counter<'py>(
         count.set(rt::iadd(&count.get()?, step)?)?;
         count.get()
     }
-    let increment = rt::function!(
-        m,
-        increment[&count](step = 1),
-        qualname = "make_counter.<locals>.increment"
-    )?;
+    let increment = rt::function!(frame, increment[&count](step = 1))?;
     // closures.py:12
     #[rt::frame(m, "make_counter.<locals>.peek", 12)]
     fn peek<'py>(m: &rt::Module<'py>, count: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
         count.get()
     }
-    let peek = rt::function!(m, peek[&count](), qualname = "make_counter.<locals>.peek")?;
+    let peek = rt::function!(frame, peek[&count]())?;
     Ok(PyTuple::new(py, [&increment, &peek])?.into_any())
 }
 
 // closures.py:18
-#[rt::frame(m, "late_binding", 18)]
+#[rt::frame(m, "late_binding", 18, frame)]
 pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let i = rt::Cell::empty(py, "i")?;
@@ -51,7 +47,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         fn show_<'py>(m: &rt::Module<'py>, i: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
             i.get()
         }
-        show = rt::function!(m, show_[&i](), qualname = "late_binding.<locals>.show")?;
+        show = rt::function!(frame, show_ as "show"[&i]())?;
         funcs.method1("append", (&show,))?;
     }
     Ok(PyList::new(
@@ -66,7 +62,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // closures.py:30
-#[rt::frame(m, "early_binding", 30)]
+#[rt::frame(m, "early_binding", 30, frame)]
 pub fn early_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // A default argument captures the value at definition time instead.
@@ -78,11 +74,9 @@ pub fn early_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         fn lambda<'py>(m: &rt::Module<'py>, i: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
             i.mul(10)
         }
-        funcs.attr("append")?.call1((rt::function!(
-            m,
-            lambda(i = &i),
-            qualname = "early_binding.<locals>.<lambda>"
-        )?,))?;
+        funcs
+            .attr("append")?
+            .call1((rt::function!(frame, lambda as "<lambda>"(i = &i))?,))?;
     }
     Ok(PyList::new(
         py,
@@ -96,7 +90,7 @@ pub fn early_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // closures.py:38
-#[rt::frame(m, "factorial", 38)]
+#[rt::frame(m, "factorial", 38, frame)]
 pub fn factorial<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let go = rt::Cell::empty(m.py(), "go")?;
     // closures.py:39
@@ -112,20 +106,16 @@ pub fn factorial<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bo
         }
         go.get()?.call1((k.sub(1)?, acc.mul(k)?))
     }
-    go.set(rt::function!(
-        m,
-        go_[&go](k, acc),
-        qualname = "factorial.<locals>.go"
-    )?)?;
+    go.set(rt::function!(frame, go_ as "go"[&go](k, acc))?)?;
     go.get()?.call1((n, 1))
 }
 
 // closures.py:47
-#[rt::frame(m, "deep", 47)]
+#[rt::frame(m, "deep", 47, frame)]
 pub fn deep<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let a = rt::Cell::new(m.py(), "a", 1)?;
     // closures.py:50
-    #[rt::frame(m, "deep.<locals>.middle", 50)]
+    #[rt::frame(m, "deep.<locals>.middle", 50, frame)]
     fn middle<'py>(m: &rt::Module<'py>, a: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
         let b = rt::int(m.py(), 2);
         // closures.py:53
@@ -138,19 +128,15 @@ pub fn deep<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             a.set(rt::iadd(&a.get()?, b)?)?;
             a.get()
         }
-        let inner = rt::function!(
-            m,
-            inner[&a, b](),
-            qualname = "deep.<locals>.middle.<locals>.inner"
-        )?;
+        let inner = rt::function!(frame, inner[&a, b]())?;
         Ok(inner)
     }
-    let middle = rt::function!(m, middle[&a](), qualname = "deep.<locals>.middle")?;
+    let middle = rt::function!(frame, middle[&a]())?;
     middle.call0()
 }
 
 // closures.py:63
-#[rt::frame(m, "unassigned", 63)]
+#[rt::frame(m, "unassigned", 63, frame)]
 pub fn unassigned<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let value = rt::Cell::empty(m.py(), "value")?;
     // closures.py:64
@@ -158,14 +144,14 @@ pub fn unassigned<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     fn read<'py>(m: &rt::Module<'py>, value: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
         value.get()
     }
-    let read = rt::function!(m, read[&value](), qualname = "unassigned.<locals>.read")?;
+    let read = rt::function!(frame, read[&value]())?;
     let try_first = read.clone();
     value.set("now set")?;
     try_first.call0()
 }
 
 // closures.py:72
-#[rt::frame(m, "too_early", 72)]
+#[rt::frame(m, "too_early", 72, frame)]
 pub fn too_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let secret = rt::Cell::empty(m.py(), "secret")?;
     // closures.py:73
@@ -173,7 +159,7 @@ pub fn too_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     fn read<'py>(m: &rt::Module<'py>, secret: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
         secret.get()
     }
-    let read = rt::function!(m, read[&secret](), qualname = "too_early.<locals>.read")?;
+    let read = rt::function!(frame, read[&secret]())?;
     let result = read.call0()?;
     secret.set(1)?;
     Ok(result)

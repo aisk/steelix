@@ -3,10 +3,11 @@
 /// Creates a Python function object backed by a Rust function, like
 /// evaluating a `def` statement (without binding the name) or a `lambda`.
 ///
-/// The first argument is where the function is defined: the module (also in
-/// function bodies), or the namespace `ns` of a class body. A function
-/// defined in a class body is a method: its `__qualname__` is
+/// The first argument is where the function is defined: the module `m`, the
+/// namespace `ns` of a class body, or in a function body its `frame`. A
+/// function defined in a class body is a method: its `__qualname__` is
 /// `<class qualname>.<name>` and its annotations see the class namespace.
+/// One defined in the body of the function `f` is `f.<locals>.<name>`.
 ///
 /// The parameter list is written like the Python one, using the Rust names of
 /// the parameters. Defaults are evaluated right away, in order, and stored in
@@ -25,7 +26,7 @@
 /// rt::function!(m, area(r: "float") -> "float")?;          // annotations
 /// rt::function!(ns, label_ as "label"(slf as "self"))?;    // Python names differ
 /// // A nested function capturing `n` by value and the shared cell `count`:
-/// rt::function!(m, add[n, &count](x), qualname = "make.<locals>.add")?;
+/// rt::function!(frame, add[n, &count](x))?;
 /// ```
 ///
 /// Decorators come before the name, as in Python. `@name` and
@@ -40,8 +41,9 @@
 /// rt::function!(m, @(m.global("functools")?.method1("wraps", (f,))?) wrapper(*args))?;
 /// ```
 ///
-/// Options: `qualname = ".."` (defaults to the name, or `<class>.<name>`
-/// for a method), `name = ".."` (like `as`) and `doc = ".."`.
+/// Options: `qualname = ".."` (defaults to the name, `<class>.<name>` for a
+/// method or `<function>.<locals>.<name>` in a function body), `name = ".."`
+/// (like `as`) and `doc = ".."`.
 #[macro_export]
 macro_rules! function {
     // --- decorators, collected in order: `{name a b}` for `@a.b`,
@@ -196,6 +198,7 @@ macro_rules! function {
             annotations: ANNOTATIONS,
             classdict: $crate::function::Definer::classdict(definer),
             class_qualname: $crate::function::Definer::class_qualname(definer),
+            enclosing_function: $crate::function::Definer::enclosing_function(definer),
             body,
         })
     }};

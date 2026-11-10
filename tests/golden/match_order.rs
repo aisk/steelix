@@ -481,7 +481,7 @@ pub mod meta {
         rt::super_(__class__, cls)?.method1("__instancecheck__", (instance,))
     }
 
-    // match_order.py:91
+    // match_order.py:90
     #[rt::frame(m, "Meta.__match_args__", 90)]
     pub fn __match_args__<'py>(
         m: &rt::Module<'py>,
@@ -598,7 +598,7 @@ pub mod store_meta {
         Ok(())
     }
 
-    // match_order.py:121
+    // match_order.py:120
     #[rt::frame(m, "StoreMeta.__prepare__", 120)]
     pub fn __prepare__<'py>(
         m: &rt::Module<'py>,

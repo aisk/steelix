@@ -80,7 +80,7 @@ pub mod config {
 pub mod pair {
     use super::*;
 
-    // classes_future.py:32
+    // classes_future.py:31
     /// The body of `class Pair`, run in its namespace `ns`.
     #[rt::frame(ns, "Pair", 31)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {

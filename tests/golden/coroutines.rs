@@ -703,7 +703,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             py,
             [
                 &m.global("nested_guard")?,
-                &rt::function!(m, lambda(log), qualname = "main.<locals>.<lambda>")?,
+                &rt::function!(frame, lambda as "<lambda>"(log))?,
             ],
         )?
         .as_any(),
@@ -832,8 +832,8 @@ pub async fn awaited_already<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         PyTuple::new(
             py,
             [
-                &rt::function!(m, lambda(), qualname = "awaited_already.<locals>.<lambda>")?,
-                &rt::function!(m, lambda2(), qualname = "awaited_already.<locals>.<lambda>")?,
+                &rt::function!(frame, lambda as "<lambda>"())?,
+                &rt::function!(frame, lambda2 as "<lambda>"())?,
             ],
         )?
         .as_any(),

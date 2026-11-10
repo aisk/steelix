@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from steelix.frontend.scope import FunctionNode
 from steelix.lower.context import NAMESPACE
-from steelix.lower.function import function_options, signature_text
+from steelix.lower.function import defined_in_frame, function_options, signature_text
 from steelix.lower.names import rust_ident
 from steelix.lower.rustflow import fallible
 from steelix.lower.values import Kind, Value
@@ -99,7 +99,10 @@ class FunctionObjectLowering:
         # A `qualname = ..` option gives the name too (its last part).
         named = any(str(o.parts[0]).startswith("qualname") for o in options)
         signature = signature_text(self.ctx, scope, rust, default_exprs, names, named)
-        macro = rs.MacroCall("rt::function", (definer, *prefixes, signature, *options))
+        # In a function body the frame is the definer, which knows the
+        # qualified name; decorator names are still read from the module.
+        where = rs.Path("frame") if defined_in_frame(self.ctx, scope, definer) else definer
+        macro = rs.MacroCall("rt::function", (where, *prefixes, signature, *options))
         value = Value(_try(macro), Kind.OWNED)
         if not temps:
             return value

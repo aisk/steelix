@@ -6,7 +6,7 @@ use pyo3::types::PyList;
 use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
-// exceptions_uncaught.py:7
+// exceptions_uncaught.py:6
 #[rt::frame(m, "resource", 6)]
 pub async fn resource<'py>(
     m: &rt::Module<'py>,

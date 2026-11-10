@@ -14,7 +14,7 @@ pub fn repeat<'py>(
 }
 
 // param_shadows_function.py:8
-#[rt::frame(m, "outer", 8)]
+#[rt::frame(m, "outer", 8, frame)]
 pub fn outer<'py>(m: &rt::Module<'py>, inner: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let mut inner = inner.clone();
     // param_shadows_function.py:9
@@ -22,7 +22,7 @@ pub fn outer<'py>(m: &rt::Module<'py>, inner: &Bound<'py, PyAny>) -> PyResult<Bo
     fn inner_<'py>(m: &rt::Module<'py>, inner: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         inner.add(1)
     }
-    inner = rt::function!(m, inner_(inner), qualname = "outer.<locals>.inner")?;
+    inner = rt::function!(frame, inner_ as "inner"(inner))?;
     inner.call1((1,))
 }
 

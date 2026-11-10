@@ -261,7 +261,7 @@ pub async fn pong<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
     Ok(rt::none(py))
 }
 
-// generators.py:148
+// generators.py:147
 #[rt::frame(m, "tag", 147, frame)]
 pub async fn tag<'py>(
     m: &rt::Module<'py>,
@@ -313,11 +313,8 @@ pub fn make_counter<'py>(
             m.py().check_signals()?;
         }
     }
-    let counter = rt::function!(
-        m,
-        gen counter[&count](),
-        qualname = "make_counter.<locals>.counter"
-    )?;
+    frame.line(161);
+    let counter = rt::function!(frame, gen counter[&count]())?;
     frame.line(167);
     counter.call0()
 }
@@ -346,12 +343,7 @@ pub fn closure_gen<'py>(
         Ok(list.into_any())
     }
     frame.line(172);
-    rt::function!(
-        m,
-        lambda[values, scale](),
-        qualname = "closure_gen.<locals>.<lambda>"
-    )?
-    .call0()
+    rt::function!(frame, lambda as "<lambda>"[values, scale]())?.call0()
 }
 
 // generators.py:175
@@ -367,11 +359,8 @@ pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         rt::yield_(x.add(1)?).await?;
         Ok(rt::none(m.py()))
     }
-    let inner = rt::function!(
-        m,
-        gen inner(x),
-        qualname = "gen_with_nested.<locals>.inner"
-    )?;
+    frame.line(176);
+    let inner = rt::function!(frame, gen inner(x))?;
     frame.line(180);
     for value in inner.call1((5,))?.try_iter()? {
         let value = value?;
@@ -514,7 +503,7 @@ pub mod bag {
         Ok(rt::none(py))
     }
 
-    // generators.py:137
+    // generators.py:136
     #[rt::frame(m, "Bag.doubled", 136, frame)]
     pub fn doubled<'py>(
         m: &rt::Module<'py>,
@@ -532,11 +521,7 @@ pub mod bag {
             Ok(None)
         }
         frame.line(138);
-        rt::genexpr!(
-            m,
-            genexpr(slf.try_iter()?),
-            qualname = "Bag.doubled.<locals>.<genexpr>"
-        )
+        rt::genexpr!(frame, genexpr(slf.try_iter()?))
     }
 }
 

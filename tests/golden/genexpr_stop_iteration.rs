@@ -13,7 +13,7 @@ pub fn boom<'py>(m: &rt::Module<'py>, v: &Bound<'py, PyAny>) -> PyResult<Bound<'
 }
 
 // genexpr_stop_iteration.py:11
-#[rt::frame(m, "run", 11)]
+#[rt::frame(m, "run", 11, frame)]
 pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // genexpr_stop_iteration.py:12
@@ -28,9 +28,8 @@ pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(None)
     }
     rt::builtin(py, "list")?.call1((rt::genexpr!(
-        m,
-        genexpr(rt::builtin(py, "range")?.call1((3,))?.try_iter()?),
-        qualname = "run.<locals>.<genexpr>"
+        frame,
+        genexpr(rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
     )?,))
 }
 

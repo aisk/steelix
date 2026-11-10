@@ -28,7 +28,7 @@ pub fn trace<'py>(
 }
 
 // classes_build.py:10
-#[rt::frame(m, "deco", 10)]
+#[rt::frame(m, "deco", 10, frame)]
 pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::builtins::print(m.py(), ("deco", label))?;
     // classes_build.py:13
@@ -48,12 +48,12 @@ pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bou
         )?;
         Ok(cls.clone())
     }
-    let apply = rt::function!(m, apply[label](cls), qualname = "deco.<locals>.apply")?;
+    let apply = rt::function!(frame, apply[label](cls))?;
     Ok(apply)
 }
 
 // classes_build.py:264
-#[rt::frame(m, "fake_meta", 264)]
+#[rt::frame(m, "fake_meta", 264, frame)]
 pub fn fake_meta<'py>(
     m: &rt::Module<'py>,
     name: &Bound<'py, PyAny>,
@@ -82,11 +82,7 @@ pub fn fake_meta<'py>(
             "fake_meta",
             name,
             bases,
-            rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-                m,
-                genexpr(ns.try_iter()?),
-                qualname = "fake_meta.<locals>.<genexpr>"
-            )?,))?,
+            rt::builtin(py, "sorted")?.call1((rt::genexpr!(frame, genexpr(ns.try_iter()?))?,))?,
             kwargs,
         ),
     )?;
@@ -106,7 +102,7 @@ pub mod base {
 pub mod ordered {
     use super::*;
 
-    // classes_build.py:27
+    // classes_build.py:25
     /// The body of `class Ordered`, run in its namespace `ns`.
     #[rt::frame(ns, "Ordered", 25)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
@@ -166,7 +162,7 @@ pub mod meta {
         Ok(())
     }
 
-    // classes_build.py:45
+    // classes_build.py:44
     #[rt::frame(m, "Meta.__prepare__", 44)]
     pub fn __prepare__<'py>(
         m: &rt::Module<'py>,
@@ -626,7 +622,7 @@ pub mod bad_prepare {
         Ok(())
     }
 
-    // classes_build.py:226
+    // classes_build.py:225
     pub fn __prepare__<'py>(
         m: &rt::Module<'py>,
         mcls: &Bound<'py, PyAny>,
@@ -836,7 +832,7 @@ pub mod in_loop {
 pub mod original {
     use super::*;
 
-    // classes_build.py:319
+    // classes_build.py:318
     /// The body of `class Original`, run in its namespace `ns`.
     #[rt::frame(ns, "Original", 318)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {

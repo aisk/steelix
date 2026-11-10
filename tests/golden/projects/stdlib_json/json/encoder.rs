@@ -15,7 +15,7 @@ use steelix_runtime::Attributes;
 /// Return a JSON representation of a Python string
 ///
 ///
-#[rt::frame(m, "py_encode_basestring", 40)]
+#[rt::frame(m, "py_encode_basestring", 40, frame)]
 pub fn py_encode_basestring<'py>(
     m: &rt::Module<'py>,
     s: &Bound<'py, PyAny>,
@@ -29,11 +29,7 @@ pub fn py_encode_basestring<'py>(
         m.global("ESCAPE_DCT")?
             .get_item(r#match.method1("group", (0,))?)
     }
-    let replace = rt::function!(
-        m,
-        replace(r#match),
-        qualname = "py_encode_basestring.<locals>.replace"
-    )?;
+    let replace = rt::function!(frame, replace(r#match))?;
     rt::str(m.py(), "\"")
         .add(m.global("ESCAPE")?.method1("sub", (&replace, s))?)?
         .add("\"")
@@ -43,7 +39,7 @@ pub fn py_encode_basestring<'py>(
 /// Return an ASCII-only JSON representation of a Python string
 ///
 ///
-#[rt::frame(m, "py_encode_basestring_ascii", 52)]
+#[rt::frame(m, "py_encode_basestring_ascii", 52, frame)]
 pub fn py_encode_basestring_ascii<'py>(
     m: &rt::Module<'py>,
     s: &Bound<'py, PyAny>,
@@ -78,11 +74,7 @@ pub fn py_encode_basestring_ascii<'py>(
             Err(err) => Err(err),
         }
     }
-    let replace = rt::function!(
-        m,
-        replace(r#match),
-        qualname = "py_encode_basestring_ascii.<locals>.replace"
-    )?;
+    let replace = rt::function!(frame, replace(r#match))?;
     rt::str(m.py(), "\"")
         .add(m.global("ESCAPE_ASCII")?.method1("sub", (&replace, s))?)?
         .add("\"")
@@ -90,7 +82,7 @@ pub fn py_encode_basestring_ascii<'py>(
 
 // # HACK: hand-optimized bytecode; turn globals into locals
 // json/encoder.py:268
-#[rt::frame(m, "_make_iterencode", 268)]
+#[rt::frame(m, "_make_iterencode", 268, frame)]
 pub fn _make_iterencode<'py>(
     m: &rt::Module<'py>,
     markers: &Bound<'py, PyAny>,
@@ -247,9 +239,8 @@ pub fn _make_iterencode<'py>(
         Ok(rt::none(py))
     }
     _iterencode_list.set(rt::function!(
-        m,
-        gen _iterencode_list_[markers, id, ValueError, _indent, _item_separator, isinstance, str, _encoder, int, _intstr, float, _floatstr, list, tuple, &_iterencode_list, dict, &_iterencode_dict, &_iterencode](lst, _current_indent_level),
-        qualname = "_make_iterencode.<locals>._iterencode_list"
+        frame,
+        gen _iterencode_list_ as "_iterencode_list"[markers, id, ValueError, _indent, _item_separator, isinstance, str, _encoder, int, _intstr, float, _floatstr, list, tuple, &_iterencode_list, dict, &_iterencode_dict, &_iterencode](lst, _current_indent_level)
     )?)?;
     // json/encoder.py:342
     #[rt::frame(m, "_make_iterencode.<locals>._iterencode_dict", 342, frame)]
@@ -422,9 +413,8 @@ pub fn _make_iterencode<'py>(
         Ok(rt::none(py))
     }
     _iterencode_dict.set(rt::function!(
-        m,
-        gen _iterencode_dict_[markers, id, ValueError, _indent, _item_separator, _sort_keys, isinstance, str, float, _floatstr, int, _intstr, _skipkeys, _encoder, _key_separator, list, tuple, &_iterencode_list, dict, &_iterencode_dict, &_iterencode](dct, _current_indent_level),
-        qualname = "_make_iterencode.<locals>._iterencode_dict"
+        frame,
+        gen _iterencode_dict_ as "_iterencode_dict"[markers, id, ValueError, _indent, _item_separator, _sort_keys, isinstance, str, float, _floatstr, int, _intstr, _skipkeys, _encoder, _key_separator, list, tuple, &_iterencode_list, dict, &_iterencode_dict, &_iterencode](dct, _current_indent_level)
     )?)?;
     // json/encoder.py:429
     #[rt::frame(m, "_make_iterencode.<locals>._iterencode", 429, frame)]
@@ -517,9 +507,8 @@ pub fn _make_iterencode<'py>(
         Ok(rt::none(py))
     }
     _iterencode.set(rt::function!(
-        m,
-        gen _iterencode_[isinstance, str, _encoder, int, _intstr, float, _floatstr, list, tuple, &_iterencode_list, dict, &_iterencode_dict, markers, id, ValueError, _default, &_iterencode](o, _current_indent_level),
-        qualname = "_make_iterencode.<locals>._iterencode"
+        frame,
+        gen _iterencode_ as "_iterencode"[isinstance, str, _encoder, int, _intstr, float, _floatstr, list, tuple, &_iterencode_list, dict, &_iterencode_dict, markers, id, ValueError, _default, &_iterencode](o, _current_indent_level)
     )?)?;
     _iterencode.get()
 }
@@ -832,7 +821,7 @@ pub mod json_encoder {
     ///     for chunk in JSONEncoder().iterencode(bigobject):
     ///         mysocket.write(chunk)
     ///
-    #[rt::frame(m, "JSONEncoder.iterencode", 210)]
+    #[rt::frame(m, "JSONEncoder.iterencode", 210, frame)]
     pub fn iterencode<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -884,15 +873,14 @@ pub mod json_encoder {
             Ok(text)
         }
         let floatstr = rt::function!(
-            m,
+            frame,
             floatstr(
                 o,
                 allow_nan = slf.attr("allow_nan")?,
                 _repr = rt::builtin(py, "float")?.attr("__repr__")?,
                 _inf = m.global("INFINITY")?,
                 _neginf = m.global("INFINITY")?.neg()?
-            ),
-            qualname = "JSONEncoder.iterencode.<locals>.floatstr"
+            )
         )?;
         let indent = if slf.attr("indent")?.is_none()
             || slf.attr("indent")?.is_instance(&rt::builtin(py, "str")?)?

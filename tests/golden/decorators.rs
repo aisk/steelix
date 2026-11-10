@@ -6,18 +6,18 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // decorators.py:6
-#[rt::frame(m, "trace", 6)]
+#[rt::frame(m, "trace", 6, frame)]
 pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     rt::builtins::print(m.py(), ("decorator expression", label))?;
     // decorators.py:9
-    #[rt::frame(m, "trace.<locals>.decorate", 9)]
+    #[rt::frame(m, "trace.<locals>.decorate", 9, frame)]
     fn decorate<'py>(
         m: &rt::Module<'py>,
         label: &Bound<'py, PyAny>,
         r#fn: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(m.py(), ("apply", label, "to", r#fn.attr("__name__")?))?;
-        // decorators.py:13
+        // decorators.py:12
         #[rt::frame(m, "trace.<locals>.decorate.<locals>.wrapper", 12)]
         fn wrapper<'py>(
             m: &rt::Module<'py>,
@@ -33,18 +33,13 @@ pub fn trace<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bo
             Ok(result)
         }
         let wrapper = rt::function!(
-            m,
+            frame,
             @(m.global("functools")?.method1("wraps", (r#fn,))?)
-            wrapper[label, r#fn](*args, **kwargs),
-            qualname = "trace.<locals>.decorate.<locals>.wrapper"
+            wrapper[label, r#fn](*args, **kwargs)
         )?;
         Ok(wrapper)
     }
-    let decorate = rt::function!(
-        m,
-        decorate[label](r#fn),
-        qualname = "trace.<locals>.decorate"
-    )?;
+    let decorate = rt::function!(frame, decorate[label](r#fn))?;
     Ok(decorate)
 }
 
@@ -58,7 +53,7 @@ pub fn default_value<'py>(
     Ok(label.clone())
 }
 
-// decorators.py:31
+// decorators.py:29
 /// Say hello.
 #[rt::frame(m, "greet", 29)]
 pub fn greet<'py>(
@@ -78,18 +73,18 @@ pub fn register<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<
     Ok(r#fn.clone())
 }
 
-// decorators.py:45
+// decorators.py:44
 pub fn first<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     Ok(rt::int(m.py(), 1))
 }
 
-// decorators.py:50
+// decorators.py:49
 #[rt::frame(m, "second", 49)]
 pub fn second<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     m.global("first")?.call0()?.add(1)
 }
 
-// decorators.py:55
+// decorators.py:54
 #[rt::frame(m, "fib", 54)]
 pub fn fib<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     if n.lt(2)? {
@@ -105,7 +100,7 @@ pub fn replace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<B
     Ok(rt::str(m.py(), "not a function any more"))
 }
 
-// decorators.py:66
+// decorators.py:65
 pub fn gone<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     Ok(rt::none(m.py()))
 }

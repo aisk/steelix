@@ -210,7 +210,7 @@ pub mod point {
 pub mod circle {
     use super::*;
 
-    // match_classes.py:17
+    // match_classes.py:16
     /// The body of `class Circle`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         Ok(())
@@ -220,7 +220,7 @@ pub mod circle {
 pub mod rect {
     use super::*;
 
-    // match_classes.py:23
+    // match_classes.py:22
     /// The body of `class Rect`, run in its namespace `ns`.
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
         Ok(())

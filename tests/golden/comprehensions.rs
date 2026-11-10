@@ -148,7 +148,7 @@ pub fn subscript_target<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
 }
 
 // comprehensions.py:51
-#[rt::frame(m, "dict_order", 51)]
+#[rt::frame(m, "dict_order", 51, frame)]
 pub fn dict_order<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     // comprehensions.py:52
     #[rt::frame(m, "dict_order.<locals>.key", 52)]
@@ -156,14 +156,14 @@ pub fn dict_order<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         m.global("print")?.call1(("key", k))?;
         k.rem(2)
     }
-    let key = rt::function!(m, key(k), qualname = "dict_order.<locals>.key")?;
+    let key = rt::function!(frame, key(k))?;
     // comprehensions.py:56
     #[rt::frame(m, "dict_order.<locals>.value", 56)]
     fn value<'py>(m: &rt::Module<'py>, v: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         m.global("print")?.call1(("value", v))?;
         Ok(v.clone())
     }
-    let value = rt::function!(m, value(v), qualname = "dict_order.<locals>.value")?;
+    let value = rt::function!(frame, value(v))?;
     // The key is evaluated before the value; a later duplicate key wins.
     let dict = PyDict::new(m.py());
     for k in rt::iter(&m.global("range")?.call1((4,))?)? {
@@ -201,7 +201,7 @@ pub fn first_iterable_outside<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
 }
 
 // comprehensions.py:78
-#[rt::frame(m, "late_binding", 78)]
+#[rt::frame(m, "late_binding", 78, frame)]
 pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let i: Bound<'py, PyAny>;
@@ -215,11 +215,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let list = PyList::empty(py);
         for item in rt::iter(&m.global("range")?.call1((3,))?)? {
             i_.set(item?)?;
-            list.append(rt::function!(
-                m,
-                lambda[&i_ as "i"](),
-                qualname = "late_binding.<locals>.<lambda>"
-            )?)?;
+            list.append(rt::function!(frame, lambda as "<lambda>"[&i_ as "i"]())?)?;
         }
         list.into_any()
     };
@@ -232,7 +228,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 // comprehensions.py:83
-#[rt::frame(m, "default_binding", 83)]
+#[rt::frame(m, "default_binding", 83, frame)]
 pub fn default_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // comprehensions.py:84
@@ -242,11 +238,7 @@ pub fn default_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
     let list = PyList::empty(py);
     for i in rt::iter(&m.global("range")?.call1((3,))?)? {
         let i = i?;
-        list.append(rt::function!(
-            m,
-            lambda(i = &i),
-            qualname = "default_binding.<locals>.<lambda>"
-        )?)?;
+        list.append(rt::function!(frame, lambda as "<lambda>"(i = &i))?)?;
     }
     let funcs = list.into_any();
     let list = PyList::empty(py);
@@ -258,7 +250,7 @@ pub fn default_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
 }
 
 // comprehensions.py:88
-#[rt::frame(m, "generator_in_comprehension", 88)]
+#[rt::frame(m, "generator_in_comprehension", 88, frame)]
 pub fn generator_in_comprehension<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let x: Bound<'py, PyAny>;
@@ -279,9 +271,8 @@ pub fn generator_in_comprehension<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
     for item in rt::iter(PyTuple::new(py, [10, 20])?.as_any())? {
         x_.set(item?)?;
         list.append(m.global("list")?.call1((rt::genexpr!(
-            m,
-            genexpr[&x_ as "x"](m.global("range")?.call1((2,))?.try_iter()?),
-            qualname = "generator_in_comprehension.<locals>.<genexpr>"
+            frame,
+            genexpr[&x_ as "x"](m.global("range")?.call1((2,))?.try_iter()?)
         )?,))?)?;
     }
     Ok(list.into_any())
@@ -302,7 +293,7 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Ok(v.clone())
     }
-    let boom = rt::function!(m, boom(v), qualname = "stop_iteration.<locals>.boom")?;
+    let boom = rt::function!(frame, boom(v))?;
     match (|| -> PyResult<Bound<'py, PyAny>> {
         let print = m.global("print")?;
         let list = PyList::empty(py);

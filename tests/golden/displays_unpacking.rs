@@ -88,7 +88,7 @@ pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound
 }
 
 // displays_unpacking.py:61
-#[rt::frame(m, "sets", 61)]
+#[rt::frame(m, "sets", 61, frame)]
 pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let s = rt::set!(
@@ -117,11 +117,7 @@ pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-                m,
-                genexpr(s.try_iter()?),
-                qualname = "sets.<locals>.<genexpr>"
-            )?,))?,
+            rt::builtin(py, "sorted")?.call1((rt::genexpr!(frame, genexpr(s.try_iter()?))?,))?,
             rt::set!(py, *a)?.rich_compare(rt::builtin(py, "set")?.call1((a,))?, CompareOp::Eq)?,
             rt::set!(py, 1, *a)?,
         ),
@@ -230,12 +226,12 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         PyTuple::new(
             py,
             [
-                &rt::function!(m, lambda(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda2(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda3(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda4(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda5(), qualname = "errors.<locals>.<lambda>")?,
-                &rt::function!(m, lambda6(), qualname = "errors.<locals>.<lambda>")?,
+                &rt::function!(frame, lambda as "<lambda>"())?,
+                &rt::function!(frame, lambda2 as "<lambda>"())?,
+                &rt::function!(frame, lambda3 as "<lambda>"())?,
+                &rt::function!(frame, lambda4 as "<lambda>"())?,
+                &rt::function!(frame, lambda5 as "<lambda>"())?,
+                &rt::function!(frame, lambda6 as "<lambda>"())?,
             ],
         )?
         .as_any(),

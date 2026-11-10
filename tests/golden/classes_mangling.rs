@@ -94,7 +94,7 @@ pub mod account {
         Ok(_Account__key.clone())
     }
 
-    // classes_mangling.py:23
+    // classes_mangling.py:22
     #[rt::frame(m, "Account.count", 22)]
     pub fn count<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         m.global("Account")?.attr("_Account__count")

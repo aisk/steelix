@@ -4,7 +4,7 @@ use pyo3::types::IntoPyDict;
 use steelix_runtime as rt;
 
 // function_headers.py:6
-#[rt::frame(m, "report", 6)]
+#[rt::frame(m, "report", 6, frame)]
 pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // function_headers.py:7
@@ -19,7 +19,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
     for name in rt::iter(&rt::call!(
         rt::builtin(py, "sorted")?,
         data,
-        key = rt::function!(m, lambda[data](k), qualname = "report.<locals>.<lambda>")?
+        key = rt::function!(frame, lambda as "<lambda>"[data](k))?
     )?)? {
         let name = name?;
         rt::builtins::print(py, (&name, data.get_item(&name)?))?;
@@ -30,7 +30,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
     fn lambda2<'py>(m: &rt::Module<'py>, n: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
         n.get()
     }
-    while rt::function!(m, lambda2[&n](), qualname = "report.<locals>.<lambda>")?
+    while rt::function!(frame, lambda2 as "<lambda>"[&n]())?
         .call0()?
         .lt(2)?
     {
@@ -42,7 +42,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
     fn lambda3<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         x.rich_compare(3, CompareOp::Gt)
     }
-    if rt::function!(m, lambda3(x), qualname = "report.<locals>.<lambda>")?
+    if rt::function!(frame, lambda3 as "<lambda>"(x))?
         .call1((data.get_item("a")?,))?
         .is_truthy()?
     {
@@ -52,7 +52,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
         fn lambda4<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
             Ok(x.clone())
         }
-        if rt::function!(m, lambda4(x), qualname = "report.<locals>.<lambda>")?
+        if rt::function!(frame, lambda4 as "<lambda>"(x))?
             .call1((0,))?
             .is_truthy()?
         {
@@ -63,7 +63,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
     fn lambda5<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(rt::bool(m.py(), false))
     }
-    if rt::function!(m, lambda5(), qualname = "report.<locals>.<lambda>")?
+    if rt::function!(frame, lambda5 as "<lambda>"())?
         .call0()?
         .is_truthy()?
     {
@@ -74,7 +74,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
         fn lambda6<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
             x.rich_compare(3, CompareOp::Lt)
         }
-        if rt::function!(m, lambda6(x), qualname = "report.<locals>.<lambda>")?
+        if rt::function!(frame, lambda6 as "<lambda>"(x))?
             .call1((data.get_item("c")?,))?
             .is_truthy()?
         {

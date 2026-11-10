@@ -50,7 +50,7 @@ pub mod account {
         slf.attr("balance")
     }
 
-    // classes_uncaught.py:16
+    // classes_uncaught.py:15
     #[rt::frame(m, "Account.opened", 15)]
     pub fn opened<'py>(
         m: &rt::Module<'py>,

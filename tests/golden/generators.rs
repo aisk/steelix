@@ -211,7 +211,7 @@ pub async fn pong<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
     Ok(rt::none(py))
 }
 
-// generators.py:148
+// generators.py:147
 #[rt::frame(m, "tag", 147, frame)]
 pub async fn tag<'py>(
     m: &rt::Module<'py>,
@@ -238,7 +238,7 @@ pub async fn tag<'py>(
 }
 
 // generators.py:158
-#[rt::frame(m, "make_counter", 158)]
+#[rt::frame(m, "make_counter", 158, frame)]
 pub fn make_counter<'py>(
     m: &rt::Module<'py>,
     start: &Bound<'py, PyAny>,
@@ -256,16 +256,12 @@ pub fn make_counter<'py>(
             m.py().check_signals()?;
         }
     }
-    let counter = rt::function!(
-        m,
-        gen counter[&count](),
-        qualname = "make_counter.<locals>.counter"
-    )?;
+    let counter = rt::function!(frame, gen counter[&count]())?;
     counter.call0()
 }
 
 // generators.py:170
-#[rt::frame(m, "closure_gen", 170)]
+#[rt::frame(m, "closure_gen", 170, frame)]
 pub fn closure_gen<'py>(
     m: &rt::Module<'py>,
     values: &Bound<'py, PyAny>,
@@ -285,16 +281,11 @@ pub fn closure_gen<'py>(
         }
         Ok(list.into_any())
     }
-    rt::function!(
-        m,
-        lambda[values, scale](),
-        qualname = "closure_gen.<locals>.<lambda>"
-    )?
-    .call0()
+    rt::function!(frame, lambda as "<lambda>"[values, scale]())?.call0()
 }
 
 // generators.py:175
-#[rt::frame(m, "gen_with_nested", 175)]
+#[rt::frame(m, "gen_with_nested", 175, frame)]
 pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     // generators.py:176
     #[rt::frame(m, "gen_with_nested.<locals>.inner", 176)]
@@ -303,11 +294,7 @@ pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         rt::yield_(x.add(1)?).await?;
         Ok(rt::none(m.py()))
     }
-    let inner = rt::function!(
-        m,
-        gen inner(x),
-        qualname = "gen_with_nested.<locals>.inner"
-    )?;
+    let inner = rt::function!(frame, gen inner(x))?;
     for value in rt::iter(&inner.call1((5,))?)? {
         let value = value?;
         rt::yield_(&value).await?;
@@ -430,8 +417,8 @@ pub mod bag {
         Ok(rt::none(py))
     }
 
-    // generators.py:137
-    #[rt::frame(m, "Bag.doubled", 136)]
+    // generators.py:136
+    #[rt::frame(m, "Bag.doubled", 136, frame)]
     pub fn doubled<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -447,11 +434,7 @@ pub mod bag {
             }
             Ok(None)
         }
-        rt::genexpr!(
-            m,
-            genexpr(slf.try_iter()?),
-            qualname = "Bag.doubled.<locals>.<genexpr>"
-        )
+        rt::genexpr!(frame, genexpr(slf.try_iter()?))
     }
 }
 

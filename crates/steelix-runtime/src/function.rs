@@ -113,6 +113,10 @@ pub struct FunctionDef<'py> {
     /// method's qualified name is `<class>.<name>` unless `qualname` says
     /// otherwise.
     pub class_qualname: Option<&'static str>,
+    /// The qualified name of the function whose body defines this one,
+    /// which is then `<function>.<locals>.<name>` unless `qualname` says
+    /// otherwise.
+    pub enclosing_function: Option<&'static str>,
     pub body: Kind,
 }
 
@@ -140,6 +144,11 @@ pub trait Definer<'py> {
     fn classdict(&self) -> Option<Bound<'py, PyAny>>;
     /// The qualified name of the class whose body this is.
     fn class_qualname(&self) -> Option<&'static str>;
+    /// The qualified name of the function whose body this is (a
+    /// [`Frame`](crate::Frame)): what it defines is `<function>.<locals>.<name>`.
+    fn enclosing_function(&self) -> Option<&'static str> {
+        None
+    }
     /// Reads a name like the code there does: `LOAD_GLOBAL` in a module,
     /// `LOAD_NAME` in a class body. For the decorators of `def!`.
     fn lookup(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>>;
@@ -222,10 +231,11 @@ impl Function {
         let py = module.py();
         let globals = module.globals();
         let name = def_name(def.name, def.qualname, def.rust_name);
-        let qualname = match (def.qualname, def.class_qualname) {
-            (Some(qualname), _) => qualname.to_owned(),
-            (None, Some(class)) => format!("{class}.{name}"),
-            (None, None) => name.to_owned(),
+        let qualname = match (def.qualname, def.class_qualname, def.enclosing_function) {
+            (Some(qualname), ..) => qualname.to_owned(),
+            (None, Some(class), _) => format!("{class}.{name}"),
+            (None, None, Some(function)) => format!("{function}.<locals>.{name}"),
+            (None, None, None) => name.to_owned(),
         };
         let defaults = (!def.defaults.is_empty())
             .then(|| PyTuple::new(py, def.defaults))

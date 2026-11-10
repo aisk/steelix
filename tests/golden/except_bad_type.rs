@@ -73,7 +73,7 @@ pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         )?;
         rt::builtin(py, "ValueError")
     }
-    let pick = rt::function!(m, pick(), qualname = "handled_while_testing.<locals>.pick")?;
+    let pick = rt::function!(frame, pick())?;
     match Err(frame.raise(PyValueError::new_err("seen"))) {
         Ok(()) => unreachable!(),
         Err(err) if frame.matches(&err, || pick.call0())? => {

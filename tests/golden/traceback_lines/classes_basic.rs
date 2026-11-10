@@ -160,7 +160,7 @@ pub mod vector {
         ))
     }
 
-    // classes_basic.py:40
+    // classes_basic.py:39
     #[rt::frame(m, "Vector.length", 39, frame)]
     pub fn length<'py>(
         m: &rt::Module<'py>,
@@ -174,14 +174,14 @@ pub mod vector {
             .pow(0.5, py.None())
     }
 
-    // classes_basic.py:44
+    // classes_basic.py:43
     #[rt::frame(m, "Vector.label", 43, frame)]
     pub fn label<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(45);
         slf.attr("_label")
     }
 
-    // classes_basic.py:48
+    // classes_basic.py:47
     #[rt::frame(m, "Vector.label", 47, frame)]
     pub fn label_<'py>(
         m: &rt::Module<'py>,
@@ -196,7 +196,7 @@ pub mod vector {
         Ok(rt::none(py))
     }
 
-    // classes_basic.py:53
+    // classes_basic.py:52
     #[rt::frame(m, "Vector.label", 52, frame)]
     pub fn label__<'py>(
         m: &rt::Module<'py>,
@@ -210,14 +210,14 @@ pub mod vector {
         Ok(rt::none(py))
     }
 
-    // classes_basic.py:58
+    // classes_basic.py:57
     #[rt::frame(m, "Vector.zero", 57, frame)]
     pub fn zero<'py>(m: &rt::Module<'py>, cls: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         frame.line(59);
         cls.call1((0, 0))
     }
 
-    // classes_basic.py:62
+    // classes_basic.py:61
     #[rt::frame(m, "Vector.dot", 61, frame)]
     pub fn dot<'py>(
         m: &rt::Module<'py>,

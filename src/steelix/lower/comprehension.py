@@ -338,7 +338,7 @@ class ComprehensionLowering:
         """`rt::genexpr!(m, genexpr[captures](xs.try_iter()?))`, after the
         step fn item (design §8)."""
         from steelix.lower.classes import merge_text
-        from steelix.lower.function import captures_text, lower_genexpr
+        from steelix.lower.function import captures_text, defined_in_frame, lower_genexpr
 
         entry_line = self.line
         first = node.generators[0]
@@ -356,7 +356,10 @@ class ComprehensionLowering:
         parts += captures_text(self.ctx, scope, self.comprehension_names())
         parts += ["(", iterator, ")"]
         args: list[rs.Expr] = [self.module(), rs.Tokens(merge_text(parts))]
-        if scope.qualname != "<genexpr>":
+        if defined_in_frame(self.ctx, scope, self.module()):
+            # The frame knows the qualified name: `f.<locals>.<genexpr>`.
+            args[0] = rs.Path("frame")
+        elif scope.qualname != "<genexpr>":
             args.append(rs.Tokens((f"qualname = {string_literal(scope.qualname)}",)))
         return Value(rs.Try(rs.MacroCall("rt::genexpr", tuple(args))), Kind.OWNED)
 

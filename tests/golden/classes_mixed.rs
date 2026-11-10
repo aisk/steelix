@@ -266,7 +266,7 @@ pub mod outer {
 pub mod decorated {
     use super::*;
 
-    // classes_mixed.py:99
+    // classes_mixed.py:98
     /// The body of `class Decorated`, run in its namespace `ns`.
     #[rt::frame(ns, "Decorated", 98)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {

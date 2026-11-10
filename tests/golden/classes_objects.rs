@@ -159,7 +159,7 @@ pub mod tree {
     }
 
     // classes_objects.py:41
-    #[rt::frame(m, "Tree.total", 41)]
+    #[rt::frame(m, "Tree.total", 41, frame)]
     pub fn total<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         // classes_objects.py:42
@@ -176,9 +176,8 @@ pub mod tree {
         Ok(if false {
             slf.attr("value")?
                 .add(rt::builtin(py, "sum")?.call1((rt::genexpr!(
-                    m,
-                    genexpr(slf.attr("children")?.try_iter()?),
-                    qualname = "Tree.total.<locals>.<genexpr>"
+                    frame,
+                    genexpr(slf.attr("children")?.try_iter()?)
                 )?,))?)?
         } else {
             slf.attr("value")?.add(

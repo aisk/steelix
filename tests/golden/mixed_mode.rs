@@ -68,7 +68,7 @@ pub fn trace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bou
     Ok(r#fn.clone())
 }
 
-// mixed_mode.py:98
+// mixed_mode.py:97
 #[rt::frame(m, "chunks", 97)]
 pub async fn chunks<'py>(
     m: &rt::Module<'py>,

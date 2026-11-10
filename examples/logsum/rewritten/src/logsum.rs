@@ -164,7 +164,7 @@ pub fn tally<'py>(
 }
 
 // logsum.py:92
-#[rt::frame(m, "print_statuses", 92)]
+#[rt::frame(m, "print_statuses", 92, frame)]
 pub fn print_statuses<'py>(
     m: &rt::Module<'py>,
     requests: &Bound<'py, PyAny>,
@@ -199,11 +199,7 @@ pub fn print_statuses<'py>(
     for item in rt::call!(
         rt::builtin(py, "sorted")?,
         &classes,
-        key = rt::function!(
-            m,
-            lambda[classes](n),
-            qualname = "print_statuses.<locals>.<lambda>"
-        )?
+        key = rt::function!(frame, lambda as "<lambda>"[classes](n))?
     )?
     .try_iter()?
     {
@@ -236,7 +232,7 @@ pub fn print_statuses<'py>(
 }
 
 // logsum.py:103
-#[rt::frame(m, "print_paths", 103)]
+#[rt::frame(m, "print_paths", 103, frame)]
 pub fn print_paths<'py>(
     m: &rt::Module<'py>,
     requests: &Bound<'py, PyAny>,
@@ -252,7 +248,7 @@ pub fn print_paths<'py>(
     let ranked = rt::call!(
         rt::builtin(py, "sorted")?,
         paths.call_method0("items")?,
-        key = rt::function!(m, lambda(item), qualname = "print_paths.<locals>.<lambda>")?
+        key = rt::function!(frame, lambda as "<lambda>"(item))?
     )?;
     rt::builtins::print(
         py,
@@ -290,7 +286,7 @@ pub fn print_paths<'py>(
 }
 
 // logsum.py:111
-#[rt::frame(m, "print_latency", 111)]
+#[rt::frame(m, "print_latency", 111, frame)]
 pub fn print_latency<'py>(
     m: &rt::Module<'py>,
     requests: &Bound<'py, PyAny>,
@@ -364,7 +360,7 @@ pub fn print_latency<'py>(
     for item3 in rt::call!(
         rt::builtin(py, "sorted")?,
         &slow_requests,
-        key = rt::function!(m, lambda(r), qualname = "print_latency.<locals>.<lambda>")?
+        key = rt::function!(frame, lambda as "<lambda>"(r))?
     )?
     .get_item(rt::slice(py, py.None(), 3)?)?
     .try_iter()?

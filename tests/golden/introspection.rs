@@ -19,19 +19,14 @@ pub fn area<'py>(
 }
 
 // introspection.py:13
-#[rt::frame(m, "outer", 13)]
+#[rt::frame(m, "outer", 13, frame)]
 pub fn outer<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     // introspection.py:14
     /// Nested docstring.
     fn nested<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         Ok(x.clone())
     }
-    let nested = rt::function!(
-        m,
-        nested(x),
-        qualname = "outer.<locals>.nested",
-        doc = "Nested docstring."
-    )?;
+    let nested = rt::function!(frame, nested(x), doc = "Nested docstring.")?;
     Ok(nested)
 }
 

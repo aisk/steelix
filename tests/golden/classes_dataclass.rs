@@ -8,7 +8,7 @@ use steelix_runtime::Attributes;
 pub mod item {
     use super::*;
 
-    // classes_dataclass.py:10
+    // classes_dataclass.py:9
     /// The body of `class Item`, run in its namespace `ns`.
     #[rt::frame(ns, "Item", 9)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
@@ -35,7 +35,7 @@ pub mod item {
 pub mod version {
     use super::*;
 
-    // classes_dataclass.py:20
+    // classes_dataclass.py:19
     /// The body of `class Version`, run in its namespace `ns`.
     #[rt::frame(ns, "Version", 19)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
@@ -98,7 +98,7 @@ pub mod later {
 pub mod slotted {
     use super::*;
 
-    // classes_dataclass.py:79
+    // classes_dataclass.py:78
     /// The body of `class Slotted`, run in its namespace `ns`.
     #[rt::frame(ns, "Slotted", 78)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
@@ -117,7 +117,7 @@ pub mod slotted {
 pub mod child {
     use super::*;
 
-    // classes_dataclass.py:92
+    // classes_dataclass.py:91
     /// The body of `class Child`, run in its namespace `ns`.
     #[rt::frame(ns, "Child", 91)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {

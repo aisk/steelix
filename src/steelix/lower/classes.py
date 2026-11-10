@@ -223,7 +223,7 @@ def lower_class_mod(module: ModuleContext, scope: ClassScope, name: str) -> rs.M
         lifetimes=("'py",),
         attrs=attrs,
         doc=(f"The body of `class {scope.qualname}`, run in its namespace `{NAMESPACE}`.",),
-        comments=(f"{module.filename}:{node.lineno}",),
+        comments=(f"{module.filename}:{line}",),
     )
     doc_lines = tuple(doc.splitlines()) if doc else ()
     return rs.Mod(name, (body_fn, *body_info.items), doc=doc_lines)

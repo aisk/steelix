@@ -4,7 +4,7 @@ use pyo3::types::PyList;
 use steelix_runtime as rt;
 
 // comprehension_uncaught.py:6
-#[rt::frame(m, "totals", 6)]
+#[rt::frame(m, "totals", 6, frame)]
 pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // comprehension_uncaught.py:7
@@ -21,11 +21,9 @@ pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
     let list = PyList::empty(py);
     for row in rt::iter(rows)? {
         let row = row?;
-        list.append(rt::builtin(py, "sum")?.call1((rt::genexpr!(
-            m,
-            genexpr(row.try_iter()?),
-            qualname = "totals.<locals>.<genexpr>"
-        )?,))?)?;
+        list.append(
+            rt::builtin(py, "sum")?.call1((rt::genexpr!(frame, genexpr(row.try_iter()?))?,))?,
+        )?;
     }
     Ok(list.into_any())
 }

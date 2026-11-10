@@ -35,6 +35,7 @@
 //! function (`genexpr[n, &count](..)`, see [`function!`](crate::function)),
 //! so they are read when the step runs (late binding).
 
+use std::borrow::Cow;
 use std::sync::{Mutex, MutexGuard};
 
 use pyo3::exceptions::{
@@ -90,13 +91,24 @@ pub struct GenExpr {
     names: Mutex<Names>,
 }
 
+/// The qualified name of a generator expression: as given, or after the
+/// function that contains it.
+#[doc(hidden)]
+pub fn qualname(given: Option<&'static str>, function: Option<&'static str>) -> Cow<'static, str> {
+    match (given, function) {
+        (Some(qualname), _) => Cow::Borrowed(qualname),
+        (None, Some(function)) => Cow::Owned(format!("{function}.<locals>.<genexpr>")),
+        (None, None) => Cow::Borrowed("<genexpr>"),
+    }
+}
+
 impl GenExpr {
     /// Creates the generator of a generator expression whose `for` clause
     /// iterates `iter`. Use it through [`genexpr!`](crate::genexpr).
     #[doc(hidden)]
     pub fn create<'py>(
         module: &Module<'py>,
-        qualname: &'static str,
+        qualname: &str,
         iter: Bound<'py, PyIterator>,
         closure: Vec<Bound<'py, PyAny>>,
         step: Step,
@@ -447,10 +459,12 @@ pub(crate) fn thrown<'py>(
 ///
 /// ```ignore
 /// rt::genexpr!(m, genexpr(xs.try_iter()?))?;
-/// rt::genexpr!(m, genexpr[n, &count](xs.try_iter()?), qualname = "f.<locals>.<genexpr>")?;
+/// rt::genexpr!(frame, genexpr[n, &count](xs.try_iter()?))?;
 /// ```
 ///
-/// `qualname` defaults to `<genexpr>`.
+/// `qualname` defaults to `<genexpr>`, or to `f.<locals>.<genexpr>` when
+/// the first argument is the frame of the function `f`
+/// (`rt::genexpr!(frame, ..)`).
 #[macro_export]
 macro_rules! genexpr {
     (@caps $h:tt [$($c:tt)*] & $id:ident $(as $n:literal)? $(, $($rest:tt)*)?) => {
@@ -473,13 +487,17 @@ macro_rules! genexpr {
             $($crate::function!(@captured $ck $c, $cn);)*
             $crate::genexpr!(@call target(module; $($c),*; iter))
         };
-        $crate::GenExpr::create(module, $qualname, iter, closure, step)
+        let qualname = $crate::generator::qualname(
+            $qualname,
+            $crate::function::Definer::enclosing_function(definer),
+        );
+        $crate::GenExpr::create(module, &qualname, iter, closure, step)
     }};
     (@call $f:ident($module:ident; $($c:ident),*; $iter:ident)) => {
         $f($module, $(&$c,)* $iter)
     };
-    (@qualname) => { "<genexpr>" };
-    (@qualname $q:literal) => { $q };
+    (@qualname) => { ::std::option::Option::None };
+    (@qualname $q:literal) => { ::std::option::Option::Some($q) };
     ($module:expr, $f:ident $([$($caps:tt)*])? ($iter:expr) $(, qualname = $q:literal)? $(,)?) => {
         $crate::genexpr!(@caps ($module, $f, $iter, $crate::genexpr!(@qualname $($q)?)) [] $($($caps)*)?)
     };

@@ -411,11 +411,8 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Ok(rt::none(py))
     }
-    let drain = rt::function!(
-        m,
-        async drain[queue](),
-        qualname = "library.<locals>.drain"
-    )?;
+    frame.line(201);
+    let drain = rt::function!(frame, async drain[queue]())?;
     frame.line(206);
     rt::await_(drain.call0()?).await?;
     Ok(rt::none(py))

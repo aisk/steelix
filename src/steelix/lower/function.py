@@ -177,7 +177,7 @@ def lower_function(
         public=public,
         attrs=attrs,
         doc=tuple(doc.splitlines()) if doc else (),
-        comments=(*comments, f"{module.filename}:{fn.lineno}"),
+        comments=(*comments, f"{module.filename}:{first_line}"),
         is_async=info.is_async,
     )
 
@@ -287,7 +287,8 @@ def signature_text(
     if kind != "function":
         out.append("async " if kind == "coroutine" else "gen ")
     out.append(rs.Path(rust_name))
-    if isinstance(node, ast.FunctionDef) and not named:
+    if not named:
+        # Also `lambda as "<lambda>"`, in a function body (`defined_in_frame`).
         out.append(_as(rust_name, scope.name))
 
     def separate(index: int) -> None:
@@ -491,21 +492,37 @@ def _as(rust: str, python: str) -> str:
     return "" if rust.removeprefix("r#") == python else f" as {string_literal(python)}"
 
 
+def defined_in_frame(ctx: Context, scope: FunctionScope, definer: rs.Expr) -> bool:
+    """Whether the function, lambda or generator expression of `scope` is
+    created with the frame of the enclosing function as its definer
+    (`rt::function!(frame, g(x))`), from which the runtime derives its
+    qualified name `f.<locals>.g`. Not in a class body, and not for a
+    `def` of a name declared `global`, whose qualified name is the name."""
+    fn = ctx.function
+    if fn is None or definer == rs.Path(NAMESPACE):
+        return False
+    return scope.qualname == f"{fn.scope.qualname}.<locals>.{scope.name}"
+
+
 def function_options(
     ctx: Context, scope: FunctionScope, rust_name: str, definer: rs.Expr
 ) -> list[rs.Tokens]:
     """`qualname = ".."` and `doc = ".."` for `rt::function!`. A function
     defined in a class body (`definer` is its namespace) is a method, whose
-    qualified name the runtime derives from the class's."""
+    qualified name the runtime derives from the class's; one defined in a
+    function body gets it from the frame (`defined_in_frame`)."""
     node = scope.node
     assert node is not None
     options = []
     derived = scope.name
+    framed = defined_in_frame(ctx, scope, definer)
     if definer == rs.Path(NAMESPACE):
         class_body = ctx.class_body
         assert class_body is not None
         derived = f"{class_body.scope.qualname}.{scope.name}"
-    if scope.qualname != derived:
+    if framed:
+        pass
+    elif scope.qualname != derived:
         options.append(rs.Tokens((f"qualname = {string_literal(scope.qualname)}",)))
     elif isinstance(node, ast.Lambda) and rust_name.removeprefix("r#") != scope.name:
         options.append(rs.Tokens((f"qualname = {string_literal(scope.name)}",)))

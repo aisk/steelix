@@ -62,7 +62,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::await_(sleep).await?;
         Ok(rt::none(m.py()))
     }
-    let pending = rt::function!(m, async pending(), qualname = "main.<locals>.pending")?;
+    let pending = rt::function!(frame, async pending())?;
     let task = rt::call!(
         m.global("asyncio")?.attr("create_task")?,
         pending.call0()?,

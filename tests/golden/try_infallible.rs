@@ -94,7 +94,7 @@ pub fn deleted_in_loop<'py>(
 }
 
 // try_infallible.py:75
-#[rt::frame(m, "captured", 75)]
+#[rt::frame(m, "captured", 75, frame)]
 pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let k = rt::int(m.py(), 5);
     // try_infallible.py:78
@@ -107,7 +107,7 @@ pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) => Err(err),
         }
     }
-    let inner = rt::function!(m, inner[k](), qualname = "captured.<locals>.inner")?;
+    let inner = rt::function!(frame, inner[k]())?;
     inner.call0()
 }
 

@@ -8,7 +8,7 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // json/scanner.py:18
-#[rt::frame(m, "py_make_scanner", 18)]
+#[rt::frame(m, "py_make_scanner", 18, frame)]
 pub fn py_make_scanner<'py>(
     m: &rt::Module<'py>,
     context: &Bound<'py, PyAny>,
@@ -137,9 +137,8 @@ pub fn py_make_scanner<'py>(
         }
     }
     _scan_once.set(rt::function!(
-        m,
-        _scan_once_[parse_string, strict, parse_object, &_scan_once, object_hook, object_pairs_hook, memo, parse_array, match_number, parse_float, parse_int, parse_constant](string, idx),
-        qualname = "py_make_scanner.<locals>._scan_once"
+        frame,
+        _scan_once_ as "_scan_once"[parse_string, strict, parse_object, &_scan_once, object_hook, object_pairs_hook, memo, parse_array, match_number, parse_float, parse_int, parse_constant](string, idx)
     )?)?;
     // json/scanner.py:68
     #[rt::frame(m, "py_make_scanner.<locals>.scan_once", 68, frame)]
@@ -156,11 +155,7 @@ pub fn py_make_scanner<'py>(
         memo.method0("clear")?;
         finally.resume()
     }
-    let scan_once = rt::function!(
-        m,
-        scan_once[&_scan_once, memo](string, idx),
-        qualname = "py_make_scanner.<locals>.scan_once"
-    )?;
+    let scan_once = rt::function!(frame, scan_once[&_scan_once, memo](string, idx))?;
     Ok(scan_once)
 }
 

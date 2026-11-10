@@ -102,6 +102,7 @@ pub struct Frame<'a, 'py> {
     /// Borrowed from the module: the frame of a suspended coroutine adds no
     /// reference to the globals that the GC can not see.
     globals: &'a Bound<'py, PyDict>,
+    module: &'a Module<'py>,
     /// The namespace of a class body, which runs in its own frame.
     class_namespace: Option<&'a Bound<'py, PyAny>>,
     code: &'static Code,
@@ -186,21 +187,24 @@ fn head_frame(exception: &Bound<'_, PyAny>) -> *mut ffi::PyObject {
 /// namespace of a class body.
 #[doc(hidden)]
 pub trait Scope<'py> {
-    fn globals(&self) -> &Bound<'py, PyDict>;
+    fn module(&self) -> &Module<'py>;
+    fn globals(&self) -> &Bound<'py, PyDict> {
+        self.module().globals()
+    }
     fn class_namespace(&self) -> Option<&Bound<'py, PyAny>> {
         None
     }
 }
 
 impl<'py> Scope<'py> for Module<'py> {
-    fn globals(&self) -> &Bound<'py, PyDict> {
-        Module::globals(self)
+    fn module(&self) -> &Module<'py> {
+        self
     }
 }
 
 impl<'py, S: Scope<'py>> Scope<'py> for &S {
-    fn globals(&self) -> &Bound<'py, PyDict> {
-        S::globals(self)
+    fn module(&self) -> &Module<'py> {
+        S::module(self)
     }
     fn class_namespace(&self) -> Option<&Bound<'py, PyAny>> {
         S::class_namespace(self)
@@ -208,8 +212,8 @@ impl<'py, S: Scope<'py>> Scope<'py> for &S {
 }
 
 impl<'py> Scope<'py> for crate::Namespace<'py> {
-    fn globals(&self) -> &Bound<'py, PyDict> {
-        self.module().globals()
+    fn module(&self) -> &Module<'py> {
+        crate::Namespace::module(self)
     }
     fn class_namespace(&self) -> Option<&Bound<'py, PyAny>> {
         Some(self.mapping())
@@ -255,6 +259,7 @@ pub async fn run_async<'py, T>(
 impl<'f, 'py> Frame<'f, 'py> {
     fn new(scope: &'f impl Scope<'py>, code: &'static Code, suspends: bool) -> Self {
         Frame {
+            module: scope.module(),
             globals: scope.globals(),
             class_namespace: scope.class_namespace(),
             code,
@@ -267,6 +272,13 @@ impl<'f, 'py> Frame<'f, 'py> {
 
     pub fn py(&self) -> Python<'py> {
         self.globals.py()
+    }
+
+    /// The qualified name of the function whose body this is, for the
+    /// names of the functions it defines (`f.<locals>.g`): `None` for a
+    /// module or class body.
+    fn function_qualname(&self) -> Option<&'static str> {
+        (!self.code.is_module() && self.class_namespace.is_none()).then_some(self.code.qualname)
     }
 
     /// Records that the function is now running the statement on `line`
@@ -982,4 +994,28 @@ fn traceback_type(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
             Ok(py.import("types")?.getattr("TracebackType")?.unbind())
         })
         .map(|tb| tb.bind(py))
+}
+
+/// A `def`, `lambda` or generator expression in a function body is defined
+/// in the function's frame: `rt::function!(frame, g(x))` names it
+/// `f.<locals>.g` after the function `f` of the frame.
+impl<'py> crate::function::Definer<'py> for Frame<'_, 'py> {
+    fn module(&self) -> &Module<'py> {
+        self.module
+    }
+    fn classdict(&self) -> Option<Bound<'py, PyAny>> {
+        None
+    }
+    fn class_qualname(&self) -> Option<&'static str> {
+        None
+    }
+    fn enclosing_function(&self) -> Option<&'static str> {
+        self.function_qualname()
+    }
+    fn lookup(&self, name: &'static str) -> PyResult<Bound<'py, PyAny>> {
+        self.module.global(name)
+    }
+    fn bind(&self, name: &'static str, value: Bound<'py, PyAny>) -> PyResult<()> {
+        self.module.set_global(name, value)
+    }
 }

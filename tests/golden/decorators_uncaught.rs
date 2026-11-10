@@ -5,7 +5,7 @@ use steelix_runtime as rt;
 use steelix_runtime::Attributes;
 
 // decorators_uncaught.py:7
-#[rt::frame(m, "show", 7)]
+#[rt::frame(m, "show", 7, frame)]
 pub fn show<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     m.global("print")?.call1(("evaluate", label))?;
     // decorators_uncaught.py:10
@@ -19,11 +19,7 @@ pub fn show<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bou
             .call1(("apply", label, "to", r#fn.attr("__qualname__")?))?;
         Ok(r#fn.clone())
     }
-    let decorate = rt::function!(
-        m,
-        decorate[label](r#fn),
-        qualname = "show.<locals>.decorate"
-    )?;
+    let decorate = rt::function!(frame, decorate[label](r#fn))?;
     Ok(decorate)
 }
 
@@ -43,7 +39,7 @@ pub fn boom<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Boun
     ))
 }
 
-// decorators_uncaught.py:41
+// decorators_uncaught.py:38
 #[rt::frame(m, "ordered", 38)]
 pub fn ordered<'py>(
     m: &rt::Module<'py>,
@@ -54,7 +50,7 @@ pub fn ordered<'py>(
 }
 
 // decorators_uncaught.py:121
-#[rt::frame(m, "factory", 121)]
+#[rt::frame(m, "factory", 121, frame)]
 pub fn factory<'py>(
     m: &rt::Module<'py>,
     prefix: &Bound<'py, PyAny>,
@@ -63,7 +59,7 @@ pub fn factory<'py>(
     let local = m
         .global("show")?
         .call1((rt::str(py, "local ").add(prefix)?,))?;
-    // decorators_uncaught.py:126
+    // decorators_uncaught.py:124
     #[rt::frame(m, "factory.<locals>.made", 124)]
     fn made<'py>(
         m: &rt::Module<'py>,
@@ -73,45 +69,38 @@ pub fn factory<'py>(
         prefix.add(x)
     }
     let made = rt::function!(
-        m,
+        frame,
         @(&local)
         @(m.global("functools")?.attr("wraps")?.call1((m.global("factory")?,))?)
-        made[prefix](x = m.global("default")?.call1((prefix,))?),
-        qualname = "factory.<locals>.made"
+        made[prefix](x = m.global("default")?.call1((prefix,))?)
     )?;
-    // decorators_uncaught.py:130
+    // decorators_uncaught.py:129
     #[rt::frame(m, "factory.<locals>.plain", 129)]
     fn plain<'py>(m: &rt::Module<'py>, y: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         y.attr("__qualname__")
     }
-    let plain = rt::function!(
-        m,
-        @(&local)
-        plain(y = &local),
-        qualname = "factory.<locals>.plain"
-    )?;
+    let plain = rt::function!(frame, @(&local) plain(y = &local))?;
     Ok(PyTuple::new(py, [&made, &plain])?.into_any())
 }
 
-// decorators_uncaught.py:142
+// decorators_uncaught.py:141
 pub fn walrus<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     Ok(rt::str(m.py(), "walrus"))
 }
 
 // decorators_uncaught.py:173
-#[rt::frame(m, "build", 173)]
+#[rt::frame(m, "build", 173, frame)]
 pub fn build<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    // decorators_uncaught.py:177
+    // decorators_uncaught.py:174
     fn method<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         Ok(x.clone())
     }
     let method = rt::function!(
-        m,
+        frame,
         @(m.global("show")?.call1(("outer",))?)
         @boom
         @(m.global("show")?.call1(("inner",))?)
-        method(x = m.global("default")?.call1(("x",))?),
-        qualname = "build.<locals>.method"
+        method(x = m.global("default")?.call1(("x",))?)
     )?;
     Ok(method)
 }
@@ -194,7 +183,7 @@ pub mod shape {
         Ok(())
     }
 
-    // decorators_uncaught.py:50
+    // decorators_uncaught.py:49
     #[rt::frame(m, "Shape.area", 49)]
     pub fn area<'py>(
         m: &rt::Module<'py>,
@@ -204,13 +193,13 @@ pub mod shape {
         rt::int(m.py(), 2).mul(scale)
     }
 
-    // decorators_uncaught.py:54
+    // decorators_uncaught.py:53
     #[rt::frame(m, "Shape.label", 53)]
     pub fn label<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         slf.attr("_label")
     }
 
-    // decorators_uncaught.py:58
+    // decorators_uncaught.py:57
     #[rt::frame(m, "Shape.label", 57)]
     pub fn label_<'py>(
         m: &rt::Module<'py>,
@@ -221,7 +210,7 @@ pub mod shape {
         Ok(rt::none(m.py()))
     }
 
-    // decorators_uncaught.py:62
+    // decorators_uncaught.py:61
     #[rt::frame(m, "Shape.label", 61)]
     pub fn label__<'py>(
         m: &rt::Module<'py>,
@@ -231,19 +220,19 @@ pub mod shape {
         Ok(rt::none(m.py()))
     }
 
-    // decorators_uncaught.py:66
+    // decorators_uncaught.py:65
     #[rt::frame(m, "Shape.unit", 65)]
     pub fn unit<'py>(m: &rt::Module<'py>, cls: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         cls.attr("__name__")
     }
 
-    // decorators_uncaught.py:70
+    // decorators_uncaught.py:69
     #[rt::frame(m, "Shape.double", 69)]
     pub fn double<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         rt::int(m.py(), 2).mul(x)
     }
 
-    // decorators_uncaught.py:74
+    // decorators_uncaught.py:73
     pub fn tagged<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -251,7 +240,7 @@ pub mod shape {
         Ok(rt::str(m.py(), "tagged"))
     }
 
-    // decorators_uncaught.py:78
+    // decorators_uncaught.py:77
     #[rt::frame(m, "Shape.cached", 77)]
     pub fn cached<'py>(
         m: &rt::Module<'py>,
@@ -317,7 +306,7 @@ pub mod shape {
                 Ok(())
             }
 
-            // decorators_uncaught.py:93
+            // decorators_uncaught.py:92
             pub fn method<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 Ok(rt::str(m.py(), "deepest"))
             }
@@ -341,7 +330,7 @@ pub mod broken {
         Ok(())
     }
 
-    // decorators_uncaught.py:166
+    // decorators_uncaught.py:164
     pub fn method<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
@@ -469,7 +458,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.global("chosen")?.attr("__qualname__")?,
     ))?;
     match (|| -> PyResult<()> {
-        // decorators_uncaught.py:152
+        // decorators_uncaught.py:150
         fn failing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Ok(rt::none(m.py()))
         }
