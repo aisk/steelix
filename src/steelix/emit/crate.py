@@ -144,16 +144,17 @@ def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> Lo
     rust_mod = rust_module_name(parsed.name)
     src = out_dir / "src"
     src.mkdir(parents=True, exist_ok=True)
-    (out_dir / "Cargo.toml").write_text(cargo_toml(parsed.name, options))
-    (out_dir / "rustfmt.toml").write_text(config_text())
-    (src / f"{rust_mod.removeprefix('r#')}.rs").write_text(module_rs)
+    (out_dir / "Cargo.toml").write_text(cargo_toml(parsed.name, options), encoding="utf-8")
+    (out_dir / "rustfmt.toml").write_text(config_text(), encoding="utf-8")
+    (src / f"{rust_mod.removeprefix('r#')}.rs").write_text(module_rs, encoding="utf-8")
     if options.mode is Mode.BIN:
         path = parsed.path or Path(parsed.filename)
         project = Path(os.path.dirname(os.path.realpath(path)))
-        (out_dir / "build.rs").write_text(rustfmt(build_rs(project)))
-        (src / "main.rs").write_text(rustfmt(main_rs(parsed, rust_mod)))
+        (out_dir / "build.rs").write_text(rustfmt(build_rs(project)), encoding="utf-8")
+        (src / "main.rs").write_text(rustfmt(main_rs(parsed, rust_mod)), encoding="utf-8")
     else:
-        (src / "lib.rs").write_text(rustfmt(lib_rs(parsed, rust_mod)))
+        (out_dir / "build.rs").write_text(rustfmt(EXT_BUILD_RS), encoding="utf-8")
+        (src / "lib.rs").write_text(rustfmt(lib_rs(parsed, rust_mod)), encoding="utf-8")
     return lowered
 
 
@@ -298,20 +299,23 @@ def emit_project(
         )
         target = src / rust.file
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(render(lowered))
+        target.write_text(render(lowered), encoding="utf-8")
         lowered_modules.append(lowered)
     for rust in layout.values():
         if rust.namespace:
             target = src / rust.file
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(namespace_mod_rs(rust))
-    (out_dir / "Cargo.toml").write_text(cargo_toml(name or project_name(project), options))
-    (out_dir / "rustfmt.toml").write_text(config_text())
+            target.write_text(namespace_mod_rs(rust), encoding="utf-8")
+    (out_dir / "Cargo.toml").write_text(
+        cargo_toml(name or project_name(project), options), encoding="utf-8"
+    )
+    (out_dir / "rustfmt.toml").write_text(config_text(), encoding="utf-8")
     if options.mode is Mode.BIN:
-        (out_dir / "build.rs").write_text(rustfmt(build_rs(project.root)))
-        (src / "main.rs").write_text(rustfmt(project_main_rs(project, layout)))
+        (out_dir / "build.rs").write_text(rustfmt(build_rs(project.root)), encoding="utf-8")
+        (src / "main.rs").write_text(rustfmt(project_main_rs(project, layout)), encoding="utf-8")
     else:
-        (src / "lib.rs").write_text(rustfmt(project_lib_rs(project, layout)))
+        (out_dir / "build.rs").write_text(rustfmt(EXT_BUILD_RS), encoding="utf-8")
+        (src / "lib.rs").write_text(rustfmt(project_lib_rs(project, layout)), encoding="utf-8")
     return lowered_modules
 
 
@@ -442,8 +446,7 @@ def cargo_toml(module_name: str, options: CrateOptions) -> str:
         f"steelix-runtime = {runtime}",
         "",
     ]
-    if options.mode is Mode.BIN:
-        lines += ["[build-dependencies]", f'pyo3-build-config = "{PYO3_VERSION}"', ""]
+    lines += ["[build-dependencies]", f'pyo3-build-config = "{PYO3_VERSION}"', ""]
     if options.standalone:
         # Cargo only reads profiles from the workspace root.
         lines += [DEV_PROFILE, RELEASE_PROFILE, "[workspace]", ""]
@@ -472,16 +475,70 @@ fn main() {{
         return;
     }}
     // Let the executable find the libpython it was linked against, instead
-    // of whichever libpython the system loader would pick.
+    // of whichever libpython the system loader would pick (on macOS also a
+    // framework build's, python.org's or Homebrew's).
     pyo3_build_config::add_libpython_rpath_link_args();
+    pyo3_build_config::add_python_framework_link_args();
+    let config = pyo3_build_config::get();
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {{
+        copy_python_dll(config);
+    }}
     // Run with the interpreter installation (and virtual environment) the
     // crate was built against, and the project's Python files.
-    let executable = pyo3_build_config::get()
+    let executable = config
         .executable()
         .expect("PyO3 found no Python interpreter");
     println!("cargo:rustc-env=STEELIX_PYTHON={{executable}}");
     println!("cargo:rustc-env=STEELIX_PROJECT={{PROJECT}}");
 }}
+
+/// Windows has no rpath: the loader looks for the DLLs of an executable
+/// next to it (and on `PATH`). Copies the interpreter's DLL (`python314.dll`)
+/// to where cargo puts the executables: the profile's directory, and `deps`
+/// for test binaries.
+fn copy_python_dll(config: &pyo3_build_config::InterpreterConfig) {{
+    use std::path::{{Path, PathBuf}};
+    // `lib_dir` is the `libs` directory of the installation, with the
+    // import library; the DLL is in the installation's directory.
+    let (Some(lib_dir), Some(lib_name)) = (config.lib_dir(), config.lib_name()) else {{
+        return;
+    }};
+    let Some(home) = Path::new(lib_dir).parent() else {{
+        return;
+    }};
+    let dll = home.join(format!("{{lib_name}}.dll"));
+    let Ok(contents) = std::fs::read(&dll) else {{
+        println!("cargo:warning=no {{}}: put it on PATH to run the program", dll.display());
+        return;
+    }};
+    println!("cargo:rerun-if-changed={{}}", dll.display());
+    // `OUT_DIR` is `<target>/<profile>/build/<package>-<hash>/out`.
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
+    let Some(profile) = out_dir.ancestors().nth(3) else {{
+        return;
+    }};
+    for dir in [profile.to_owned(), profile.join("deps")] {{
+        let target = dir.join(format!("{{lib_name}}.dll"));
+        // A running program keeps its DLL open; only replace a different one.
+        if std::fs::read(&target).is_ok_and(|existing| existing == contents) {{
+            continue;
+        }}
+        if let Err(err) = std::fs::write(&target, &contents) {{
+            println!("cargo:warning=can not copy {{}}: {{err}}", dll.display());
+        }}
+    }}
+}}
+"""
+
+
+# The build script of an extension module. On macOS the interpreter that
+# imports it provides the Python symbols (`-undefined dynamic_lookup`), as
+# on Linux; elsewhere it adds nothing (on Windows the module links against
+# the interpreter's DLL, which is already loaded when it is imported).
+EXT_BUILD_RS = """\
+fn main() {
+    pyo3_build_config::add_extension_module_link_args();
+}
 """
 
 

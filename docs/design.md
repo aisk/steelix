@@ -458,7 +458,7 @@ m.set_global("parse", rt::import_from(&json, "loads")?)?;
 
 - `import a.b`（`a` 和 `a.b`），`from a import b`（`b` 是子模块时），相对 import，字面量名字的 `importlib.import_module("a.b")`（包括带 `package` 参数的相对名字）和 `__import__("a")`
 - 函数里、`try` 里的 import 也算。转换出来的模块只是登记在表里，运行时真的 import 时才执行，所以多算进来的模块不会改变行为
-- 和 path finder 一样，包（`a/__init__.py`）优先于同名的 `a.py`，旁边有同名的扩展模块时不算；builtin 模块和 frozen 模块优先于 `sys.path`，同名的项目文件不算
+- 和 path finder 一样，包（`a/__init__.py`）优先于同名的 `a.py`，旁边有同名的扩展模块时不算；builtin 模块和 frozen 模块优先于 `sys.path`，同名的项目文件不算。文件名和 path finder 一样按目录列表精确比较大小写：在不区分大小写的文件系统（macOS、Windows）上 `from store import Inventory` 不会把 `store/inventory.py` 当成子模块 `store.Inventory`
 - 命名空间包（没有 `__init__.py` 的目录，M6 之后）里的模块也算，和 path finder 一样，同一个目录里包和模块都优先于命名空间包。命名空间包本身没有代码，不在表里：它的 Rust mod（`src/ns/mod.rs`）只声明子模块，包对象照常由 `PathFinder` 从目录创建，所以分发里即使 `--no-sources` 也保留这个目录（只带它自己的其它文件，不带子目录里的）。`sys.path` 后面有同名的普通包或模块时（比如项目里的 `json/` 目录和标准库的 `json`）CPython 用后者，命名空间包不存在，所以 finder 对父包不在表里的模块总是检查父包的 `__path__`（见下面的 finder），`tests/projects/namespaces`。`--include 目录` 时这个目录和它上面的目录可以是命名空间包，它下面的子目录仍然要是包，不把任意目录都当成模块
 - 不算的：标准库和第三方包（不在项目目录里），编译不过的文件（CPython 在 import 时报 `SyntaxError`，不转换的话运行时也一样），用 `--exclude` 排除的模块。它们运行时照常从源码 import，报告里列出原因
 - 名字在运行时才算出来的 import（插件之类）用 `--include` 补充，参数是模块名、`.py` 文件或者目录（目录下所有能 import 的模块）
@@ -1172,7 +1172,7 @@ m.set_global(
   - 生成的 `Cargo.toml` 在 dev profile 下把 pyo3、pyo3-ffi 和 runtime 设为 `opt-level = 3`，生成的 crate 本身设为 1。没有优化的 PyO3 让每个 Python 操作慢几倍；不用 `package."*"`，因为它也会优化 proc macro，让干净构建的时间翻倍。实测（M3a）一个递归加循环的基准：全部 `opt-level = 0` 时 1.39s，现在的配置 0.40s，而 CPython 是 0.18s；干净构建从 11.5s 增加到 15.3s，改一行后重新构建从 0.5s 增加到 1.0s。转换出来的代码每个操作仍然经过 C API，没有字节码解释的开销但也没有 CPython 的特化和内联缓存，在函数被改写成原生 Rust 之前不会比 CPython 快
   - release profile 打开 `lto = "fat"` 和 `codegen-units = 1`。生成代码调用大量很小的 runtime 函数（`attr`、`global`、`frame::run` 等），没有 LTO 时它们跨 crate 内联不了。skime 的 fib 22（release）从 0.92s 降到 0.85s（CPython 0.41s），二进制小 7%。代价是 release 构建变慢：改生成代码后重新构建从 33s 到 51s，干净构建从 44s 到 62s。只影响编译方式，不改变行为和生成的代码
   - 只有 crate 是 workspace 根时 profile 才生效，所以只在独立 crate（默认）里生成
-  - 开发构建（在生成的 crate 里 `cargo build`）：build.rs 设置指向构建时 libpython 的 rpath，避免运行时加载到系统的 libpython，并把构建用的解释器（`PYO3_PYTHON`）和项目目录作为 `STEELIX_PYTHON`、`STEELIX_PROJECT` 交给编译器。程序用这个解释器的安装和 venv，只适合在本机运行。分发用的构建见下面的"分发"
+  - 开发构建（在生成的 crate 里 `cargo build`）：build.rs 设置指向构建时 libpython 的 rpath（macOS 上 framework 构建的 Python 另加 framework 的 rpath），避免运行时加载到系统的 libpython（Windows 没有 rpath，build.rs 把解释器的 `python314.dll` 复制到 target 的 profile 目录和放测试二进制的 `deps` 里，加载器在可执行文件旁边找到它），并把构建用的解释器（`PYO3_PYTHON`）和项目目录作为 `STEELIX_PYTHON`、`STEELIX_PROJECT` 交给编译器。程序用这个解释器的安装和 venv，只适合在本机运行。分发用的构建见下面的"分发"
   - 与 `python app.py` 一致的脚本信息（M2，M7 改成运行时确定）。`main.rs` 里只有脚本相对于项目目录的名字 `steelix_runtime::script!("app.py")`，宏在生成的 crate 里读取 build.rs 给出的两个路径（分发构建时没有），runtime 在启动时算出下面这些路径。所以 `main.rs` 里没有本机的绝对路径，golden 也不用替换路径
     - `sys.path[0]` 是项目目录（脚本所在目录，解析符号链接），所以脚本旁边还没转换的 Python 模块照样能 import
     - `__main__` 的 `__file__` 是项目目录加上脚本名，是绝对路径（3.9 起 CPython 也是绝对路径），`__cached__` 是 `None`
@@ -1180,7 +1180,7 @@ m.set_global(
   - 已知差异：`__main__` 的 `__loader__` 不是 `SourceFileLoader`
   - 有项目模块时（M6，§7 的"项目"）`main.rs` 多一张模块表，调用 `rt::embed::run_project`，它在执行 `__main__` 之前安装 finder。只有一个模块时生成的代码和以前完全一样，仍然调用 `run_main`
   - `-m pkg`（M6）调用 `rt::embed::run_module(.., "pkg.__main__")`，照 `runpy._run_module_as_main` 的做法：`sys.path[0]` 是项目目录，先 import 父包，`sys.argv[0]` 和 `__file__` 是 `__main__.py` 的绝对路径，`__main__` 的 `__spec__`、`__package__`、`__loader__`、`__cached__` 来自 `pkg.__main__` 的 spec，然后在 `__main__` 模块里执行生成的代码。`argparse` 由此得到和 CPython 一样的程序名 `python -m pkg`。`-m pkg.mod` 运行普通模块也可以
-- **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块。M12 起只用于把转换过的库作为扩展模块发布，改写时用项目自己的测试检查原生代码不再需要它，用的是 bin 的解释器角色（§15 "用项目自己的测试检查"）
+- **ext 模式**（`--mode ext`，次要场景）：cdylib 扩展模块，替换原 Python 模块。build.rs 调用 `pyo3_build_config::add_extension_module_link_args()`：macOS 上链接 `-undefined dynamic_lookup`，Python 的符号由 import 它的解释器提供（和 Linux 一样），其它平台什么也不加。cargo 在 macOS 上的产物是 `lib<name>.dylib`，改名成 `<name>.so` 使用，Windows 上是 `<name>.dll`，改名成 `<name>.pyd`。M12 起只用于把转换过的库作为扩展模块发布，改写时用项目自己的测试检查原生代码不再需要它，用的是 bin 的解释器角色（§15 "用项目自己的测试检查"）
   - 有项目模块时（M6），`PyInit_*` 先调用 `rt::init_extension(m, MODULES)` 安装 finder，项目目录是扩展模块所在的目录，其余模块照样惰性执行
   - `--mode ext -m pkg` 生成包形式的扩展模块：`pkg.so` 只导出 `PyInit_pkg`，`init_extension` 给它设置 `__path__`、`__package__` 和 spec 的 `submodule_search_locations`，于是它成了包，相对 import 和 `import pkg.sub` 都能用。包里所有的模块都转换（库的任何子模块都可能被 import），不只是静态 import 到的。这样安装时扩展模块不能和包的源码目录放在一起，否则 `PathFinder` 先找到源码目录
   - 也可以把它安装成包目录里的 `pkg/__init__.so`（M12）。`FileFinder` 认 `__init__` 加上扩展模块后缀的文件，所以 import 之前 spec 就是包，`python -m pkg` 能找到 `pkg.__main__`（M6 遗留的问题：`pkg.so` 的 spec 不是包，`runpy` 在执行它之前就按普通模块处理，于是只有 `python -m pkg.__main__` 可以）。扩展模块后缀排在 `.py` 前面，`pkg/__init__.so` 和源码放在一起时也是它先被找到，包目录里也可以只有它。`init_extension` 看到文件名是 `__init__.*` 时把项目目录往上提到包目录的外面。`PyInit_pkg` 的名字不用变，`ExtensionFileLoader` 按模块名而不是文件名找它
@@ -1198,7 +1198,7 @@ dist/app/python/bin/python            sys.executable，指向 ../../app 的符�
 dist/app/src/                         项目目录，sys.path[0]
 ```
 
-**定位**。`steelix build` 构建时设置环境变量 `STEELIX_DIST`，build.rs 于是只加 `-Wl,-rpath,$ORIGIN/python/lib`，不设置 `STEELIX_PYTHON`、`STEELIX_PROJECT`，程序里没有构建机器的路径。runtime 发现这两个值都没有时，从可执行文件的位置（`/proc/self/exe`，解析符号链接，和 `$ORIGIN` 一致）找 `python/` 和 `src/`，用 `PyConfig.home` 指定 Python 的安装，`sys.prefix` 就是 `dist/app/python`，`site` 照常把它下面的 site-packages 加进 `sys.path`。项目模块的 `__file__`（§7 的 finder）、`__main__` 的 `__file__` 和 `sys.argv[0]` 都在 `dist/app/src/` 下面。panic 信息里的源码位置用 `--remap-path-prefix` 把 cargo registry 和 runtime 的目录换成 `cargo/`、`steelix/`。这些参数加在用户自己的 rustflags 后面：环境变量里有 `RUSTFLAGS` 或 `CARGO_ENCODED_RUSTFLAGS` 时追加到它们后面（它们会让 cargo 忽略配置文件里的 rustflags），否则用 `--config build.rustflags=[..]` 传给 cargo，cargo 把它和配置文件里的 `build.rustflags` 合并。配置文件里有 `target.<triple>.rustflags` 时它优先，路径不会被替换，只影响 panic 信息。
+**定位**。`steelix build` 构建时设置环境变量 `STEELIX_DIST`，build.rs 于是只加 `-Wl,-rpath,$ORIGIN/python/lib`，不设置 `STEELIX_PYTHON`、`STEELIX_PROJECT`，程序里没有构建机器的路径。runtime 发现这两个值都没有时，从可执行文件的位置（`current_exe` 再解析符号链接：Linux 的 `/proc/self/exe` 本来就解析过，和 `$ORIGIN` 一致，macOS 给的是启动时的路径，从 `python/bin/python` 启动时要解析到程序本身）找 `python/` 和 `src/`，用 `PyConfig.home` 指定 Python 的安装，`sys.prefix` 就是 `dist/app/python`，`site` 照常把它下面的 site-packages 加进 `sys.path`。项目模块的 `__file__`（§7 的 finder）、`__main__` 的 `__file__` 和 `sys.argv[0]` 都在 `dist/app/src/` 下面。panic 信息里的源码位置用 `--remap-path-prefix` 把 cargo registry 和 runtime 的目录换成 `cargo/`、`steelix/`。这些参数加在用户自己的 rustflags 后面：环境变量里有 `RUSTFLAGS` 或 `CARGO_ENCODED_RUSTFLAGS` 时追加到它们后面（它们会让 cargo 忽略配置文件里的 rustflags），否则用 `--config build.rustflags=[..]` 传给 cargo，cargo 把它和配置文件里的 `build.rustflags` 合并。配置文件里有 `target.<triple>.rustflags` 时它优先，路径不会被替换，只影响 panic 信息。
 
 - Python 的安装放在 `python/` 并保持 python-build-standalone 原来的 `bin/`、`lib/` 结构，这样 `sys.prefix` 是一个普通的 Python 安装，`sysconfig`、`site` 和看安装布局的工具都不用特殊处理
 - 源码目录叫 `src/` 而不是程序名，因为程序名已经是可执行文件的名字
@@ -1243,7 +1243,19 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 - **静态链接 libpython**：python-build-standalone 有静态的变体（本机的 install_only 没有 `libpython3.14.a`）。好处是少一个 `.so` 和 rpath，总体积差不多（libpython 的内容进了程序）。问题是 `lib-dynload` 和第三方的 C 扩展模块要从进程里解析 libpython 的符号，程序必须用 `--export-dynamic` 导出它们；musl 的完全静态版本不能 `dlopen`，根本不能加载扩展模块；PyO3 要用 `PYO3_CONFIG_FILE` 配置静态链接，还要链接 libpython 依赖的静态库。收益小，复杂度高，不做
 - **用系统的 Python**：要求目标机器上正好有同一个次版本的 Python，Debian 系还把标准库拆成多个包，venv 的依赖也要另外安装，没有控制力，不做
 
-**其它平台**（没有实现）。macOS 上 rpath 写成 `@executable_path/python/lib`，libpython 是 `libpython3.14.dylib`，定位可执行文件用 `_NSGetExecutablePath`（Rust 的 `current_exe` 已经处理），还要处理代码签名和公证（复制进来的 dylib 要重新签名）。Windows 没有 rpath，`python314.dll` 放在可执行文件旁边由加载器找到，标准库在 `Lib/`、扩展模块在 `DLLs/`，`sys.executable` 不能是符号链接（要复制一个 `python.exe` 或者用别的方式区分角色），multiprocessing 的 spawn 在 Windows 上用 `_winapi.CreateProcess`，命令行的识别方式一样。runtime 的 `embed` 现在只在 `cfg(unix)` 下编译。
+**其它平台**（分发没有实现）。macOS 和 Windows 上开发构建、ext 模式和测试都可以用（CI 有 macOS 和 Windows 的 job），分发还不行。macOS 的问题是：现在构建出的程序按绝对路径（libpython 的 install name）加载构建机器上的 `libpython3.14.dylib`，换一台机器就运行不了，`$ORIGIN` 在 macOS 上也没有意义。要做的是 rpath 写成 `@executable_path/python/lib`，用 `install_name_tool -id @rpath/libpython3.14.dylib` 改复制进来的 dylib、`-change` 改程序里的引用，改过的 Mach-O 签名失效，要 `codesign -s -` 重新做 ad-hoc 签名（Apple Silicon 上不签名不能运行），对外发布还要 Developer ID 签名和公证。macOS 没有 `bwrap`，分发测试里在沙箱中运行的那部分跳过，要另外检查程序里没有构建机器的路径（`otool -L`/`otool -l`）。
+
+Windows 上 runtime 的差异：
+
+- 初始化用宽字符的 API（`Py_PreInitializeFromArgs`、`PyConfig_SetArgv`、`PyConfig_SetString`），参数是 `OsString` 的 UTF-16，和 `python.exe` 的 `wmain` 一样；Unix 上仍是 `Bytes` 版本，按 locale 解码
+- 路径用平台的分隔符：`__main__` 的 `__file__`、项目模块的 `__file__` 和包的 `__path__` 和 path finder 一样是 `C:\proj\pkg\__init__.py`。`current_exe` 不做 `canonicalize`（只会得到 `\\?\` 前缀的路径）
+- 未捕获的 `KeyboardInterrupt` 之后和 CPython 一样以 `STATUS_CONTROL_C_EXIT`（`0xC000013A`）退出。测试里没法只给一个进程发 Ctrl-C（`CTRL_C_EVENT` 发给整个控制台），中断的用例跳过
+- 解释器角色看程序名去掉 `.exe` 之后是不是 `python`。`steelix test` 不能建符号链接（需要特权），改用硬链接（不行就复制）的 `python.exe`，旁边同样链接 `python314.dll`
+- runtime 自己声明的几个 CPython 函数（`PyMethod_New`、`PyErr_FormatUnraisable`）要说明来自哪个 DLL：PyO3 用 `raw-dylib`，但它需要字面量的 DLL 名，runtime 的 build.rs 改为链接解释器 `libs/` 下的导入库 `python314.lib`
+- `.cargo/config.toml` 里的 `PYO3_PYTHON` 是 `.venv/bin/python`，Windows 上要在环境变量里设成 `.venv\Scripts\python.exe`（环境变量优先于配置文件）
+- steelix 读写文本文件都显式用 UTF-8（Windows 默认是 locale 的编码，比如 GBK），调用 rustfmt 和读 cargo 的输出也是
+
+Windows 的分发要做的是：`python314.dll` 放在可执行文件旁边由加载器找到（没有 rpath），标准库在 `Lib/`、扩展模块在 `DLLs/`，`sys.executable` 不能是符号链接（要复制一个 `python.exe` 和它旁边的 DLL，或者用别的方式区分角色），`--remap-path-prefix` 和测试里的路径也要换成 Windows 的写法。multiprocessing 的 spawn 在 Windows 上用 `_winapi.CreateProcess`，命令行的识别方式一样（开发构建已经验证过）；没有 forkserver。现在 `steelix build` 在 Windows 上直接报错。
 
 ## 12. 名字卫生与已知语义差异
 
@@ -1514,7 +1526,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：在源码 checkout 里运行时（测试和开发）用 path 依赖，指向仓库里的 `crates/steelix-runtime`；从 PyPI 安装的 steelix 找不到这个目录，写成 crates.io 上的版本（`emit/crate.py` 的 `RUNTIME_VERSION`，现在是 `"0.3"`）。`--runtime-path` 可以显式指定。所以 runtime 必须和 PyPI 上的 steelix 同步发布到 crates.io，版本的前两位一致
 - **发版**：PyPI 上的 `steelix` 和 crates.io 上的 `steelix-runtime`、`steelix-runtime-macros`（runtime 依赖它，版本相同，先发布）一起发布，git tag 用 `v` 前缀（`v0.1.0`）。改了 runtime 的公开接口（生成代码用到的部分）时提升 `RUNTIME_VERSION`
 - 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
-- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
+- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，Ubuntu 24.04、macOS 15 和 Windows Server 2025 各一个 job（macOS 和 Windows 上没有 `bwrap`，沙箱里的分发测试跳过，Windows 上整个分发都跳过），所有步骤都用 bash（Windows 默认的 pwsh 在多行命令中间失败时不会停），Windows 上把 `PYO3_PYTHON` 设成 `.venv\Scripts\python.exe`，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
 
 ## 15. 把函数改写成原生 Rust（M3b）
 

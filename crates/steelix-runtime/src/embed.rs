@@ -1,9 +1,8 @@
 //! Running a transpiled program as an executable that embeds libpython.
 
 use std::any::Any;
-use std::ffi::{CString, OsString, c_char};
+use std::ffi::{OsStr, OsString};
 use std::mem::MaybeUninit;
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -89,6 +88,14 @@ struct Paths {
 impl Paths {
     fn locate(script: &Script) -> Self {
         let program = match std::env::current_exe() {
+            // Linux's `/proc/self/exe` has the links resolved already, macOS
+            // gives the path the process was started by: `python/bin/python`
+            // of a distribution, a link to the program. Windows gives the
+            // path of the executable itself, which `canonicalize` would only
+            // turn into a `\\?\` path.
+            #[cfg(unix)]
+            Ok(program) => program.canonicalize().unwrap_or(program),
+            #[cfg(not(unix))]
             Ok(program) => program,
             Err(err) => fatal(&format!("can not locate the executable: {err}")),
         };
@@ -114,7 +121,10 @@ impl Paths {
             Some(project) => project.to_owned(),
             None => path_string(&dist.join(DIST_PROJECT)),
         };
-        let file = format!("{project}/{}", script.file);
+        // `script.file` is spelled with `/`; `__file__` has the platform's
+        // separator, like for `python app.py`.
+        let file = script.file.replace('/', std::path::MAIN_SEPARATOR_STR);
+        let file = path_string(&Path::new(&project).join(file));
         Self {
             program: path_string(&program),
             executable,
@@ -215,6 +225,11 @@ fn role(args: &[OsString], paths: &Paths) -> Role {
         .and_then(|arg0| Path::new(arg0).file_name())
         .and_then(|name| name.to_str())
         .unwrap_or("");
+    // `python.exe` on Windows.
+    let name = match name.len().checked_sub(4) {
+        Some(stem) if cfg!(windows) && name[stem..].eq_ignore_ascii_case(".exe") => &name[..stem],
+        _ => name,
+    };
     let version = name.strip_prefix("python3").unwrap_or("x");
     let dev_child = paths.home.is_none()
         && multiprocessing::is_child(
@@ -446,6 +461,7 @@ fn run_program(
 
 /// Ends the process with `SIGINT`, like CPython does after an uncaught
 /// `KeyboardInterrupt`. Returns only if that fails.
+#[cfg(unix)]
 fn exit_sigint() {
     // SAFETY: plain libc calls; the interpreter is finalized, nothing else
     // depends on the `SIGINT` handler any more.
@@ -454,6 +470,14 @@ fn exit_sigint() {
             libc::kill(libc::getpid(), libc::SIGINT);
         }
     }
+}
+
+/// Exits with `STATUS_CONTROL_C_EXIT`, like CPython does after an uncaught
+/// `KeyboardInterrupt` on Windows.
+#[cfg(windows)]
+fn exit_sigint() {
+    const STATUS_CONTROL_C_EXIT: u32 = 0xC000_013A;
+    std::process::exit(STATUS_CONTROL_C_EXIT as i32)
 }
 
 /// The `PanicException` for a caught panic, carrying its message.
@@ -493,13 +517,13 @@ fn flush_io(py: Python<'_>) {
 /// script's path followed by them, as for `python app.py args...`.
 /// `isolation` comes before the command line, so `-E` and `-s` still apply.
 unsafe fn initialize(paths: &Paths, args: &[OsString], python_args: bool, isolation: Isolation) {
-    let orig_args: Vec<CString> = args.iter().map(|arg| c_string(arg.as_bytes())).collect();
-    let script_name = c_string(paths.file.as_bytes());
-    let mut argv: Vec<*const c_char> = if python_args {
-        orig_args.iter().map(|arg| arg.as_ptr()).collect()
+    let orig_args: Vec<NativeString> = args.iter().map(|arg| NativeString::new(arg)).collect();
+    let script_name = NativeString::new(OsStr::new(&paths.file));
+    let mut argv: Vec<*const NativeChar> = if python_args {
+        orig_args.iter().map(NativeString::as_ptr).collect()
     } else {
         std::iter::once(script_name.as_ptr())
-            .chain(orig_args.iter().skip(1).map(|arg| arg.as_ptr()))
+            .chain(orig_args.iter().skip(1).map(NativeString::as_ptr))
             .collect()
     };
     let mut preconfig = MaybeUninit::<ffi::PyPreConfig>::uninit();
@@ -515,63 +539,153 @@ unsafe fn initialize(paths: &Paths, args: &[OsString], python_args: bool, isolat
         let preconfig = preconfig.assume_init_mut();
         preconfig.parse_argv = python_args.into();
         preconfig.use_environment = isolation.environment.into();
-        check(ffi::Py_PreInitializeFromBytesArgs(
-            preconfig,
-            argv.len() as ffi::Py_ssize_t,
-            argv.as_mut_ptr().cast(),
-        ));
+        check(native::pre_initialize(preconfig, &mut argv));
 
         ffi::PyConfig_InitPythonConfig(config.as_mut_ptr());
-        let config = config.assume_init_mut();
-        config.parse_argv = python_args.into();
-        config.use_environment = isolation.environment.into();
-        config.user_site_directory = isolation.user_site.into();
+        let config = config.as_mut_ptr();
+        (*config).parse_argv = python_args.into();
+        (*config).use_environment = isolation.environment.into();
+        (*config).user_site_directory = isolation.user_site.into();
 
-        let executable = c_string(paths.executable.as_bytes());
-        check(ffi::PyConfig_SetBytesString(
+        let executable = NativeString::new(OsStr::new(&paths.executable));
+        check(native::set_string(
             config,
-            &mut config.executable,
-            executable.as_ptr(),
+            &raw mut (*config).executable,
+            &executable,
         ));
         if let Some(home) = &paths.home {
-            let home = c_string(home.as_bytes());
-            check(ffi::PyConfig_SetBytesString(
-                config,
-                &mut config.home,
-                home.as_ptr(),
-            ));
+            let home = NativeString::new(OsStr::new(home));
+            check(native::set_string(config, &raw mut (*config).home, &home));
         }
 
-        check(ffi::PyConfig_SetBytesArgv(
-            config,
-            argv.len() as ffi::Py_ssize_t,
-            argv.as_mut_ptr(),
-        ));
-        let mut orig_argv = Vec::with_capacity(orig_args.len());
-        for arg in &orig_args {
-            let wide = ffi::Py_DecodeLocale(arg.as_ptr(), std::ptr::null_mut());
-            assert!(!wide.is_null(), "can not decode command line argument");
-            orig_argv.push(wide);
-        }
-        check(ffi::PyConfig_SetWideStringList(
-            config,
-            &mut config.orig_argv,
-            orig_argv.len() as ffi::Py_ssize_t,
-            orig_argv.as_mut_ptr(),
-        ));
-        for wide in orig_argv {
-            ffi::PyMem_RawFree(wide.cast());
-        }
+        check(native::set_argv(config, &mut argv));
+        check(native::set_orig_argv(config, &orig_args));
 
         check(ffi::Py_InitializeFromConfig(config));
         ffi::PyConfig_Clear(config);
     }
 }
 
-fn c_string(bytes: &[u8]) -> CString {
-    match CString::new(bytes) {
-        Ok(text) => text,
-        Err(_) => fatal("a path or argument contains a NUL character"),
+/// An argument or path in the form CPython's initialization takes it: NUL
+/// terminated bytes on Unix, which it decodes with the locale like the
+/// `argv` of `main`, and NUL terminated UTF-16 on Windows, like the `argv`
+/// of `wmain`.
+struct NativeString(Vec<NativeChar>);
+
+#[cfg(unix)]
+type NativeChar = std::ffi::c_char;
+#[cfg(windows)]
+type NativeChar = libc::wchar_t;
+
+impl NativeString {
+    fn new(text: &OsStr) -> Self {
+        #[cfg(unix)]
+        let mut chars: Vec<NativeChar> = {
+            use std::os::unix::ffi::OsStrExt;
+            text.as_bytes()
+                .iter()
+                .map(|&byte| byte as NativeChar)
+                .collect()
+        };
+        #[cfg(windows)]
+        let mut chars: Vec<NativeChar> = {
+            use std::os::windows::ffi::OsStrExt;
+            text.encode_wide().collect()
+        };
+        if chars.contains(&0) {
+            fatal("a path or argument contains a NUL character");
+        }
+        chars.push(0);
+        Self(chars)
+    }
+
+    fn as_ptr(&self) -> *const NativeChar {
+        self.0.as_ptr()
+    }
+}
+
+/// The initialization functions that take [`NativeString`]s: the `Bytes`
+/// variants on Unix, the wide ones on Windows.
+mod native {
+    use super::{NativeChar, NativeString};
+    use pyo3::ffi;
+
+    pub(super) unsafe fn pre_initialize(
+        preconfig: &ffi::PyPreConfig,
+        argv: &mut [*const NativeChar],
+    ) -> ffi::PyStatus {
+        let argc = argv.len() as ffi::Py_ssize_t;
+        // SAFETY: NUL terminated strings, which CPython only reads.
+        unsafe {
+            #[cfg(unix)]
+            return ffi::Py_PreInitializeFromBytesArgs(preconfig, argc, argv.as_mut_ptr().cast());
+            #[cfg(windows)]
+            return ffi::Py_PreInitializeFromArgs(preconfig, argc, argv.as_mut_ptr().cast());
+        }
+    }
+
+    /// Sets the string `field` of `config` to a copy of `value`.
+    pub(super) unsafe fn set_string(
+        config: *mut ffi::PyConfig,
+        field: *mut *mut libc::wchar_t,
+        value: &NativeString,
+    ) -> ffi::PyStatus {
+        // SAFETY: the caller passes a string field of `config`.
+        unsafe {
+            #[cfg(unix)]
+            return ffi::PyConfig_SetBytesString(config, field, value.as_ptr());
+            #[cfg(windows)]
+            return ffi::PyConfig_SetString(config, field, value.as_ptr());
+        }
+    }
+
+    pub(super) unsafe fn set_argv(
+        config: *mut ffi::PyConfig,
+        argv: &mut [*const NativeChar],
+    ) -> ffi::PyStatus {
+        let argc = argv.len() as ffi::Py_ssize_t;
+        // SAFETY: NUL terminated strings, which CPython copies.
+        unsafe {
+            #[cfg(unix)]
+            return ffi::PyConfig_SetBytesArgv(config, argc, argv.as_mut_ptr());
+            #[cfg(windows)]
+            return ffi::PyConfig_SetArgv(config, argc, argv.as_mut_ptr());
+        }
+    }
+
+    /// `sys.orig_argv`: the arguments, decoded like `argv` is.
+    pub(super) unsafe fn set_orig_argv(
+        config: *mut ffi::PyConfig,
+        args: &[NativeString],
+    ) -> ffi::PyStatus {
+        // SAFETY: after pre-initialization `Py_DecodeLocale` decodes with
+        // the locale CPython decodes `argv` with. `PyConfig_SetWideStringList`
+        // copies the strings.
+        unsafe {
+            #[cfg(unix)]
+            let mut wide: Vec<*mut libc::wchar_t> = args
+                .iter()
+                .map(|arg| {
+                    let wide = ffi::Py_DecodeLocale(arg.as_ptr(), std::ptr::null_mut());
+                    assert!(!wide.is_null(), "can not decode command line argument");
+                    wide
+                })
+                .collect();
+            #[cfg(windows)]
+            let mut wide: Vec<*mut libc::wchar_t> =
+                args.iter().map(|arg| arg.as_ptr().cast_mut()).collect();
+            let status = ffi::PyConfig_SetWideStringList(
+                config,
+                &raw mut (*config).orig_argv,
+                wide.len() as ffi::Py_ssize_t,
+                wide.as_mut_ptr(),
+            );
+            #[cfg(unix)]
+            for item in wide {
+                ffi::PyMem_RawFree(item.cast());
+            }
+            status
+        }
     }
 }
 

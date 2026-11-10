@@ -279,7 +279,7 @@ def coverage(args: argparse.Namespace) -> int:
             print(f"  {f['feature']:<{width}}  {f['functions']:>9}  {f['only']:>4}")
     if args.report is not None:
         data = {"modules": reports, "features": features}
-        args.report.write_text(json.dumps(data, indent=2) + "\n")
+        args.report.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return 0
 
 
@@ -371,7 +371,7 @@ def attrs(args: argparse.Namespace) -> int:
         print(f"steelix: {err}", file=sys.stderr)
         return err.code
     if args.output is not None:
-        args.output.write_text(text)
+        args.output.write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
     return 0
@@ -423,7 +423,7 @@ def transpile(args: argparse.Namespace) -> int:
             data = reports[0].to_json()
         else:
             data = project_report(reports)
-        args.report.write_text(json.dumps(data, indent=2) + "\n")
+        args.report.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return 0
 
 
@@ -434,6 +434,11 @@ def build(args: argparse.Namespace) -> int:
     from steelix.emit.crate import default_runtime_path, project_name
 
     try:
+        if sys.platform == "win32":
+            raise dist.DistError(
+                "building a distribution is not supported on Windows yet; "
+                "`steelix transpile` and `cargo build` make a program that runs on this machine"
+            )
         python = args.python or Path(os.environ.get("PYO3_PYTHON") or sys.executable)
         install = dist.inspect_python(Path(os.path.abspath(python)))
         project, crate, lowered = emit_program(args, "bin", None)
@@ -484,21 +489,45 @@ def test(args: argparse.Namespace) -> int:
 def pytest_command(program: Path, pytest_args: list[str]) -> tuple[list[str], dict[str, str]]:
     """The command line and environment that run pytest with `program` as
     the Python interpreter: it is started through a link named `python`,
-    with `steelix_native` (`pytest_native.py`) as a plugin."""
+    with `steelix_native` (`pytest_native.py`) as a plugin.
+
+    On Windows, where a symbolic link needs a privilege, `python.exe` is a
+    hard link to the program (or a copy), next to links to the DLLs the
+    build copied next to the program (`python314.dll`), which Windows looks
+    for in the directory of the executable it starts."""
     home = program.parent / "steelix-test"
     bin_dir = home / "bin"
     plugins = home / "plugins"
     bin_dir.mkdir(parents=True, exist_ok=True)
     plugins.mkdir(exist_ok=True)
-    link = bin_dir / "python"
-    if link.is_symlink() or link.exists():
-        link.unlink()
-    link.symlink_to(program)
+    if sys.platform == "win32":
+        link = bin_dir / "python.exe"
+        for dll in program.parent.glob("python*.dll"):
+            _hard_link(dll, bin_dir / dll.name)
+        _hard_link(program, link)
+    else:
+        link = bin_dir / "python"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(program)
     shutil.copyfile(Path(__file__).with_name("pytest_native.py"), plugins / "steelix_native.py")
     env = dict(os.environ)
     env["STEELIX_NATIVE_IMPORTS"] = "1"
     env["PYTHONPATH"] = os.pathsep.join([str(plugins), *filter(None, [env.get("PYTHONPATH")])])
     return [str(link), "-m", "pytest", "-p", "steelix_native", *pytest_args], env
+
+
+def _hard_link(source: Path, link: Path) -> None:
+    """Makes `link` a hard link to `source`, or a copy where the file system
+    has none."""
+    if link.exists():
+        if link.samefile(source):
+            return
+        link.unlink()
+    try:
+        os.link(source, link)
+    except OSError:
+        shutil.copy2(source, link)
 
 
 def cargo_build_program(crate: Path, python: Path, release: bool) -> Path:
@@ -507,7 +536,7 @@ def cargo_build_program(crate: Path, python: Path, release: bool) -> Path:
     import tomllib
 
     try:
-        manifest = tomllib.loads((crate / "Cargo.toml").read_text())
+        manifest = tomllib.loads((crate / "Cargo.toml").read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as err:
         raise CommandError(
             f"{crate} is not a crate written by `steelix transpile`: {err}", 2
@@ -597,6 +626,7 @@ def cargo_executable(
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL if quiet else None,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if proc.returncode != 0:

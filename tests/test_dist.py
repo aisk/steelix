@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -43,6 +44,11 @@ JSON_PROJECT = PROJECTS_DIR / "stdlib_json"
 # path of the build machine.
 MOUNT = "/opt/program"
 
+# `steelix build` does not support Windows yet (design §11).
+needs_dist = pytest.mark.skipif(
+    sys.platform == "win32", reason="distributions are not supported on Windows"
+)
+
 
 # Unit tests
 
@@ -61,10 +67,12 @@ def test_build_parser_defaults() -> None:
     assert (args.module, args.sources, args.archive, args.exclude) == ("pkg", False, True, ["x"])
 
 
+@needs_dist
 def test_inspect_python_finds_the_build_interpreter() -> None:
     install = dist.inspect_python(PYTHON)
     assert install.version == "3.14"
-    assert install.libpython.name == "libpython3.14.so.1.0"
+    expected = "libpython3.14.dylib" if sys.platform == "darwin" else "libpython3.14.so.1.0"
+    assert install.libpython.name == expected
     assert (install.stdlib / "os.py").is_file()
     assert install.site_packages == (ROOT / ".venv" / "lib" / "python3.14" / "site-packages",)
     # steelix itself (an editable install) is a build tool, not part of programs.
@@ -78,6 +86,7 @@ def test_inspect_python_rejects_what_it_can_not_run(tmp_path: Path) -> None:
         dist.inspect_python(tmp_path / "python")
 
 
+@needs_dist
 def test_inspect_python_venv_with_system_site_packages(tmp_path: Path) -> None:
     """A virtual environment that includes the system site-packages (which
     are not copied) is reported; a `.dist-info` without `METADATA` does not
@@ -112,18 +121,18 @@ def fake_install(tmp_path: Path) -> dist.PythonInstall:
     ]
     for name in files:
         (stdlib / name).parent.mkdir(parents=True, exist_ok=True)
-        (stdlib / name).write_text("")
+        (stdlib / name).write_text("", encoding="utf-8")
     libpython = base / "lib" / "libpython3.14.so.1.0"
-    libpython.write_text("")
+    libpython.write_text("", encoding="utf-8")
     site = tmp_path / "venv" / "site-packages"
     for name in ["greeting/__init__.py", "steelix.pth", "steelix-0.1.0.dist-info/RECORD"]:
         (site / name).parent.mkdir(parents=True, exist_ok=True)
-        (site / name).write_text("")
-    (site / "editable.pth").write_text("/home/someone/src/lib\n")
+        (site / name).write_text("", encoding="utf-8")
+    (site / "editable.pth").write_text("/home/someone/src/lib\n", encoding="utf-8")
     # A separate platlib (purelib != platlib), merged into the same directory.
     platlib = tmp_path / "venv" / "platlib"
     (platlib / "native").mkdir(parents=True)
-    (platlib / "native" / "__init__.py").write_text("")
+    (platlib / "native" / "__init__.py").write_text("", encoding="utf-8")
     return dist.PythonInstall(
         executable=Path("/nonexistent/python"),
         version="3.14",
@@ -138,14 +147,15 @@ def files_under(path: Path) -> list[str]:
     return sorted(p.relative_to(path).as_posix() for p in path.rglob("*") if not p.is_dir())
 
 
+@needs_dist
 def test_assemble_layout(tmp_path: Path) -> None:
     install = fake_install(tmp_path)
     binary = tmp_path / "target" / "hello"
     binary.parent.mkdir()
-    binary.write_text("")
+    binary.write_text("", encoding="utf-8")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    (project_dir / "hello.py").write_text("print(1)\n")
+    (project_dir / "hello.py").write_text("print(1)\n", encoding="utf-8")
     project = find_project(project_dir / "hello.py")
     target = tmp_path / "dist" / "hello"
     options = dist.DistOptions(compile=False)
@@ -186,19 +196,19 @@ def test_assemble_refuses_to_replace_other_directories(tmp_path: Path) -> None:
     install = fake_install(tmp_path)
     target = tmp_path / "important"
     target.mkdir()
-    (target / "notes.txt").write_text("keep me")
+    (target / "notes.txt").write_text("keep me", encoding="utf-8")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    (project_dir / "hello.py").write_text("")
+    (project_dir / "hello.py").write_text("", encoding="utf-8")
     project = find_project(project_dir / "hello.py")
     with pytest.raises(dist.DistError, match="not a distribution"):
         dist.assemble(tmp_path / "x", "hello", install, project, target, dist.DistOptions())
-    assert (target / "notes.txt").read_text() == "keep me"
+    assert (target / "notes.txt").read_text(encoding="utf-8") == "keep me"
     with pytest.raises(dist.DistError, match="not a directory"):
         dist.assemble(
             tmp_path / "x", "hello", install, project, target / "notes.txt", dist.DistOptions()
         )
-    assert (target / "notes.txt").read_text() == "keep me"
+    assert (target / "notes.txt").read_text(encoding="utf-8") == "keep me"
 
 
 def test_package_data_and_unshipped_modules(tmp_path: Path) -> None:
@@ -219,7 +229,7 @@ def test_package_data_and_unshipped_modules(tmp_path: Path) -> None:
     }
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_text(text)
+        (root / name).write_text(text, encoding="utf-8")
     project = find_project(root / "app.py")
     shipped = dist.project_files(project, dist.DistOptions(sources=False))
     assert shipped == ["pkg/data.txt", "pkg/plugin.py", "pkg/templates/page.html"]
@@ -239,7 +249,7 @@ def test_namespace_package_files(tmp_path: Path) -> None:
     install = fake_install(tmp_path)
     binary = tmp_path / "target" / "app"
     binary.parent.mkdir()
-    binary.write_text("")
+    binary.write_text("", encoding="utf-8")
     root = tmp_path / "project"
     files = {
         "app.py": "import ns.mod\n",
@@ -249,7 +259,7 @@ def test_namespace_package_files(tmp_path: Path) -> None:
     }
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_text(text)
+        (root / name).write_text(text, encoding="utf-8")
     project = find_project(root / "app.py")
     assert dist.project_files(project, dist.DistOptions(sources=False)) == ["ns/data.txt"]
     (root / "ns" / "data.txt").unlink()
@@ -266,11 +276,12 @@ def pyc_flags(pyc: Path) -> int:
     return int.from_bytes(pyc.read_bytes()[4:8], "little")
 
 
+@needs_dist
 def test_compile_tree(tmp_path: Path) -> None:
     """Hash based `.pyc` (copies need not keep modification times); files
     that do not compile are reported, a failing `compileall` is an error."""
-    (tmp_path / "good.py").write_text("X = 1\n")
-    (tmp_path / "bad.py").write_text("def (:\n")
+    (tmp_path / "good.py").write_text("X = 1\n", encoding="utf-8")
+    (tmp_path / "bad.py").write_text("def (:\n", encoding="utf-8")
     warnings = dist.compile_tree(PYTHON, [tmp_path], "unchecked-hash")
     assert warnings == [f"does not compile, importing it fails: {tmp_path / 'bad.py'}"]
     assert pyc_flags(tmp_path / "__pycache__" / "good.cpython-314.pyc") == 1
@@ -299,6 +310,7 @@ def test_project_files() -> None:
         dist.project_files(project, dist.DistOptions(data=(str(ROOT / "README.md"),)))
 
 
+@needs_dist
 def test_dist_rustflags_remap_build_paths() -> None:
     """The remappings are added to the user's rustflags: appended to those
     of the environment, or joined by cargo with those of its configuration
@@ -320,6 +332,13 @@ def test_dist_rustflags_remap_build_paths() -> None:
     env, args = dist_rustflags({"CARGO_HOME": "/c"}, None)
     assert env == {}
     assert args == ["--config", 'build.rustflags=["--remap-path-prefix=/c/registry/src=cargo"]']
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_build_refuses_windows(tmp_path: Path, capsys) -> None:
+    assert main(["build", str(HELLO), "-o", str(tmp_path), "-q"]) == 1
+    assert "not supported on Windows" in capsys.readouterr().err
+    assert not any(tmp_path.iterdir())
 
 
 # End-to-end tests
@@ -366,11 +385,17 @@ def build_venv() -> Path:
     site = venv / "lib" / "python3.14" / "site-packages"
     package = site / "greeting"
     package.mkdir(exist_ok=True)
-    (package / "__init__.py").write_text('def hello(name):\n    return f"hello, {name}"\n')
+    (package / "__init__.py").write_text(
+        'def hello(name):\n    return f"hello, {name}"\n', encoding="utf-8"
+    )
     info = site / "greeting-1.0.dist-info"
     info.mkdir(exist_ok=True)
-    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: greeting\nVersion: 1.0\n")
-    (info / "RECORD").write_text("greeting/__init__.py,,\ngreeting-1.0.dist-info/METADATA,,\n")
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: greeting\nVersion: 1.0\n", encoding="utf-8"
+    )
+    (info / "RECORD").write_text(
+        "greeting/__init__.py,,\ngreeting-1.0.dist-info/METADATA,,\n", encoding="utf-8"
+    )
     return python
 
 
@@ -482,6 +507,7 @@ def test_child_command_line_is_the_programs(
 
 
 @pytest.mark.e2e
+@needs_dist
 def test_distribution_ignores_the_python_environment(
     hello_dists: tuple[Path, Path], tmp_path: Path
 ) -> None:
@@ -493,10 +519,10 @@ def test_distribution_ignores_the_python_environment(
     home = tmp_path / "home"
     user_site = home / ".local" / "lib" / "python3.14" / "site-packages"
     user_site.mkdir(parents=True)
-    (user_site / "usercustomize.py").write_text("print('USERCUSTOMIZE')\n")
+    (user_site / "usercustomize.py").write_text("print('USERCUSTOMIZE')\n", encoding="utf-8")
     shadow = tmp_path / "shadow"
     shadow.mkdir()
-    (shadow / "json.py").write_text("print('SHADOW json')\n")
+    (shadow / "json.py").write_text("print('SHADOW json')\n", encoding="utf-8")
     clean = {"PATH": os.environ["PATH"]}
     polluted = {
         **clean,
@@ -529,6 +555,7 @@ def test_distribution_ignores_the_python_environment(
 
 
 @pytest.mark.e2e
+@needs_dist
 def test_bytecode_does_not_depend_on_modification_times(hello_dists: tuple[Path, Path]) -> None:
     """The standard library and site-packages are compiled with unchecked
     hashes: a copy that does not keep modification times (`cp -r`, `scp`)
@@ -543,6 +570,7 @@ def test_bytecode_does_not_depend_on_modification_times(hello_dists: tuple[Path,
 
 
 @pytest.mark.e2e
+@needs_dist
 def test_archive_keeps_the_layout(hello_dists: tuple[Path, Path], tmp_path: Path) -> None:
     with tarfile.open(E2E_DIR / "dist-hello.tar.gz") as tar:
         tar.extractall(tmp_path, filter="tar")
@@ -682,6 +710,8 @@ def test_multiprocessing_from_a_module_distribution(method: str, build_venv: Pat
 def test_multiprocessing_in_development(method: str, tmp_path: Path) -> None:
     """A development build (`cargo build` in the generated crate) also
     starts itself for the children: it works after the source is gone."""
+    if method == "forkserver" and sys.platform == "win32":
+        pytest.skip("Windows has no forkserver")
     project = tmp_path / "project"
     project.mkdir()
     shutil.copyfile(MPAPP, project / "mpapp.py")
@@ -695,7 +725,7 @@ def test_multiprocessing_in_development(method: str, tmp_path: Path) -> None:
     options = CrateOptions(mode=Mode.BIN, runtime_path=RUNTIME, standalone=False)
     emit_crate(parse_file(project / "mpapp.py"), root / "mpapp", options)
     manifest = f'[workspace]\nresolver = "3"\nmembers = ["mpapp"]\n\n{DEV_PROFILE}'
-    (root / "Cargo.toml").write_text(manifest)
+    (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
     shutil.copyfile(ROOT / "Cargo.lock", root / "Cargo.lock")
     result = Workspace(root, ["mpapp"]).cargo("build", "--workspace")
     assert result.returncode == 0, result.stderr
@@ -721,17 +751,26 @@ def test_runtime_unit_tests() -> None:
     Tests that use Python link the test binary against libpython, which has
     no rpath: the dynamic linker has to find the interpreter's own library
     (CI's uv-managed Python is not on the default search path)."""
+    # Windows looks for DLLs on `PATH`, and has `python314.dll` in the
+    # installation's directory.
+    code = (
+        "import sys, sysconfig; "
+        "print(sys.base_prefix if sys.platform == 'win32' else sysconfig.get_config_var('LIBDIR'))"
+    )
     libdir = subprocess.run(
-        [str(PYTHON), "-c", "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"],
-        capture_output=True,
-        text=True,
-        check=True,
+        [str(PYTHON), "-c", code], capture_output=True, text=True, check=True
     ).stdout.strip()
-    search = os.pathsep.join(filter(None, [libdir, os.environ.get("LD_LIBRARY_PATH")]))
+    # `DYLD_LIBRARY_PATH` on macOS.
+    search = {
+        var: os.pathsep.join(filter(None, [libdir, os.environ.get(var)]))
+        for var in (
+            ("PATH",) if sys.platform == "win32" else ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH")
+        )
+    }
     result = subprocess.run(
         ["cargo", "test", "-p", "steelix-runtime", "--lib"],
         cwd=ROOT,
-        env={**os.environ, "PYO3_PYTHON": str(PYTHON), "LD_LIBRARY_PATH": search},
+        env={**os.environ, "PYO3_PYTHON": str(PYTHON), **search},
         capture_output=True,
         text=True,
         check=False,

@@ -15,11 +15,21 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import CASES, CASES_DIR, E2E_DIR, PYTHON, Workspace, make_workspace
+from conftest import (
+    CASES,
+    CASES_DIR,
+    E2E_DIR,
+    EXTENSION_SUFFIX,
+    PYTHON,
+    Workspace,
+    extension_library,
+    make_workspace,
+)
 
 from steelix.emit.crate import Mode
 
@@ -162,7 +172,10 @@ def bin_workspace() -> Workspace:
 @pytest.mark.parametrize("case", CASES)
 def test_bin_matches_python(case: str, bin_workspace: Workspace, tmp_path: Path) -> None:
     source = CASES_DIR / f"{case}.py"
-    text = source.read_text()
+    text = source.read_text(encoding="utf-8")
+    if INTERRUPT in text and sys.platform == "win32":
+        # A console process can only press Ctrl-C for its whole console.
+        pytest.skip("no way to send one process SIGINT on Windows")
     runner = run_interrupted if INTERRUPT in text else run
     expected = runner([str(PYTHON), str(source)], tmp_path)
     binary = E2E_DIR / "target" / "debug" / case
@@ -174,7 +187,7 @@ def test_bin_matches_python(case: str, bin_workspace: Workspace, tmp_path: Path)
     if match := EXPECT_ERROR.search(text):
         assert expected.stdout.startswith(actual.stdout), actual.stderr
         assert actual.returncode == 1
-        pattern = re.escape(match.group(1)).replace("ADDRESS", "0x[0-9a-f]+")
+        pattern = re.escape(match.group(1)).replace("ADDRESS", "0x[0-9a-fA-F]+")
         assert re.fullmatch(pattern, actual.last_stderr_line), actual.stderr
         return
     if case in KNOWN_DIFFERENCES:
@@ -256,7 +269,7 @@ def test_panic_exits_like_an_uncaught_exception(tmp_path: Path) -> None:
     """A Rust panic, e.g. in a function rewritten by hand, is reported like a
     Python exception and exits with 1 rather than Rust's 101."""
     source = tmp_path / "panicking.py"
-    source.write_text("print('before')\n")
+    source.write_text("print('before')\n", encoding="utf-8")
     workspace = make_workspace(
         "panic", ["panicking"], Mode.BIN, from_golden=False, source_dir=tmp_path
     )
@@ -269,7 +282,8 @@ def test_panic_exits_like_an_uncaught_exception(tmp_path: Path) -> None:
         "    let values: Vec<i32> = Vec::new();\n"
         "    rt::builtins::print(m.py(), (values[3],))?;\n"
         "    Ok(())\n"
-        "}\n"
+        "}\n",
+        encoding="utf-8",
     )
     result = workspace.cargo("build", "--workspace")
     assert result.returncode == 0, result.stderr
@@ -284,7 +298,7 @@ def test_ext_module_matches_python(tmp_path: Path) -> None:
     workspace = make_workspace("ext", ["fib"], Mode.EXT, from_golden=False)
     result = workspace.cargo("build", "--workspace", extension=True)
     assert result.returncode == 0, result.stderr
-    shutil.copyfile(E2E_DIR / "target-ext" / "debug" / "libfib.so", tmp_path / "fib.so")
+    shutil.copyfile(extension_library("fib"), tmp_path / f"fib{EXTENSION_SUFFIX}")
     expected = run([str(PYTHON), str(CASES_DIR / "fib.py")], tmp_path)
     actual = run([str(PYTHON), "-c", "import fib"], tmp_path)
     assert (actual.stdout, actual.returncode) == (expected.stdout, expected.returncode)
@@ -316,10 +330,10 @@ def default_lines_workspace() -> Workspace:
     )
     for case in DEFAULT_LINES_CASES:
         manifest = workspace.root / case / "Cargo.toml"
-        text = manifest.read_text()
+        text = manifest.read_text(encoding="utf-8")
         text = text.replace(f'name = "{case}"', f'name = "{case}{DEFAULT_SUFFIX}"')
         text = text.replace(f'name = "{case.replace("_", "-")}"', f'name = "{case}-default-lines"')
-        manifest.write_text(text)
+        manifest.write_text(text, encoding="utf-8")
     result = workspace.cargo("build", "--workspace")
     assert result.returncode == 0, result.stderr
     return workspace
@@ -339,7 +353,7 @@ def native_lines(source: Path) -> dict[str, set[int]]:
     """The lines a native frame of each function may report without the
     markers: its `def` line (the first decorator's, if any), 1 for the
     module."""
-    tree = ast.parse(source.read_text())
+    tree = ast.parse(source.read_text(encoding="utf-8"))
     lines: dict[str, set[int]] = {"<module>": {1}}
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):

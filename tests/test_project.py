@@ -13,13 +13,14 @@ from steelix.emit.crate import rust_layout
 from steelix.frontend.parse import parse_source
 from steelix.lower.module import ModuleRole, lower_module
 from steelix.project import ProjectError, cross_module_patches, find_project, resolve_relative
+from steelix.rustast.printer import string_literal
 
 
 def write(root: Path, files: dict[str, str]) -> None:
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
 
 
 def test_discovers_imported_project_modules(tmp_path: Path) -> None:
@@ -128,6 +129,24 @@ def test_namespace_packages(tmp_path: Path) -> None:
     assert "ns.unused.d" in project.modules
     project = find_project(tmp_path / "app.py", include=[str(tmp_path / "ns")])
     assert "ns.unused.d" not in project.modules
+
+
+def test_module_names_are_case_sensitive(tmp_path: Path) -> None:
+    """On a case-insensitive file system (macOS, Windows) `pkg/Item.py` and
+    `Pkg/` still do not exist when the files are `pkg/item.py` and `pkg/`:
+    like the path finder, the lookup compares the stored names."""
+    write(
+        tmp_path,
+        {
+            "app.py": "import pkg\nfrom pkg import Item\nimport Pkg.item\nimport Ns.a\n",
+            "pkg/__init__.py": "from .item import Item\n",
+            "pkg/item.py": "class Item: pass\n",
+            "ns/a.py": "",
+        },
+    )
+    project = find_project(tmp_path / "app.py")
+    assert list(project.modules) == ["pkg", "pkg.item"]
+    assert project.namespaces == {}
 
 
 def test_include_modules_and_directories(tmp_path: Path) -> None:
@@ -306,11 +325,11 @@ def test_cli_transpiles_a_project(tmp_path: Path, capsys) -> None:
         "plugins/mod.rs",
         "plugins/more.rs",
     ]
-    assert "pub mod core;" in (out / "src" / "pkg" / "mod.rs").read_text()
-    main_rs = (out / "src" / "main.rs").read_text()
+    assert "pub mod core;" in (out / "src" / "pkg" / "mod.rs").read_text(encoding="utf-8")
+    main_rs = (out / "src" / "main.rs").read_text(encoding="utf-8")
     assert 'NativeModule::package("pkg", pkg::exec_module),' in main_rs
     assert "run_project(" in main_rs
-    data = json.loads(report.read_text())
+    data = json.loads(report.read_text(encoding="utf-8"))
     assert [m["module"] for m in data["modules"]][:2] == ["app.py", "pkg/__init__.py"]
     assert data["total"]["functions"] == {"native": 0, "total": 1}
     assert data["features"][0]["feature"] == "asynchronous generator"
@@ -320,12 +339,12 @@ def test_cli_python_m(tmp_path: Path, monkeypatch) -> None:
     write(tmp_path, {"pkg/__init__.py": "", "pkg/__main__.py": "print(1)\n"})
     monkeypatch.chdir(tmp_path)
     assert main(["transpile", "-m", "pkg", "-o", "out", "-q"]) == 0
-    main_rs = (tmp_path / "out" / "src" / "main.rs").read_text()
+    main_rs = (tmp_path / "out" / "src" / "main.rs").read_text(encoding="utf-8")
     assert 'steelix_runtime::script!("pkg/__main__.py");' in main_rs
     assert 'run_module(&script, MODULES, "pkg.__main__")' in main_rs
-    build_rs = (tmp_path / "out" / "build.rs").read_text()
-    assert f'const PROJECT: &str = "{tmp_path.resolve()}";' in build_rs
-    assert 'name = "pkg"' in (tmp_path / "out" / "Cargo.toml").read_text()
+    build_rs = " ".join((tmp_path / "out" / "build.rs").read_text(encoding="utf-8").split())
+    assert f"const PROJECT: &str = {string_literal(str(tmp_path.resolve()))};" in build_rs
+    assert 'name = "pkg"' in (tmp_path / "out" / "Cargo.toml").read_text(encoding="utf-8")
     assert (tmp_path / "out" / "src" / "pkg" / "__main__.rs").is_file()
 
 
@@ -344,7 +363,7 @@ def test_ext_mode_package(tmp_path: Path) -> None:
     out = tmp_path / "out"
     args = ["transpile", "--mode", "ext", "-m", "pkg", "--root", str(tmp_path), "-o", str(out)]
     assert main([*args, "-q"]) == 0
-    lib_rs = (out / "src" / "lib.rs").read_text()
+    lib_rs = (out / "src" / "lib.rs").read_text(encoding="utf-8")
     assert '#[pymodule(name = "pkg")]' in lib_rs
     assert "steelix_runtime::init_extension(m, MODULES)?;" in lib_rs
     assert 'NativeModule::module("pkg.b", pkg::b::exec_module),' in lib_rs

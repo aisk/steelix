@@ -6,7 +6,18 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS and Windows have no bwrap: the dist tests that run programs
+        # in a sandbox are skipped there, and Windows has no distributions.
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Also on Windows, where pwsh would go on after a failing command of
+        # a multi-line step.
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -32,6 +43,7 @@ jobs:
           cache-all-crates: true
 
       - name: Install bubblewrap
+        if: runner.os == 'Linux'
         # The dist tests run the built program in a sandbox. Ubuntu 24.04
         # restricts unprivileged user namespaces, which bwrap needs.
         run: |
@@ -41,6 +53,12 @@ jobs:
 
       - name: Set up the environment
         run: uv sync --locked
+
+      - name: Point PyO3 at the virtual environment
+        if: runner.os == 'Windows'
+        # `.cargo/config.toml` names `.venv/bin/python`, which Windows does
+        # not have; the environment variable takes precedence over it.
+        run: echo "PYO3_PYTHON=$GITHUB_WORKSPACE/.venv/Scripts/python.exe" >> "$GITHUB_ENV"
 
       - name: Lint
         run: |

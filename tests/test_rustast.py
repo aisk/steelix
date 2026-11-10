@@ -475,6 +475,6 @@ def test_goldens_have_no_late_init_if_chains() -> None:
     found = {
         str(path.relative_to(root)): chains
         for path in sorted(root.rglob("*.rs"))
-        if (chains := _late_init_if_chains(path.read_text()))
+        if (chains := _late_init_if_chains(path.read_text(encoding="utf-8")))
     }
     assert found == {}

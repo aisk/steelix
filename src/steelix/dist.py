@@ -268,7 +268,7 @@ def _pth_warnings(site_packages: Path) -> list[str]:
     installs), which do not exist on another machine."""
     warnings = []
     for pth in sorted(site_packages.glob("*.pth")):
-        for line in pth.read_text(errors="replace").splitlines():
+        for line in pth.read_text(errors="replace", encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith(("#", "import ")) and os.path.isabs(line):
                 warnings.append(

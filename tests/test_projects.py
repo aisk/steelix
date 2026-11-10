@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import pytest
 from conftest import (
     DEV_PROFILE,
     E2E_DIR,
+    EXTENSION_SUFFIX,
     GOLDEN_DIR,
     PYTHON,
     ROOT,
@@ -26,6 +28,7 @@ from conftest import (
     Workspace,
     cargo_env,
     compiler_warnings,
+    extension_library,
 )
 from test_e2e import Outcome, run
 
@@ -137,7 +140,7 @@ def generated_sources(crate: Path) -> dict[str, str]:
     """The files under `src/` of a crate, by path relative to `src/`. They
     do not depend on where the project is (`build.rs` has its directory)."""
     return {
-        path.relative_to(crate / "src").as_posix(): path.read_text()
+        path.relative_to(crate / "src").as_posix(): path.read_text(encoding="utf-8")
         for path in sorted((crate / "src").rglob("*.rs"))
     }
 
@@ -153,12 +156,13 @@ def test_project_golden(name: str, update_golden: bool, tmp_path: Path) -> None:
             shutil.rmtree(golden_dir)
         for relative, text in actual.items():
             (golden_dir / relative).parent.mkdir(parents=True, exist_ok=True)
-            (golden_dir / relative).write_text(text)
+            (golden_dir / relative).write_text(text, encoding="utf-8")
         if not update_golden:
             pytest.fail(f"created missing golden {golden_dir}; review and commit it")
         return
     expected = {
-        p.relative_to(golden_dir).as_posix(): p.read_text() for p in golden_dir.rglob("*.rs")
+        p.relative_to(golden_dir).as_posix(): p.read_text(encoding="utf-8")
+        for p in golden_dir.rglob("*.rs")
     }
     assert sorted(actual) == sorted(expected), "the crate layout changed"
     for relative, text in actual.items():
@@ -182,7 +186,7 @@ def projects_workspace() -> Workspace:
         crates += [f'"{case.name}"', f'"{case.name}_default"']
     members = ", ".join(crates)
     manifest = f'[workspace]\nresolver = "3"\nmembers = [{members}]\n\n{DEV_PROFILE}'
-    (root / "Cargo.toml").write_text(manifest)
+    (root / "Cargo.toml").write_text(manifest, encoding="utf-8")
     shutil.copyfile(ROOT / "Cargo.lock", root / "Cargo.lock")
     workspace = Workspace(root, [case.name for case in CASES])
     result = workspace.cargo("build", "--workspace", "--message-format=json")
@@ -203,7 +207,16 @@ def test_projects_are_clippy_clean(projects_workspace: Workspace) -> None:
 
 
 def binary(case: Case) -> Path:
-    return E2E_DIR / "target" / "debug" / case.name
+    suffix = ".exe" if sys.platform == "win32" else ""
+    return E2E_DIR / "target" / "debug" / f"{case.name}{suffix}"
+
+
+def hide_dir(text: str, directory: Path) -> str:
+    """`text` with `directory` replaced by `<dir>`, also where it is in a
+    repr (with doubled backslashes on Windows)."""
+    for spelling in (repr(str(directory))[1:-1], str(directory)):
+        text = text.replace(spelling, "<dir>")
+    return text
 
 
 def without_runpy(outcome: Outcome) -> list[str]:
@@ -245,13 +258,13 @@ def test_ext_package_matches_python(tmp_path: Path) -> None:
     options = CrateOptions(mode=Mode.EXT, runtime_path=RUNTIME, standalone=False)
     emit_project(project, crate_root / "store", options)
     manifest = f'[workspace]\nresolver = "3"\nmembers = ["store"]\n\n{DEV_PROFILE}'
-    (crate_root / "Cargo.toml").write_text(manifest)
+    (crate_root / "Cargo.toml").write_text(manifest, encoding="utf-8")
     shutil.copyfile(ROOT / "Cargo.lock", crate_root / "Cargo.lock")
     workspace = Workspace(crate_root, ["store"])
     result = workspace.cargo("build", "--workspace", "--message-format=json", extension=True)
     assert result.returncode == 0, result.stderr + result.stdout
     assert not compiler_warnings(result.stdout, workspace)
-    shutil.copyfile(E2E_DIR / "target-ext" / "debug" / "libstore.so", tmp_path / "store.so")
+    shutil.copyfile(extension_library("store"), tmp_path / f"store{EXTENSION_SUFFIX}")
     code = (
         "import store\n"
         "from store.reports import render\n"
@@ -265,27 +278,22 @@ def test_ext_package_matches_python(tmp_path: Path) -> None:
     expected = run([str(PYTHON), "-B", "-c", code], root)
     actual = run([str(PYTHON), "-B", "-c", code], tmp_path)
     assert actual.returncode == expected.returncode == 0, actual.stderr
-    assert actual.stdout.replace(str(tmp_path), "<dir>") == expected.stdout.replace(
-        str(root), "<dir>"
-    )
+    assert hide_dir(actual.stdout, tmp_path) == hide_dir(expected.stdout, root)
     # `runpy` runs a transpiled submodule through `NativeLoader.get_code`.
     expected = run([str(PYTHON), "-B", "-m", "store.__main__"], root)
     actual = run([str(PYTHON), "-B", "-m", "store.__main__"], tmp_path)
     assert actual.returncode == expected.returncode == 0, actual.stderr
-    assert actual.stdout.replace(str(tmp_path), "<dir>") == expected.stdout.replace(
-        str(root), "<dir>"
-    )
+    assert hide_dir(actual.stdout, tmp_path) == hide_dir(expected.stdout, root)
     # Installed as `store/__init__.so` the extension module is a package
     # before it runs, so `python -m store` finds `store.__main__`.
     package = tmp_path / "package"
     (package / "store").mkdir(parents=True)
-    shutil.copyfile(tmp_path / "store.so", package / "store" / "__init__.so")
+    init = f"__init__{EXTENSION_SUFFIX}"
+    shutil.copyfile(tmp_path / f"store{EXTENSION_SUFFIX}", package / "store" / init)
     expected = run([str(PYTHON), "-B", "-m", "store"], root)
     actual = run([str(PYTHON), "-B", "-m", "store"], package)
     assert actual.returncode == expected.returncode == 0, actual.stderr
-    assert actual.stdout.replace(str(package), "<dir>") == expected.stdout.replace(
-        str(root), "<dir>"
-    )
+    assert hide_dir(actual.stdout, package) == hide_dir(expected.stdout, root)
 
 
 # `steelix test` (design §15): the project's own tests run with the program as
@@ -360,7 +368,7 @@ def test_steelix_test_runs_tests_natively(tmp_path: Path) -> None:
     native modules although the project directory is not on `sys.path`."""
     project = tmp_path / "inventory"
     shutil.copytree(PROJECTS_DIR / "inventory", project)
-    (project / "store" / "test_inside.py").write_text(INSIDE_TEST)
+    (project / "store" / "test_inside.py").write_text(INSIDE_TEST, encoding="utf-8")
     crate = tmp_path / "crate"
     result = steelix(
         "transpile", "-m", "store", "--root", str(project), "-o", str(crate), "-q", cwd=tmp_path
@@ -368,7 +376,7 @@ def test_steelix_test_runs_tests_natively(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     work = tmp_path / "work"
     (work / "tests").mkdir(parents=True)
-    (work / "tests" / "test_store.py").write_text(STORE_TESTS)
+    (work / "tests" / "test_store.py").write_text(STORE_TESTS, encoding="utf-8")
 
     result = steelix("test", str(crate), "--", "-p", "no:cacheprovider", "tests", cwd=work)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -381,7 +389,7 @@ def test_steelix_test_runs_tests_natively(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "1 passed" in result.stdout
 
-    (work / "tests" / "test_source.py").write_text(SOURCE_TEST)
+    (work / "tests" / "test_source.py").write_text(SOURCE_TEST, encoding="utf-8")
     result = steelix("test", str(crate), "-p", "no:cacheprovider", "tests", cwd=work)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "3 passed" in result.stdout
@@ -393,7 +401,7 @@ def test_skime_tests_run_natively(projects_workspace: Workspace, tmp_path: Path)
     """skime's own 108 tests (`tests/projects/skime/tests`, from skime 0.3.1)
     pass against the transpiled skime, like `steelix test` runs them."""
     shutil.copytree(PROJECTS_DIR / "skime" / "tests", tmp_path / "tests")
-    command, env = pytest_command(binary(BY_NAME["skime"]).with_name("skime_default"), [])
+    command, env = pytest_command(binary(BY_NAME["skime"]).with_stem("skime_default"), [])
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     proc = subprocess.run(
         [*command, "-p", "no:cacheprovider", "tests"],

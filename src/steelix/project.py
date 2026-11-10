@@ -188,6 +188,22 @@ class _Finder:
         self.failed: set[str] = set()
         self.noted: set[str] = set()
         self.namespaces: dict[str, str] = {}
+        self.listings: dict[Path, frozenset[str]] = {}
+
+    def listdir(self, directory: Path) -> frozenset[str]:
+        """The names in `directory`, spelled as they are stored, cached like
+        the path finder's (the project does not change while it is found).
+        Module names are compared with them exactly, also on case-insensitive
+        file systems (macOS, Windows), where `Path.is_file` would find
+        `Inventory.py` for `inventory.py`."""
+        names = self.listings.get(directory)
+        if names is None:
+            try:
+                names = frozenset(os.listdir(directory))
+            except OSError:
+                names = frozenset()
+            self.listings[directory] = names
+        return names
 
     def is_excluded(self, name: str) -> bool:
         return any(name == e or name.startswith(e + ".") for e in self.exclude)
@@ -212,21 +228,27 @@ class _Finder:
         directory = self.root
         for i, part in enumerate(parts):
             last = i == len(parts) - 1
-            if any((directory / part / f"__init__{s}").is_file() for s in _EXTENSIONS):
+            names = self.listdir(directory)
+            # Like the path finder, only the directory's name is compared
+            # exactly; `__init__` is looked up by path.
+            package = part in names
+            if package and any((directory / part / f"__init__{s}").is_file() for s in _EXTENSIONS):
                 return None
             init = directory / part / "__init__.py"
-            if init.is_file():
+            if package and init.is_file():
                 if last:
                     return SourceModule(name, self.relpath(init), True)
                 directory = directory / part
                 continue
-            if any((directory / f"{part}{s}").is_file() for s in _EXTENSIONS):
+            if any(
+                f"{part}{s}" in names and (directory / f"{part}{s}").is_file() for s in _EXTENSIONS
+            ):
                 return None
-            if (directory / f"{part}.py").is_file():
+            if f"{part}.py" in names and (directory / f"{part}.py").is_file():
                 if last:
                     return SourceModule(name, self.relpath(directory / f"{part}.py"), False)
                 return None
-            if not (directory / part).is_dir():
+            if not package or not (directory / part).is_dir():
                 return None
             directory = directory / part
             if last:

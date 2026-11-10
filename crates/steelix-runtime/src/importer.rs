@@ -8,7 +8,7 @@
 //! (`__name__`, `__file__`, `__spec__`, `__path__`, ..) that importing the
 //! source would have created.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf};
 
 use pyo3::exceptions::PyImportError;
 use pyo3::prelude::*;
@@ -52,11 +52,12 @@ impl NativeModule {
         }
     }
 
-    /// The source file relative to the project directory.
+    /// The source file relative to the project directory, with the
+    /// platform's separator, as the path finder spells it.
     pub fn path(&self) -> String {
-        let path = self.name.replace('.', "/");
+        let path = self.name.replace('.', MAIN_SEPARATOR_STR);
         if self.package {
-            path + "/__init__.py"
+            path + MAIN_SEPARATOR_STR + "__init__.py"
         } else {
             path + ".py"
         }
@@ -103,7 +104,7 @@ impl NativeImporter {
 
     /// The absolute path of a module's source file, its `__file__`.
     fn location(&self, module: &NativeModule) -> String {
-        format!("{}/{}", self.root, module.path())
+        format!("{}{MAIN_SEPARATOR}{}", self.root, module.path())
     }
 
     /// Whether [`find_spec`](Self::find_spec) answers for `module` only
@@ -210,6 +211,18 @@ pub(crate) fn resolve(path: &Path) -> PathBuf {
     }
 }
 
+/// `path` split at its last separator (`/`, also `\` on Windows) into
+/// the directory and the file name.
+fn split_file_name(path: &str) -> Option<(&str, &str)> {
+    let index = path.rfind(std::path::is_separator)?;
+    Some((&path[..index], &path[index + 1..]))
+}
+
+/// The directory part of `path`, or `default` if it has none.
+fn directory<'a>(path: &'a str, default: &'a str) -> &'a str {
+    split_file_name(path).map_or(default, |(dir, _)| dir)
+}
+
 #[pymethods]
 impl NativeImporter {
     /// `importlib.abc.MetaPathFinder.find_spec`: the spec importing the
@@ -238,7 +251,7 @@ impl NativeImporter {
         let kwargs = PyDict::new(py);
         kwargs.set_item("loader", Bound::new(py, loader)?)?;
         if module.package {
-            let directory = location.rsplit_once('/').map_or("", |(dir, _)| dir);
+            let directory = directory(&location, "");
             kwargs.set_item("submodule_search_locations", PyList::new(py, [directory])?)?;
         } else {
             kwargs.set_item("submodule_search_locations", py.None())?;
@@ -486,23 +499,23 @@ pub fn init_extension(m: &Bound<'_, PyModule>, modules: &'static [NativeModule])
         _ => return Err(PyImportError::new_err("extension module without __file__")),
     };
     let name: String = m.name()?.extract()?;
-    let mut root = file.rsplit_once('/').map_or(".", |(dir, _)| dir).to_owned();
+    let mut root = directory(&file, ".");
     // Installed as the package's `__init__` (`pkg/__init__.so`), the
     // extension module is a package from the start, which `python -m pkg`
     // needs: the project directory is above the package's directory.
-    let (_, file_name) = file.rsplit_once('/').unwrap_or(("", &file));
+    let file_name = split_file_name(&file).map_or(file.as_str(), |(_, name)| name);
     if file_name.starts_with("__init__.") {
         for _ in name.split('.') {
-            root = root.rsplit_once('/').map_or(".", |(dir, _)| dir).to_owned();
+            root = directory(root, ".");
         }
     }
+    let root = root.to_owned();
     let importer = install_importer(py, &root, modules)?;
     if let Some(module) = importer.get().get(&name)
         && module.package
     {
         let path = importer.get().location(module);
-        let directory = path.rsplit_once('/').map_or("", |(dir, _)| dir);
-        let search = PyList::new(py, [directory])?;
+        let search = PyList::new(py, [directory(&path, "")])?;
         globals.set_item("__path__", &search)?;
         globals.set_item("__package__", &name)?;
         if let Some(spec) = globals.get_item("__spec__")?
@@ -522,14 +535,19 @@ mod tests {
     fn resolves_paths_that_do_not_exist() {
         let dir = std::env::temp_dir().join(format!("steelix-resolve-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("root")).unwrap();
-        std::os::unix::fs::symlink(dir.join("root"), dir.join("link")).unwrap();
         let root = std::fs::canonicalize(dir.join("root")).unwrap();
-        // A package directory that is not there (no sources), through a
-        // link, `.` and `..`.
+        // A package directory that is not there (no sources), through `.`
+        // and `..`, and on Unix through a link (Windows needs a privilege
+        // to create one).
         assert_eq!(resolve(&dir.join("root/pkg")), root.join("pkg"));
-        assert_eq!(resolve(&dir.join("link/pkg/sub")), root.join("pkg/sub"));
-        assert_eq!(resolve(&dir.join("link/./x/../pkg")), root.join("pkg"));
+        assert_eq!(resolve(&dir.join("root/./x/../pkg")), root.join("pkg"));
         assert_ne!(resolve(&dir.join("root/other")), root.join("pkg"));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.join("root"), dir.join("link")).unwrap();
+            assert_eq!(resolve(&dir.join("link/pkg/sub")), root.join("pkg/sub"));
+            assert_eq!(resolve(&dir.join("link/./x/../pkg")), root.join("pkg"));
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -136,13 +136,15 @@ def test_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert len(json.loads(capsys.readouterr().out)["classes"]) == 6
     output = tmp_path / "point.rs"
     assert main(["attrs", app, "--pyclass", "shapes.Point", "-o", str(output)]) == 0
-    assert output.read_text().startswith("// DRAFT of a `#[pyclass]` for class `Point`")
+    assert output.read_text(encoding="utf-8").startswith(
+        "// DRAFT of a `#[pyclass]` for class `Point`"
+    )
     assert main(["attrs", "-m", "app", "--root", str(SHAPES), "--class", "Size"]) == 0
     assert "class shapes.Size" in capsys.readouterr().out
     assert main(["attrs", app, "--class", "Nope"]) == 2
     assert "no class 'Nope'" in capsys.readouterr().err
-    (tmp_path / "a.py").write_text("import b\n\nclass C:\n    pass\n")
-    (tmp_path / "b.py").write_text("class C:\n    pass\n")
+    (tmp_path / "a.py").write_text("import b\n\nclass C:\n    pass\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("class C:\n    pass\n", encoding="utf-8")
     assert main(["attrs", str(tmp_path / "a.py"), "--pyclass", "C"]) == 2
     assert "'C' is ambiguous: a.C, b.C" in capsys.readouterr().err
     assert main(["attrs", str(tmp_path / "a.py"), "--pyclass", "b.C"]) == 0
@@ -184,14 +186,15 @@ def test_drafts_are_valid_pyo3() -> None:
     (crate / "src").mkdir(parents=True)
     (crate / "Cargo.toml").write_text(
         '[package]\nname = "attrs-drafts"\nversion = "0.0.0"\nedition = "2024"\n\n'
-        '[dependencies]\npyo3 = "0.30"\n\n[workspace]\n'
+        '[dependencies]\npyo3 = "0.30"\n\n[workspace]\n',
+        encoding="utf-8",
     )
     shutil.copyfile(ROOT / "Cargo.lock", crate / "Cargo.lock")
     names = [*(n.lower() for n in DRAFTS), "skime_context"]
     for name in names:
-        text = (GOLDEN / f"{name}.rs").read_text().replace(", extends = Base", "")
-        (crate / "src" / f"{name}.rs").write_text(text)
-    (crate / "src" / "lib.rs").write_text("".join(f"mod {n};\n" for n in names))
+        text = (GOLDEN / f"{name}.rs").read_text(encoding="utf-8").replace(", extends = Base", "")
+        (crate / "src" / f"{name}.rs").write_text(text, encoding="utf-8")
+    (crate / "src" / "lib.rs").write_text("".join(f"mod {n};\n" for n in names), encoding="utf-8")
     result = subprocess.run(
         ["cargo", "check", "--offline"],
         cwd=crate,
