@@ -63,6 +63,55 @@ pub fn load<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Boun
     }
     Ok(list.into_any())
 }
+
+pub mod item {
+    use super::*;
+
+    // inventory.py:4
+    /// The body of `class Item`, run in its namespace `ns`.
+    #[rt::frame(ns, "Item", 4)]
+    pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
+        rt::def!(ns, __init__(slf as "self", name, price, qty = 1))?;
+        rt::def!(ns, total(slf as "self"))?;
+        Ok(())
+    }
+
+    // inventory.py:5
+    #[rt::frame(m, "Item.__init__", 5)]
+    pub fn __init__<'py>(
+        m: &rt::Module<'py>,
+        slf: &Bound<'py, PyAny>,
+        name: &Bound<'py, PyAny>,
+        price: &Bound<'py, PyAny>,
+        qty: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        slf.set_attr("name", name)?;
+        slf.set_attr("price", price)?;
+        slf.set_attr("qty", qty)?;
+        Ok(rt::none(m.py()))
+    }
+
+    // inventory.py:10
+    #[rt::frame(m, "Item.total", 10)]
+    pub fn total<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        slf.attr("price")?.mul(slf.attr("qty")?)
+    }
+}
+```
+
+The module body creates the class from that `body` function, the way Python executes a `class` statement:
+
+```rust
+m.set_global(
+    "Item",
+    rt::class!(
+        m,
+        "Item"(),
+        item::body,
+        line = 4,
+        attributes = ["name", "price", "qty"]
+    )?,
+)?;
 ```
 
 `cargo build` in `out/` produces an executable that embeds libpython and prints `6`, like `python inventory.py`. `Item` is still a real Python class whose methods are native functions, and `load` is a real Python function (`inspect.signature`, pickling and monkeypatching still work).
