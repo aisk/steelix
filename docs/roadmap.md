@@ -408,7 +408,8 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] PyPI 发布 steelix 0.1.0，git tag `v0.1.0`
 - [x] `steelix-runtime` 0.1.0 发布到 crates.io，从 PyPI 安装的 steelix 生成的 crate 可以直接构建（已验证）
 - [ ] 0.2.0：版本号、`RUNTIME_VERSION = "0.2"` 和 tag `v0.2.0` 已就绪（runtime 的公开接口自 M13 起不兼容，所以不是 0.1.1），待发布到 PyPI 和 crates.io
-- [ ] 0.3.0：`rt::frame!` 换成 `#[rt::frame]`、`frame.matches` 去掉行号，runtime 的公开接口不兼容，`RUNTIME_VERSION = "0.3"`，tag `v0.3.0`。`steelix-runtime-macros` 和 `steelix-runtime` 0.3.0 已发布到 crates.io，PyPI 待发布（下次改动之前先发）
+- [x] 0.3.0：`rt::frame!` 换成 `#[rt::frame]`、`frame.matches` 去掉行号，runtime 的公开接口不兼容，`RUNTIME_VERSION = "0.3"`，tag `v0.3.0`。`steelix-runtime-macros` 和 `steelix-runtime` 0.3.0 已发布到 crates.io，没有发 PyPI：发布时本地缺远端的 macOS 和 Windows 两个提交，runtime 0.3.0 不含它们
+- [ ] 0.3.1：合并了 macOS 和 Windows 的支持，tag `v0.3.1`。`steelix-runtime` 0.3.1 已发布到 crates.io（宏 crate 没有变化，仍是 0.3.0），PyPI 待发布（下次改动之前先发）
 - [ ] 以后每次发版：PyPI 和 crates.io 同步，`RUNTIME_VERSION` 与 runtime 的版本一致（design §14）
 
 ## 以后再说
