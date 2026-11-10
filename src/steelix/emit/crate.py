@@ -31,7 +31,7 @@ from steelix.rustast.printer import print_file, string_literal
 from steelix.rustast.verify import verify
 
 PYO3_VERSION = "0.30"
-RUNTIME_VERSION = "0.2"
+RUNTIME_VERSION = "0.3"
 
 # Crate-wide lint configuration. Python naming does not follow Rust's, Python
 # functions may ignore their parameters, and Python code may assign values it

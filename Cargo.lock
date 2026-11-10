@@ -109,7 +109,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 
 [[package]]
 name = "steelix-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "pyo3",
@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "steelix-runtime-macros"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "syn"
