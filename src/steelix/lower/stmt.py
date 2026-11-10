@@ -67,7 +67,7 @@ class StmtLowering(HandlingLowering, MatchLowering):
         """The `case` clauses being lowered, innermost last."""
         self.exprs.line = line
         self.frame_line = line
-        """The line of the frame header (`rt::frame!(m, "f", line, ..)`), which
+        """The line of the frame header (`#[rt::frame(m, "f", line)]`), which
         stays the traceback line without `--traceback-lines`."""
         self.line = line
         """The traceback line of the frame at this point of the generated

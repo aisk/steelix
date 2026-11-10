@@ -241,8 +241,8 @@ pub(super) fn set_handled_exception(_py: Python<'_>, exception: Option<&Bound<'_
     unsafe { ffi::PyErr_SetHandledException(exception) };
 }
 
-/// For the traceback frame of a body (`rt::frame!` with an `async`
-/// closure): the exception thrown into a coroutine or generator that has
+/// For the traceback frame of a body (`#[rt::frame]` on an `async fn`):
+/// the exception thrown into a coroutine or generator that has
 /// not started, which CPython raises before the first statement.
 pub(crate) fn thrown_at_start() -> impl Future<Output = Option<PyErr>> {
     std::future::poll_fn(|cx| Poll::Ready(channel(cx).and_then(Channel::take_thrown)))

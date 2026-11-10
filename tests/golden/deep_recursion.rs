@@ -5,18 +5,17 @@ use steelix_runtime as rt;
 // CPython reports "maximum recursion depth exceeded"; transpiled code is only
 // bounded by the C stack and reports "Stack overflow (used N kB)".
 // deep_recursion.py:6
+#[rt::frame(m, "depth", 6, recursive)]
 pub fn depth<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let _guard = rt::RecursionGuard::enter(m.py())?;
-    rt::frame!(m, "depth", 6, |_| { depth(m, &n.add(1)?) })
+    depth(m, &n.add(1)?)
 }
 
 /// Executes the body of `deep_recursion.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |_| {
-        rt::def!(m, depth(n))?;
-        rt::builtins::print(py, ("start",))?;
-        depth(m, &rt::int(py, 0))?;
-        Ok(())
-    })
+    rt::def!(m, depth(n))?;
+    rt::builtins::print(py, ("start",))?;
+    depth(m, &rt::int(py, 0))?;
+    Ok(())
 }

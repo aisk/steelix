@@ -7,9 +7,8 @@ pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 }
 
 /// Executes the body of `plugins/static.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    rt::frame!(m, "<module>", 1, |_| {
-        rt::def!(m, run())?;
-        Ok(())
-    })
+    rt::def!(m, run())?;
+    Ok(())
 }

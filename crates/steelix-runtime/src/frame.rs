@@ -2,7 +2,7 @@
 //!
 //! Native functions have no Python frame while they run. Like Cython, they
 //! add one to the traceback of an exception on its way out instead: every
-//! generated function body runs inside [`frame!`](crate::frame), which knows
+//! generated function has the attribute [`frame`](macro@crate::frame), which knows
 //! the Python file, the function's qualified name and its `def` line.
 //! Tracebacks of uncaught exceptions and `traceback.extract_tb` then have
 //! CPython's frames, with the `def` line for native ones. Code generated with
@@ -33,6 +33,7 @@ use crate::Module;
 pub struct Code {
     qualname: &'static str,
     first_line: u32,
+    recursive: bool,
     object: PyOnceLock<Py<PyAny>>,
 }
 
@@ -43,8 +44,17 @@ impl Code {
         Self {
             qualname,
             first_line,
+            recursive: false,
             object: PyOnceLock::new(),
         }
+    }
+
+    /// For a function that may call itself with direct Rust calls: each
+    /// call checks the stack first ([`RecursionGuard`](crate::RecursionGuard)),
+    /// so that unbounded recursion raises `RecursionError`.
+    pub const fn recursive(mut self) -> Self {
+        self.recursive = true;
+        self
     }
 
     fn is_module(&self) -> bool {
@@ -87,7 +97,7 @@ impl Code {
 }
 
 /// The traceback frame of one call of a native function, or of the module
-/// body. Created by [`frame!`](crate::frame).
+/// body. Created by [`#[rt::frame]`](macro@crate::frame).
 pub struct Frame<'a, 'py> {
     /// Borrowed from the module: the frame of a suspended coroutine adds no
     /// reference to the globals that the GC can not see.
@@ -207,18 +217,23 @@ impl<'py> Scope<'py> for crate::Namespace<'py> {
 }
 
 /// Runs the body of a native function (or module, or class) in a traceback
-/// frame. Use it through [`frame!`](crate::frame).
+/// frame. Use it through [`#[rt::frame]`](macro@crate::frame).
 pub fn run<'py, T>(
     scope: &impl Scope<'py>,
     code: &'static Code,
     body: impl FnOnce(&Frame<'_, 'py>) -> PyResult<T>,
 ) -> PyResult<T> {
+    // Before the frame: `RecursionError` is raised in the caller.
+    let _guard = match code.recursive {
+        true => Some(crate::RecursionGuard::enter(scope.globals().py())?),
+        false => None,
+    };
     let frame = Frame::new(scope, code, false);
     body(&frame).map_err(|err| PyErr::from_value(frame.take(err)))
 }
 
 /// Runs the body of a native coroutine or generator in a traceback frame:
-/// [`frame!`](crate::frame) with an `async` closure.
+/// [`#[rt::frame]`](macro@crate::frame) on an `async fn`.
 ///
 /// The frame lives as long as the body, across its suspensions, so an
 /// exception gets one entry for it however often the body was resumed. An
@@ -305,19 +320,34 @@ impl<'f, 'py> Frame<'f, 'py> {
         self.entered.set(entered);
     }
 
-    /// `except handler:` on `line`, where `handler` is not a builtin
-    /// exception class: evaluates `handler` and tells whether `err` is an
-    /// instance of it (or of a class in a tuple of classes).
+    /// `except handler:`, where `handler` is not a builtin exception class:
+    /// evaluates `handler` and tells whether `err` is an instance of it (or
+    /// of a class in a tuple of classes).
     ///
     /// Like CPython, the handler expression runs with `err` as the exception
-    /// being handled, on the line of the `except`: an exception it raises,
-    /// or the `TypeError` for a handler that is not an exception class, has
-    /// `err` as its `__context__` and is reported on that line.
+    /// being handled: an exception it raises, or the `TypeError` for a
+    /// handler that is not an exception class, has `err` as its
+    /// `__context__`.
     ///
     /// ```ignore
-    /// Err(err) if frame.matches(&err, 7, || m.global("ParseError"))? => { .. }
+    /// Err(err) if frame.matches(&err, || m.global("ParseError"))? => { .. }
     /// ```
     pub fn matches(
+        &self,
+        err: &PyErr,
+        handler: impl FnOnce() -> PyResult<Bound<'py, PyAny>>,
+    ) -> PyResult<bool> {
+        self.matches_at(err, self.line.get(), handler)
+    }
+
+    /// [`Frame::matches`] for an `except` on `line` (`--traceback-lines`):
+    /// the handler expression is evaluated on that line, where its errors
+    /// are reported, and the frame stays there.
+    ///
+    /// ```ignore
+    /// Err(err) if frame.matches_at(&err, 7, || m.global("ParseError"))? => { .. }
+    /// ```
+    pub fn matches_at(
         &self,
         err: &PyErr,
         line: u32,
@@ -952,44 +982,4 @@ fn traceback_type(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
             Ok(py.import("types")?.getattr("TracebackType")?.unbind())
         })
         .map(|tb| tb.bind(py))
-}
-
-/// Runs the body of a generated function in a traceback [`Frame`]:
-///
-/// ```ignore
-/// pub fn parse<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-///     rt::frame!(m, "parse", 10, |_| {
-///         let value = text.call_method0("strip")?;
-///         ..
-///     })
-/// }
-/// ```
-///
-/// The closure gets the [`Frame`] (`|frame|`) when the body raises or
-/// handles exceptions, or records statement lines (`--traceback-lines`).
-///
-/// The arguments are the module, the function's `__qualname__` (`<module>`
-/// for the module body) and the line of its `def`. A class body passes its
-/// namespace instead of the module, its `__qualname__` and the line of its
-/// first decorator (or `class`).
-///
-/// In the body of a native coroutine or generator (an `async fn`) the
-/// closure is `async`, and the macro awaits it:
-///
-/// ```ignore
-/// rt::frame!(m, "fetch", 1, async |_| {
-///     let resp = rt::await_(session.method1("get", (&url,))?).await?;
-///     rt::await_(resp.method0("text")?).await
-/// })
-/// ```
-#[macro_export]
-macro_rules! frame {
-    ($module:expr, $qualname:literal, $line:literal, async $($body:tt)+) => {{
-        static CODE: $crate::frame::Code = $crate::frame::Code::new($qualname, $line);
-        $crate::frame::run_async(&$module, &CODE, async $($body)+).await
-    }};
-    ($module:expr, $qualname:literal, $line:literal, $body:expr $(,)?) => {{
-        static CODE: $crate::frame::Code = $crate::frame::Code::new($qualname, $line);
-        $crate::frame::run($module, &CODE, $body)
-    }};
 }

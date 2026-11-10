@@ -43,24 +43,23 @@ pub mod k {
 
     // docstrings.py:8
     /// The body of `class K`, run in its namespace `ns`.
+    #[rt::frame(ns, "K", 8)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "K", 8, |_| {
-            ns.set(
-                "__doc__",
-                "Class doc.\n\
-                    \n\
-                    More.\n",
-            )?;
-            rt::def!(
-                ns,
-                method(slf as "self", a, b = 1),
-                doc = "Method doc.\n\
-                    \n\
-                    \x20   code block\n\
-                    trailing"
-            )?;
-            Ok(())
-        })
+        ns.set(
+            "__doc__",
+            "Class doc.\n\
+                \n\
+                More.\n",
+        )?;
+        rt::def!(
+            ns,
+            method(slf as "self", a, b = 1),
+            doc = "Method doc.\n\
+                \n\
+                \x20   code block\n\
+                trailing"
+        )?;
+        Ok(())
     }
 
     // docstrings.py:14
@@ -79,46 +78,45 @@ pub mod k {
 }
 
 /// Executes the body of `docstrings.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |_| {
-        m.set_global(
-            "__doc__",
-            "Docstrings of several lines are printed one line per source line in the\n\
-                Rust literal, joined by `\\` continuations, and keep their exact value.\n\
-                \n\
-                \x20  Indented line.\n",
-        )?;
-        m.set_global("K", rt::class!(m, "K"(), k::body, line = 8)?)?;
-        rt::def!(
-            m,
-            f(x),
-            doc = "Summary line.\n\
-                \n\
-                Details here with \"quotes\" and \\ backslash  tab.\n\
-                \x20 indented two\n"
-        )?;
-        rt::def!(m, g(), doc = "One line only.")?;
-        rt::def!(
-            m,
-            h(),
-            doc = "Tabs    inside and a tab        \n\
-                \x20   starting a line, trailing spaces  \n\
-                ünïcødé, a lone \\ and an escaped \" quote.\n\
-                \n\
-                \u{c} form feed\u{b} vertical tab\n"
-        )?;
-        rt::def!(m, k(), doc = "Ends with blank lines.")?;
-        rt::builtins::print(py, (m.global("__doc__")?.repr()?,))?;
-        rt::builtins::print(py, (m.global("K")?.attr("__doc__")?.repr()?,))?;
-        rt::builtins::print(
-            py,
-            (m.global("K")?.attr("method")?.attr("__doc__")?.repr()?,),
-        )?;
-        rt::builtins::print(py, (m.global("f")?.attr("__doc__")?.repr()?,))?;
-        rt::builtins::print(py, (m.global("g")?.attr("__doc__")?.repr()?,))?;
-        rt::builtins::print(py, (m.global("h")?.attr("__doc__")?.repr()?,))?;
-        rt::builtins::print(py, (m.global("k")?.attr("__doc__")?.repr()?,))?;
-        Ok(())
-    })
+    m.set_global(
+        "__doc__",
+        "Docstrings of several lines are printed one line per source line in the\n\
+            Rust literal, joined by `\\` continuations, and keep their exact value.\n\
+            \n\
+            \x20  Indented line.\n",
+    )?;
+    m.set_global("K", rt::class!(m, "K"(), k::body, line = 8)?)?;
+    rt::def!(
+        m,
+        f(x),
+        doc = "Summary line.\n\
+            \n\
+            Details here with \"quotes\" and \\ backslash  tab.\n\
+            \x20 indented two\n"
+    )?;
+    rt::def!(m, g(), doc = "One line only.")?;
+    rt::def!(
+        m,
+        h(),
+        doc = "Tabs    inside and a tab        \n\
+            \x20   starting a line, trailing spaces  \n\
+            ünïcødé, a lone \\ and an escaped \" quote.\n\
+            \n\
+            \u{c} form feed\u{b} vertical tab\n"
+    )?;
+    rt::def!(m, k(), doc = "Ends with blank lines.")?;
+    rt::builtins::print(py, (m.global("__doc__")?.repr()?,))?;
+    rt::builtins::print(py, (m.global("K")?.attr("__doc__")?.repr()?,))?;
+    rt::builtins::print(
+        py,
+        (m.global("K")?.attr("method")?.attr("__doc__")?.repr()?,),
+    )?;
+    rt::builtins::print(py, (m.global("f")?.attr("__doc__")?.repr()?,))?;
+    rt::builtins::print(py, (m.global("g")?.attr("__doc__")?.repr()?,))?;
+    rt::builtins::print(py, (m.global("h")?.attr("__doc__")?.repr()?,))?;
+    rt::builtins::print(py, (m.global("k")?.attr("__doc__")?.repr()?,))?;
+    Ok(())
 }

@@ -239,7 +239,7 @@ def test_conditions_use_rust_operators() -> None:
     )
     assert "if a.is_truthy()? && !b.is_truthy()? || a.is_none() {" in out
     # The middle operand of a chain is evaluated once.
-    assert "let len = xs.len()?;\n        if 0 < len && len <= 3 && !xs.contains(a)? {" in out
+    assert "let len = xs.len()?;\n    if 0 < len && len <= 3 && !xs.contains(a)? {" in out
 
 
 def test_builtin_special_cases_respect_rebinding() -> None:
@@ -268,7 +268,7 @@ def test_for_loop_variable_scoped_to_the_body() -> None:
                 print(x)
         """
     )
-    assert "for x in rt::iter(xs)? {\n            let x = x?;" in out
+    assert "for x in rt::iter(xs)? {\n        let x = x?;" in out
 
 
 def test_imports_bind_names() -> None:
@@ -300,7 +300,8 @@ def test_py_is_bound_once_or_spelled_in_place() -> None:
     )
     assert "pub fn once<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {" in out
     assert "Ok(rt::none(m.py()))" in out
-    assert 'let py = m.py();\n    rt::frame!(m, "twice", 5, |_| {' in out
+    assert '#[rt::frame(m, "twice", 5)]' in out
+    assert ") -> PyResult<Bound<'py, PyAny>> {\n    let py = m.py();\n" in out
     assert "Ok(PyList::new(py, [x, &rt::int(py, 1)" in out
 
 
@@ -329,7 +330,7 @@ def test_literal_defaults_are_passed_in_place() -> None:
         """
     )
     args = ["&rt::int(py, 1)", '&rt::str(py, "x")', "&rt::none(py)", '&m.default("f", "d")?']
-    assert ",\n            ".join(args) in out
+    assert ",\n        ".join(args) in out
 
 
 def test_assigned_defaults_are_read_from_the_function() -> None:
@@ -379,7 +380,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
         """
     )
     assert out.count("rt::exec_python!(") == 3
-    comments = "// about the class\n        // m.py:4, kept as Python: type parameters at 4:1\n"
+    comments = "// about the class\n    // m.py:4, kept as Python: type parameters at 4:1\n"
     assert comments in out
     assert "// inside the class" not in out
     assert '"\nclass A[T]:\n    # inside the class\n    pass\n"' in out
@@ -393,7 +394,7 @@ def test_each_python_def_or_class_has_its_own_block() -> None:
 def test_python_statement_after_semicolon() -> None:
     out = lower("x = 1; y = t'ab'; print(y)\n")
     assert 'm.set_global("x", 1)?;' in out
-    assert "line = 1,\n            r#\"\ny = t'ab'\n\"#" in out
+    assert "line = 1,\n        r#\"\ny = t'ab'\n\"#" in out
     assert 'rt::builtins::print(m.py(), (m.global("y")?,))?;' in out
 
 
@@ -422,7 +423,7 @@ def test_future_annotations_reach_python_code() -> None:
             x: int
         """
     )
-    assert "line = 3,\n            future_annotations,\n" in out
+    assert "line = 3,\n        future_annotations,\n" in out
 
 
 def kept_lines(source: str) -> list[int]:
@@ -553,19 +554,19 @@ def check(x):
 
 def test_no_line_markers_by_default() -> None:
     """Native frames report their `def` line (design §9): no `frame.line(n)`,
-    and `|_|` where the body does not use the frame."""
+    and the attribute names the frame only where the body uses it."""
     out = lower(TRACEBACK_SOURCE)
     assert "frame.line(" not in out
-    assert 'rt::frame!(m, "total", 2, |_| {' in out
-    assert 'rt::frame!(m, "check", 8, |frame| {' in out
+    assert '#[rt::frame(m, "total", 2)]' in out
+    assert '#[rt::frame(m, "check", 8, frame)]' in out
     assert "frame.raise(PyValueError::new_err(" in out
-    assert 'rt::frame!(m, "<module>", 1, |_| {' in out
+    assert '#[rt::frame(m, "<module>", 1)]' in out
 
 
 def test_traceback_lines_marks_statements() -> None:
     parsed = parse_source(textwrap.dedent(TRACEBACK_SOURCE), "m")
     out = render_module(parsed, traceback_lines=True)
-    assert 'rt::frame!(m, "total", 2, |frame| {' in out
+    assert '#[rt::frame(m, "total", 2, frame)]' in out
     for line in (4, 5, 9, 10):
         assert f"frame.line({line});" in out
     # Without the markers the code is the same, except that a `for` loop
@@ -576,16 +577,17 @@ def test_traceback_lines_marks_statements() -> None:
     def normalized(code: str) -> str:
         skipped = ("frame.line(", "check_signals", "let py = m.py();")
         lines = [line for line in code.splitlines() if not any(s in line for s in skipped)]
-        code = "\n".join(lines).replace("|frame|", "|_|").replace("m.py()", "py")
+        code = "\n".join(lines).replace(", frame)]", ")]").replace("m.py()", "py")
         return re.sub(r"rt::iter\(&?([\w.]+)\)\?", r"\1.try_iter()?", code)
 
     assert "py.check_signals()?;" in out
     assert normalized(out) == normalized(default)
 
 
-def test_single_expression_frame_keeps_braces() -> None:
+def test_frame_is_an_attribute_of_the_fn() -> None:
     out = lower("def double(x):\n    return x * 2\n")
-    assert 'rt::frame!(m, "double", 1, |_| { x.mul(2) })' in out
+    assert '#[rt::frame(m, "double", 1)]\npub fn double<' in out
+    assert "{\n    x.mul(2)\n}" in out
 
 
 def test_coroutines_are_awaited_in_place_only_by_await() -> None:

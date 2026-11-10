@@ -115,7 +115,12 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "smallvec",
+ "steelix-runtime-macros",
 ]
+
+[[package]]
+name = "steelix-runtime-macros"
+version = "0.2.0"
 
 [[package]]
 name = "syn"

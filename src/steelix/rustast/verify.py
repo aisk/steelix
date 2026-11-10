@@ -152,6 +152,9 @@ class _Verifier:
             match = _BOUND_TYPE.search(param.ty)
             ty = match.group(1) if match and match.group(1) != "PyAny" else None
             scope.locals[param.name] = ty
+        # `#[rt::frame(m, "f", 1, frame)]` names the frame for the body.
+        if any(a.startswith("rt::frame(") and ", frame" in a.rsplit('"', 1)[-1] for a in fn.attrs):
+            scope.locals["frame"] = None
         self.block(fn.body, scope)
         self.fn, self.labels = saved
 

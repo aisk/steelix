@@ -88,12 +88,9 @@ def lower_function(
     first_line = _first_line(fn)
     lowering = StmtLowering(ctx, line=first_line)
 
-    guard: list[rs.Stmt] = []
     # A coroutine or generator checks the stack each time it is resumed, and
     # `rt::delegate` at each direct await (design §8).
-    if fn in module.callgraph.recursive and not info.is_async:
-        enter = rs.Call(rs.Path("rt::RecursionGuard::enter"), (rs.Path("py"),))
-        guard.append(rs.Let("_guard", init=rs.Try(enter)))
+    recursive = fn in module.callgraph.recursive and not info.is_async
     body: list[rs.Stmt] = []
     typed = {info.varargs, info.varkw} - {None}
     for param in scope.params:
@@ -168,14 +165,17 @@ def lower_function(
     doc = docstring(fn, module.filename) if isinstance(fn, ast.FunctionDef) else None
     locals_ = {names[n] for n in [*scope.params, *locals_info.order]}
     lowered = declare_late(rs.Block(tuple(body), tail), locals_)
-    block = in_frame(ctx.context_name, scope.qualname, first_line, lowered, info.is_async)
+    block, attrs = in_frame(
+        ctx.context_name, scope.qualname, first_line, lowered, info.is_async, recursive
+    )
     return rs.Fn(
         name=rust_name,
         params=tuple(params),
         ret=RESULT,
-        body=bind_py(rs.Block((*guard, *block.stmts), block.tail), ctx.context_name),
+        body=bind_py(block, ctx.context_name),
         lifetimes=("'py",),
         public=public,
+        attrs=attrs,
         doc=tuple(doc.splitlines()) if doc else (),
         comments=(*comments, f"{module.filename}:{fn.lineno}"),
         is_async=info.is_async,
@@ -190,24 +190,34 @@ def _first_line(fn: FunctionNode) -> int:
 
 
 def in_frame(
-    context: str, qualname: str, line: int, body: rs.Block, is_async: bool = False
-) -> rs.Block:
-    """`body` run in a traceback frame: `rt::frame!(m, "name", line, |frame| ..)`
-    (design §9). A body that can not raise needs none, except the body of a
-    coroutine or generator: `async |frame| ..` also raises what `throw()`
-    sends before it starts (design §8)."""
+    context: str,
+    qualname: str,
+    line: int,
+    body: rs.Block,
+    is_async: bool = False,
+    recursive: bool = False,
+) -> tuple[rs.Block, tuple[str, ...]]:
+    """`body` and the attribute of its fn that runs it in a traceback frame:
+    `#[rt::frame(m, "name", line)]`, with the name `frame` as a fourth
+    argument when the body uses the frame (design §9). A body that can not
+    raise needs none, except the body of a coroutine or generator: there the
+    frame also raises what `throw()` sends before it starts (design §8).
+
+    A function in a cycle of direct calls is `recursive`: the last argument
+    of its attribute makes each call check the stack (`rt::RecursionGuard`),
+    or a stack overflow would crash instead of raising `RecursionError`."""
     if body.tail is None:
         stmts, tail_expr = returns_as_tail(body.stmts)
         body = rs.Block(tuple(stmts), tail_expr)
     tail = [] if body.tail is None else [rs.Return(body.tail)]
-    if not is_async and not fallible([*body.stmts, *tail]):
-        return body
-    param = "frame" if count_path(body, "frame") else "_"
-    # Always a block: `|_| { expr }` reads better than an expression that
-    # rustfmt breaks across the lines of the macro call.
-    closure = rs.Closure((param,), body, braces=True, is_async=is_async)
-    args = (rs.Path(context), rs.StrLit(qualname), rs.IntLit(line), closure)
-    return rs.Block((), rs.MacroCall("rt::frame", args))
+    if not is_async and not recursive and not fallible([*body.stmts, *tail]):
+        return body, ()
+    args = [context, string_literal(qualname), str(line)]
+    if count_path(body, "frame"):
+        args.append("frame")
+    if recursive:
+        args.append("recursive")
+    return body, (f"rt::frame({', '.join(args)})",)
 
 
 def _cell_declared_at_assignment(info: FunctionInfo, name: str) -> bool:
@@ -385,16 +395,15 @@ def lower_genexpr(ctx: Context, node: ast.GeneratorExp, comprehension_names: dic
     value, or `None` once the generator is exhausted. Each call runs in a
     frame of its own, `<genexpr>` in tracebacks:
 
+        #[rt::frame(m, "<genexpr>", 3)]
         fn genexpr<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyIterator>) -> ... {
-            rt::frame!(m, "<genexpr>", 3, |frame| {
-                for x in rt::iter(xs)? {
-                    let x = x?;
-                    if x.gt(3)? {
-                        return Ok(Some(x));
-                    }
+            for x in rt::iter(xs)? {
+                let x = x?;
+                if x.gt(3)? {
+                    return Ok(Some(x));
                 }
-                Ok(None)
-            })
+            }
+            Ok(None)
         }
 
     `return` leaves the loop in the middle, the next call goes on with the
@@ -445,7 +454,7 @@ def lower_genexpr(ctx: Context, node: ast.GeneratorExp, comprehension_names: dic
         body.append(rs.If(next_item, then, pattern=f"Some({pattern})"))
     items = [rs.ItemStmt(item) for item in inner.items]
     done = rs.Call(rs.Path("Ok"), (rs.Path("None"),))
-    block = in_frame(
+    block, attrs = in_frame(
         inner.context_name, scope.qualname, node.lineno, rs.Block((*items, *body), done)
     )
     module.uses.add("pyo3::types::PyIterator")
@@ -462,6 +471,7 @@ def lower_genexpr(ctx: Context, node: ast.GeneratorExp, comprehension_names: dic
             body=bind_py(block, inner.context_name),
             lifetimes=("'py",),
             public=False,
+            attrs=attrs,
             comments=(f"{module.filename}:{node.lineno}",),
         )
     )

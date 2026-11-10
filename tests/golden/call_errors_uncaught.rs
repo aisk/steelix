@@ -12,24 +12,23 @@ pub fn connect<'py>(
 }
 
 /// Executes the body of `call_errors_uncaught.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |_| {
-        m.set_global(
-            "__doc__",
-            "An uncaught error from a call that can not be bound at transpile time.",
-        )?;
-        rt::def!(m, connect(host, port, *, timeout))?;
-        rt::builtins::print(
-            py,
-            (connect(
-                m,
-                &rt::str(py, "localhost"),
-                &rt::int(py, 80),
-                &rt::int(py, 1),
-            )?,),
-        )?;
-        rt::call!(m.global("connect")?, "localhost", timeout = 5)?;
-        Ok(())
-    })
+    m.set_global(
+        "__doc__",
+        "An uncaught error from a call that can not be bound at transpile time.",
+    )?;
+    rt::def!(m, connect(host, port, *, timeout))?;
+    rt::builtins::print(
+        py,
+        (connect(
+            m,
+            &rt::str(py, "localhost"),
+            &rt::int(py, 80),
+            &rt::int(py, 1),
+        )?,),
+    )?;
+    rt::call!(m.global("connect")?, "localhost", timeout = 5)?;
+    Ok(())
 }

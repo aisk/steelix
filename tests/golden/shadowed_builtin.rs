@@ -8,29 +8,29 @@ pub fn len<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'p
 }
 
 // shadowed_builtin.py:8
+#[rt::frame(m, "use", 8)]
 pub fn r#use<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "use", 8, |_| { len(m, xs)?.add(1) })
+    len(m, xs)?.add(1)
 }
 
 /// Executes the body of `shadowed_builtin.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |_| {
-        m.set_global(
-            "__doc__",
-            "A builtin rebound at module level is no longer special-cased.",
-        )?;
-        rt::def!(m, len(x))?;
-        rt::def!(m, r#use(xs))?;
-        m.set_global("str", rt::builtin(py, "repr")?)?;
-        rt::builtins::print(
-            py,
-            (
-                r#use(m, PyList::new(py, [1, 2])?.as_any())?,
-                len(m, &rt::str(py, "abc"))?,
-                m.global("str")?.call1(("quoted",))?,
-            ),
-        )?;
-        Ok(())
-    })
+    m.set_global(
+        "__doc__",
+        "A builtin rebound at module level is no longer special-cased.",
+    )?;
+    rt::def!(m, len(x))?;
+    rt::def!(m, r#use(xs))?;
+    m.set_global("str", rt::builtin(py, "repr")?)?;
+    rt::builtins::print(
+        py,
+        (
+            r#use(m, PyList::new(py, [1, 2])?.as_any())?,
+            len(m, &rt::str(py, "abc"))?,
+            m.global("str")?.call1(("quoted",))?,
+        ),
+    )?;
+    Ok(())
 }

@@ -1,7 +1,8 @@
 """Call graph of direct Rust calls between functions.
 
 It tells which module level functions are part of a cycle of direct Rust
-calls and need a `RecursionGuard` (calls through Python objects are already
+calls and need a stack check (`recursive` in `#[rt::frame]`; calls through
+Python objects are already
 guarded by CPython; nested functions are only ever called through Python),
 or, for coroutines and generators, `Box::pin` around the future of a
 recursive call.

@@ -61,6 +61,52 @@ pub mod frame;
 
 pub use frame::{Caught, Flow, Frame, Handling, IntoException};
 
+/// Runs the body of a generated function in a traceback [`Frame`]:
+///
+/// ```ignore
+/// #[rt::frame(m, "parse", 10)]
+/// pub fn parse<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+///     let value = text.call_method0("strip")?;
+///     ..
+/// }
+/// ```
+///
+/// The arguments are the module, the function's `__qualname__` (`<module>`
+/// for the module body) and the line of its `def`. A class body passes its
+/// namespace `ns` instead of the module, and the line is the one of the
+/// first decorator (or `class`).
+///
+/// A body that raises or handles exceptions, or records statement lines
+/// (`--traceback-lines`), names the [`Frame`] as a fourth argument:
+///
+/// ```ignore
+/// #[rt::frame(m, "check", 3, frame)]
+/// pub fn check<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+///     if x.lt(0)? {
+///         return Err(frame.raise(PyValueError::new_err("negative")));
+///     }
+///     Ok(x.clone())
+/// }
+/// ```
+///
+/// A function that may call itself with direct Rust calls adds `recursive`
+/// as the last argument (`#[rt::frame(m, "fib", 1, recursive)]`): each call
+/// then checks the stack first, like [`RecursionGuard`], so that unbounded
+/// recursion raises `RecursionError` instead of overflowing the stack.
+///
+/// The body becomes a closure that gets the frame, so `?` and `return` in
+/// it end the function as written. On an `async fn`, the body of a native
+/// coroutine or generator, the frame lives across the suspensions:
+///
+/// ```ignore
+/// #[rt::frame(m, "fetch", 1)]
+/// pub async fn fetch<'py>(m: &rt::Module<'py>, url: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+///     let resp = rt::await_(session.method1("get", (url,))?).await?;
+///     rt::await_(resp.method0("text")?).await
+/// }
+/// ```
+pub use steelix_runtime_macros::frame;
+
 pub use attr::Attributes;
 pub use cell::Cell;
 pub use class::{Namespace, super_};

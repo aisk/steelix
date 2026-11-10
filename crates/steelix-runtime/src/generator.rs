@@ -14,20 +14,19 @@
 //!
 //! ```ignore
 //! // (word.upper() for word in words if word)
+//! #[rt::frame(m, "<genexpr>", 3)]
 //! fn genexpr<'py>(
 //!     m: &rt::Module<'py>,
 //!     words: &Bound<'py, PyIterator>,
 //! ) -> PyResult<Option<Bound<'py, PyAny>>> {
-//!     rt::frame!(m, "<genexpr>", 3, |_| {
-//!         for word in words {
-//!             let word = word?;
-//!             if word.is_truthy()? {
-//!                 return Ok(Some(word.call_method0("upper")?));
-//!             }
-//!             m.py().check_signals()?;
+//!     for word in words {
+//!         let word = word?;
+//!         if word.is_truthy()? {
+//!             return Ok(Some(word.call_method0("upper")?));
 //!         }
-//!         Ok(None)
-//!     })
+//!         m.py().check_signals()?;
+//!     }
+//!     Ok(None)
 //! }
 //! let upper = rt::genexpr!(m, genexpr(words.try_iter()?))?;
 //! ```

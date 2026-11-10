@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 pyo3.workspace = true
 smallvec = "1"
+steelix-runtime-macros = { version = "0.2.0", path = "../steelix-runtime-macros" }
 
 [build-dependencies]
 pyo3-build-config = "0.30"

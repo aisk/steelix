@@ -487,7 +487,8 @@ class HandlingLowering:
 
     def handler_test(self: StmtLowering, handler: ast.ExceptHandler, err: rs.Path) -> rs.Expr:
         """Whether the exception `err` matches `handler`: a test of its type
-        for builtin exceptions, else `frame.matches(&err, line, || handler)?`,
+        for builtin exceptions, else `frame.matches(&err, || handler)?`
+        (`frame.matches_at(&err, line, || handler)?` with `--traceback-lines`),
         which evaluates the handler expression while `err` is being handled."""
         type_ = handler.type
         assert type_ is not None
@@ -513,12 +514,11 @@ class HandlingLowering:
         else:
             classes = value.result()
         closure = rs.Closure((), rs.Block(tuple(prelude), classes))
-        line = handler.lineno
-        if not self.ctx.module.traceback_lines and self.frame_line is not None:
+        if not self.ctx.module.traceback_lines:
             # Without line markers the traceback line stays the def line, also
             # after the test: an `except` line there would be stale.
-            line = self.frame_line
-        return rs.Try(_frame("matches", rs.Ref(err), rs.IntLit(line), closure))
+            return rs.Try(_frame("matches", rs.Ref(err), closure))
+        return rs.Try(_frame("matches_at", rs.Ref(err), rs.IntLit(handler.lineno), closure))
 
     def builtin_exception(self: StmtLowering, expr: ast.expr) -> str | None:
         """The name of the builtin exception class `expr` refers to, if it

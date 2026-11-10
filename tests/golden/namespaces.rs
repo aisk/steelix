@@ -8,32 +8,31 @@ use pyo3::pyclass::CompareOp;
 use steelix_runtime as rt;
 
 /// Executes the body of `namespaces.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
-    rt::frame!(m, "<module>", 1, |_| {
-        m.set_global(
-            "__doc__",
-            "`dir()`, `vars()` and `locals()` without arguments read the current scope.",
-        )?;
-        m.set_global("x", 1)?;
-        m.global("print")?.call1((
-            m.dir()?.contains("x")?,
-            m.dir()?
-                .rich_compare(m.global("sorted")?.call1((m.globals(),))?, CompareOp::Eq)?,
-        ))?;
-        m.global("print")?
-            .call1((m.globals().is(m.globals()), m.globals().is(m.globals())))?;
-        // namespaces.py:8, kept as Python: locals() in a function at 10:19
-        rt::exec_python!(
-            m,
-            line = 8,
-            r#"
+    m.set_global(
+        "__doc__",
+        "`dir()`, `vars()` and `locals()` without arguments read the current scope.",
+    )?;
+    m.set_global("x", 1)?;
+    m.global("print")?.call1((
+        m.dir()?.contains("x")?,
+        m.dir()?
+            .rich_compare(m.global("sorted")?.call1((m.globals(),))?, CompareOp::Eq)?,
+    ))?;
+    m.global("print")?
+        .call1((m.globals().is(m.globals()), m.globals().is(m.globals())))?;
+    // namespaces.py:8, kept as Python: locals() in a function at 10:19
+    rt::exec_python!(
+        m,
+        line = 8,
+        r#"
 def local_names(a):
     b = a + 1
     return sorted(locals()), dir()
 "#
-        )?;
-        m.global("print")?
-            .call1((m.global("local_names")?.call1((1,))?,))?;
-        Ok(())
-    })
+    )?;
+    m.global("print")?
+        .call1((m.global("local_names")?.call1((1,))?,))?;
+    Ok(())
 }

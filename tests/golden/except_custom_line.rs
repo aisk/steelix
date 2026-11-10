@@ -3,24 +3,23 @@ use pyo3::types::PyDict;
 use steelix_runtime as rt;
 
 // except_custom_line.py:5
+#[rt::frame(m, "handle", 5, frame)]
 pub fn handle<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "handle", 5, |frame| {
-        match (|| -> PyResult<()> {
-            if n.is_truthy()? {
-                return Err(frame.raise(m.global("AppError")?.call1(("bad",))?));
-            }
-            Ok(())
-        })() {
-            Ok(()) => {}
-            Err(err) if frame.matches(&err, 5, || m.global("AppError"))? => {
-                let e = frame.catch(err);
-                rt::builtins::print(py, ("caught", &e))?;
-            }
-            Err(err) => return Err(err),
+    match (|| -> PyResult<()> {
+        if n.is_truthy()? {
+            return Err(frame.raise(m.global("AppError")?.call1(("bad",))?));
         }
-        PyDict::new(py).as_any().get_item("after")
-    })
+        Ok(())
+    })() {
+        Ok(()) => {}
+        Err(err) if frame.matches(&err, || m.global("AppError"))? => {
+            let e = frame.catch(err);
+            rt::builtins::print(py, ("caught", &e))?;
+        }
+        Err(err) => return Err(err),
+    }
+    PyDict::new(py).as_any().get_item("after")
 }
 
 pub mod app_error {
@@ -34,20 +33,19 @@ pub mod app_error {
 }
 
 /// Executes the body of `except_custom_line.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |_| {
-        m.set_global(
-            "AppError",
-            rt::class!(
-                m,
-                "AppError"(rt::builtin(py, "Exception")?),
-                app_error::body,
-                line = 1
-            )?,
-        )?;
-        rt::def!(m, handle(n))?;
-        handle(m, &rt::int(py, 1))?;
-        Ok(())
-    })
+    m.set_global(
+        "AppError",
+        rt::class!(
+            m,
+            "AppError"(rt::builtin(py, "Exception")?),
+            app_error::body,
+            line = 1
+        )?,
+    )?;
+    rt::def!(m, handle(n))?;
+    handle(m, &rt::int(py, 1))?;
+    Ok(())
 }

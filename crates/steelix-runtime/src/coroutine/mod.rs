@@ -21,15 +21,14 @@
 //! // async def fetch(session, url):
 //! //     resp = await session.get(url)
 //! //     return await resp.text()
+//! #[rt::frame(m, "fetch", 1)]
 //! pub async fn fetch<'py>(
 //!     m: &rt::Module<'py>,
 //!     session: &Bound<'py, PyAny>,
 //!     url: &Bound<'py, PyAny>,
 //! ) -> PyResult<Bound<'py, PyAny>> {
-//!     rt::frame!(m, "fetch", 1, async |_| {
-//!         let resp = rt::await_(session.method1("get", (url,))?).await?;
-//!         rt::await_(resp.method0("text")?).await
-//!     })
+//!     let resp = rt::await_(session.method1("get", (url,))?).await?;
+//!     rt::await_(resp.method0("text")?).await
 //! }
 //! rt::def!(m, async fetch(session, url))?;
 //! ```

@@ -35,7 +35,7 @@ CONTEXT_FALLBACK = "module"
 # Names the generated code binds or relies on inside function bodies.
 # `frame` is the traceback frame of the function (design §9), `_caught`
 # the exception an `except` block without `as` handles.
-FUNCTION_RESERVED = frozenset({"py", "_guard", "frame", "_caught", "Ok", "Err", "Some", "None"})
+FUNCTION_RESERVED = frozenset({"py", "frame", "_caught", "Ok", "Err", "Some", "None"})
 # Item names the generated module defines or relies on next to the functions.
 # The context parameter and `py` are locals of generated fns, which would
 # shadow functions of the same name.

@@ -39,30 +39,29 @@ print(sum(item.total() for item in items))
 
 ```rust
 // inventory.py:14
+#[rt::frame(m, "load", 14, frame)]
 pub fn load<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "load", 14, |frame| {
-        let rows = match (|| m.global("json")?.method1("loads", (text,)))() {
-            Ok(value) => value,
-            Err(err) if err.is_instance_of::<PyValueError>(py) => {
-                let e = frame.catch(err);
-                rt::builtins::print(
-                    py,
-                    (rt::fstring(py, ("bad input: ", rt::format(&e, "")?))?,),
-                )?;
-                return Ok(PyList::empty(py).into_any());
-            }
-            Err(err) => return Err(err),
-        };
-        let list = PyList::empty(py);
-        for row in rt::iter(&rows)? {
-            let row = row?;
-            if row.get_item("qty")?.gt(0)? {
-                list.append(rt::call!(m.global("Item")?, **row)?)?;
-            }
+    let rows = match (|| m.global("json")?.method1("loads", (text,)))() {
+        Ok(value) => value,
+        Err(err) if err.is_instance_of::<PyValueError>(py) => {
+            let e = frame.catch(err);
+            rt::builtins::print(
+                py,
+                (rt::fstring(py, ("bad input: ", rt::format(&e, "")?))?,),
+            )?;
+            return Ok(PyList::empty(py).into_any());
         }
-        Ok(list.into_any())
-    })
+        Err(err) => return Err(err),
+    };
+    let list = PyList::empty(py);
+    for row in rt::iter(&rows)? {
+        let row = row?;
+        if row.get_item("qty")?.gt(0)? {
+            list.append(rt::call!(m.global("Item")?, **row)?)?;
+        }
+    }
+    Ok(list.into_any())
 }
 ```
 

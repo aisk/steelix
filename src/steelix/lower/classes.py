@@ -211,7 +211,7 @@ def lower_class_mod(module: ModuleContext, scope: ClassScope, name: str) -> rs.M
     body += lowering.block(node.body).stmts
     ok = rs.Call(rs.Path("Ok"), (rs.Tuple(()),))
     block = rs.Block(tuple(body), ok if flow.end_reachable else None)
-    framed = in_frame(NAMESPACE, scope.qualname, line, block)
+    framed, attrs = in_frame(NAMESPACE, scope.qualname, line, block)
     body_fn = rs.Fn(
         name="body",
         params=(
@@ -221,6 +221,7 @@ def lower_class_mod(module: ModuleContext, scope: ClassScope, name: str) -> rs.M
         ret="PyResult<()>",
         body=bind_py(framed, ctx.context()),
         lifetimes=("'py",),
+        attrs=attrs,
         doc=(f"The body of `class {scope.qualname}`, run in its namespace `{NAMESPACE}`.",),
         comments=(f"{module.filename}:{node.lineno}",),
     )

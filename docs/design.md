@@ -102,6 +102,7 @@ steelix/
 │   ├── rustast/               Rust AST 定义、清理、检查、打印、rustfmt
 │   └── emit/                  生成完整 crate
 ├── crates/
+│   ├── steelix-runtime-macros/ `#[rt::frame]` 属性宏（proc macro，§9）
 │   └── steelix-runtime/       生成代码依赖的运行时（`rt::`）：function.rs（Function）、
 │                              macros.rs（rt::function!、rt::def!）、values.rs（字面量、slice、
 │                              f-string）、names.rs（驻留的名字）、frame.rs（帧和异常）、class.rs、
@@ -144,24 +145,21 @@ use pyo3::prelude::*;
 use steelix_runtime as rt;
 
 // fib.py:1
+#[rt::frame(m, "fib", 1, recursive)]
 pub fn fib<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let _guard = rt::RecursionGuard::enter(m.py())?;
-    rt::frame!(m, "fib", 1, |_| {
-        if n.lt(2)? {
-            return Ok(n.clone());
-        }
-        fib(m, &n.sub(1)?)?.add(fib(m, &n.sub(2)?)?)
-    })
+    if n.lt(2)? {
+        return Ok(n.clone());
+    }
+    fib(m, &n.sub(1)?)?.add(fib(m, &n.sub(2)?)?)
 }
 
 /// Executes the body of `fib.py` in the module `m`.
+#[rt::frame(m, "<module>", 1)]
 pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let py = m.py();
-    rt::frame!(m, "<module>", 1, |_| {
-        rt::def!(m, fib(n))?;
-        rt::builtins::print(py, (fib(m, &rt::int(py, 10))?,))?;
-        Ok(())
-    })
+    rt::def!(m, fib(n))?;
+    rt::builtins::print(py, (fib(m, &rt::int(py, 10))?,))?;
+    Ok(())
 }
 ```
 
@@ -169,7 +167,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`get_item`、`call` 等方法
 - 名字写在源码里的属性和方法（`o.x`、`o.x = v`、`o.m(a)`）用 runtime 的扩展 trait `rt::Attributes`（M11）：`o.attr("x")?`、`o.set_attr("x", v)?`、`o.del_attr("x")?`、`o.method0("m")?`、`o.method1("m", (a,))?`。它们就是 PyO3 的 `getattr`、`setattr`、`delattr`、`call_method0`、`call_method1`，区别只在名字必须是 `'static` 的字面量，runtime 为每个名字只创建一次驻留（interned）的 Python 字符串（第 6 节"调用的开销"）。用到它们的模块多一行 `use steelix_runtime::Attributes;`。trait 对所有的 `Bound<'py, T>` 实现（M11a），手写代码里的 `Bound<PyDict>`、`Bound<PyTuple>`、`#[pyclass]` 的值不用先 `.as_any()`，`Borrowed` 通过 `Deref` 也能用。名字在运行时才知道的（手写的代码里）照常用 PyO3 的方法
-- 函数体和模块体包在 `rt::frame!` 里，异常的 traceback 因此有原生函数的帧，函数名和 Python 一样，行号是 `def` 所在的行。闭包参数 `frame` 只在用到时出现（`raise`、`except` 等），否则写 `|_|`。`--traceback-lines` 在可能出错的语句前加 `frame.line(N);`，行号精确到语句（见第 9 节）
+- 函数和模块体的 fn 带 `#[rt::frame(m, "qualname", 行号)]` 属性，异常的 traceback 因此有原生函数的帧，函数名和 Python 一样，行号是 `def` 所在的行。函数体用到帧时（`raise`、`except` 等）属性多一个参数 `frame`，它就是函数体里那个变量的名字。`--traceback-lines` 在可能出错的语句前加 `frame.line(N);`，行号精确到语句（见第 9 节）
 - 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
 - 模块体生成 `exec_module(m)`，只依赖传入的模块上下文，与输出模式无关
 - 模块级变量的读写走 globals 字典：`m.global("LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `m.set_global("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，`print` 用 `rt::builtins::print`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "max")?`
@@ -190,7 +188,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
   ```
 - 模块级函数若只绑定一次，并且能在转换时绑定参数，调用时直接调用 Rust 函数（见第 6、7 节）
 - 嵌套函数和 lambda 是写在外层函数体里的 Rust fn，被捕获并会改变的变量是 `rt::Cell`（见第 6 节）
-- 会递归的函数（直接调用构成的调用图里有环）开头加 `let _guard = rt::RecursionGuard::enter(py)?;`，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用由 `Function` 的入口检查（第 6 节），不需要 guard
+- 会递归的函数（直接调用构成的调用图里有环）的属性最后多一个 `recursive`（`#[rt::frame(m, "fib", 1, recursive)]`），每次调用在建帧之前先用 `rt::RecursionGuard` 检查栈，否则栈溢出会直接 SIGSEGV 而不是抛 `RecursionError`。经过 Python 对象的调用由 `Function` 的入口检查（第 6 节），不需要 guard
   - 3.14 的 `Py_EnterRecursiveCall` 按 C 栈剩余空间判断，不看 `sys.getrecursionlimit()`，报错信息是 `Stack overflow (used N kB)`（见第 12 节）
   - 已验证的坑：栈快耗尽时 `PyErr::fetch` 第一次创建 PyO3 的 `PanicException` 类型会失败并在 PyO3 的懒初始化锁上死锁。`RecursionGuard::enter` 每次先确保这个类型已经创建
 - runtime 一律通过 `rt::` 路径引用，不用 glob import，避免被 Python 里叫 `int`、`print` 的局部变量遮蔽
@@ -320,7 +318,7 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 
 - 参数不纯时的方法调用 `o.attr("m")?.call1((f()?,))?` 仍然先创建 bound method。要避免它得在 runtime 里重新实现 `_PyObject_GetMethod`（类型的 MRO、数据描述符、实例 dict、`__getattr__`），不算低成本
 - 字符串常量 `rt::str(py, "..")` 仍然每次新建。缓存它们会让 `is` 的结果和以前不同（虽然更接近 CPython），而且不在热点上
-- 循环里的 `py.check_signals()`、`rt::frame!` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动（M14 之后 `for` 循环的检查挪进了 `rt::iter`，为了可读性）
+- 循环里的 `py.check_signals()`、`#[rt::frame]` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动（M14 之后 `for` 循环的检查挪进了 `rt::iter`，为了可读性）
 - M14 之后的 review 又测过不值得的：字符串常量缓存、`__slots__` 的 inline cache（`roadmap.md` 的性能候选项）；去掉 vectorcall 入口的 `RecursionGuard` 最多快 6.5%，但 Python 侧的递归要靠它抛 `RecursionError`
 - 全局变量的缓存（dict watcher），理由见第 7 节
 
@@ -662,16 +660,15 @@ Ok(dict.into_any())
 
 ```rust
 // return any(x > 3 for x in xs)
+#[rt::frame(m, "has_big.<locals>.<genexpr>", 10)]
 fn genexpr<'py>(
     m: &rt::Module<'py>,
     xs: &Bound<'py, PyIterator>,
 ) -> PyResult<Option<Bound<'py, PyAny>>> {
-    rt::frame!(m, "has_big.<locals>.<genexpr>", 10, |_| {
-        if let Some(x) = rt::next(xs)? {
-            return Ok(Some(x.rich_compare(3, CompareOp::Gt)?));
-        }
-        Ok(None)
-    })
+    if let Some(x) = rt::next(xs)? {
+        return Ok(Some(x.rich_compare(3, CompareOp::Gt)?));
+    }
+    Ok(None)
 }
 rt::builtin(m.py(), "any")?.call1((rt::genexpr!(
     m,
@@ -752,15 +749,14 @@ M13 先做了 runtime 的 PoC（手写"生成代码"，和 CPython 比较输出�
 // async def fetch(session, url):
 //     resp = await session.get(url)
 //     return await resp.text()
+#[rt::frame(m, "fetch", 1)]
 pub async fn fetch<'py>(
     m: &rt::Module<'py>,
     session: &Bound<'py, PyAny>,
     url: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    rt::frame!(m, "fetch", 1, async |_| {
-        let resp = rt::await_(session.method1("get", (url,))?).await?;
-        rt::await_(resp.method0("text")?).await
-    })
+    let resp = rt::await_(session.method1("get", (url,))?).await?;
+    rt::await_(resp.method0("text")?).await
 }
 rt::def!(m, async fetch(session, url))?;
 ```
@@ -775,27 +771,26 @@ rt::def!(m, async fetch(session, url))?;
 //         if x is None:
 //             return total
 //         total += x
+#[rt::frame(m, "running_total", 1)]
 pub async fn running_total<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "running_total", 1, async |_| {
-        let mut total = rt::int(py, 0);
-        let mut x: Bound<'py, PyAny>;
-        loop {
-            x = rt::yield_(&total).await?;
-            if x.is_none() {
-                return Ok(total);
-            }
-            total = rt::iadd(&total, &x)?;
-            py.check_signals()?;
+    let mut total = rt::int(py, 0);
+    let mut x: Bound<'py, PyAny>;
+    loop {
+        x = rt::yield_(&total).await?;
+        if x.is_none() {
+            return Ok(total);
         }
-    })
+        total = rt::iadd(&total, &x)?;
+        py.check_signals()?;
+    }
 }
 rt::def!(m, gen running_total())?;
 ```
 
 lowering（`lower/expr.py` 的 `suspension`、`lower/handling.py`、`lower/stmt.py` 的 `async_for`）的规则
 
-- 函数体里有 `yield`、`yield from` 的 `def` 是生成器函数，`async def` 是协程（`frontend/scope.py` 的 `function_kind`）。两者的 Rust fn 都是 `pub async fn`，参数和同步函数一样，函数体总在 `rt::frame!(.., async |frame| ..)` 里（即使不会出错也要帧：没开始就 `throw` 的异常要在第一条语句之前抛出），没有 `RecursionGuard`（下面的"递归深度"）。`rt::def!`、`rt::function!` 的签名前加 `async` 或 `gen`，方法（`ns`）、装饰器、嵌套函数和捕获的变量都和同步函数一样。前端把 `async def`、`async for`、`async with` 换成 `def`、`for`、`with` 节点的子类（`frontend/desugar.py`），作用域、绑定和区域的分析照常处理它们
+- 函数体里有 `yield`、`yield from` 的 `def` 是生成器函数，`async def` 是协程（`frontend/scope.py` 的 `function_kind`）。两者的 Rust fn 都是 `pub async fn`，参数和同步函数一样，总带 `#[rt::frame(..)]`（即使不会出错也要帧：没开始就 `throw` 的异常要在第一条语句之前抛出），没有 `RecursionGuard`（下面的"递归深度"）。`rt::def!`、`rt::function!` 的签名前加 `async` 或 `gen`，方法（`ns`）、装饰器、嵌套函数和捕获的变量都和同步函数一样。前端把 `async def`、`async for`、`async with` 换成 `def`、`for`、`with` 节点的子类（`frontend/desugar.py`），作用域、绑定和区域的分析照常处理它们
 - `await e` 是 `rt::await_(e).await?`。`e` 的 Rust 表达式会留下临时值时（在调用结果上调用方法、借用不是变量的值、宏），先用 `let` 绑定（下面"GC 看得到的东西"）：`let sleep = m.global("asyncio")?.method1("sleep", (0,))?; rt::await_(sleep).await?;`，名字取被调用的函数名，被占用时用 `awaitable`。`rt::yield_` 的值和 `rt::yield_from` 的对象同理（`value`、`iterable`）。局部变量、参数、字面量和 `x.method0("f")?` 这类表达式不留下临时值，直接写在括号里
 - `try` 的区域（§9）和 `with` 的函数体只有在会暂停（里面有 `await`、`yield`、`yield from`、`async for`、`async with`，不算嵌套函数）时才变成 `async`，其余和同步函数完全一样。会暂停的 `try` 部分是 `let result: PyResult<..> = async { .. }.await;`，再 `match result` 或 `frame.finally(result)`：`match async { .. }.await` 推断不出 `?` 的错误类型，类型要写在 `let` 上。只有一个表达式的 `try`（§9 的 A 形式）直接 `match` 那个表达式，它是 PyO3 或 runtime 返回的 `PyResult`，需要先执行语句时是 `match async { ..; rt::await_(x).await }.await`。会暂停的 `with` 是 `frame.with_async(&manager, async |value| ..).await?`。`return`、`break`、`continue` 和同步代码一样经过 `Flow`
 - `async with` 是 `frame.async_with(&manager, async |value| ..).await?`，几个 item 嵌套。`__aexit__`、`__aenter__` 按 CPython 的顺序在类型上查找，找不到、返回的对象不能 await 时的 `TypeError` 和 3.14 的文字一样（包括"Did you mean to use 'with'?"）
@@ -821,7 +816,7 @@ lowering（`lower/expr.py` 的 `suspension`、`lower/handling.py`、`lower/stmt.
 - **对象的行为和 CPython 一样**：没开始时只能 `send(None)`，重入时 `ValueError: coroutine already executing`，暂停在 await 上的协程再被 await（Python 的 `await c`、`rt::await_(c)`，原生的和 CPython 的协程都一样）时 `RuntimeError: coroutine is being awaited already`，结束后再用 `RuntimeError: cannot reuse already awaited coroutine`（生成器是 `StopIteration`），函数体里的 `StopIteration` 变成 `RuntimeError: coroutine raised StopIteration`（PEP 479），没开始就 `throw` 时异常在第一条语句之前抛出（traceback 里有这个函数的 `def` 行），`close()` 在暂停处抛 `GeneratorExit`、`finally` 照常执行，捕获后又暂停的抛 `RuntimeError: coroutine ignored GeneratorExit`，捕获后 `return` 的值是 `close()` 的结果（3.13）。在 `except` 里暂停时 `throw`、`close` 和 asyncio 的取消送进来的异常以这个块正在处理的异常为 `__context__`（CPython 的 `_PyErr_ChainStackItem`，用 `PyErr_SetObject` 断开环），有委托对象时是从委托对象出来的异常。函数体自己没有正在处理的异常时不设置，调用方正在处理的异常不算（`Channel` 记着这一次 poll 函数体有没有自己的异常）。`__await__` 返回 `coroutine_wrapper` 那样的迭代器。`cr_running`、`cr_suspended`、`gi_running`、`gi_suspended`、可写的 `__name__`/`__qualname__`（调用时取自函数对象）、`repr`。`StopAsyncIteration` 的转换只属于异步生成器，协程没有。类型的 `__name__` 是 `generator`、`coroutine`、`coroutine_wrapper`，`__module__` 是 `builtins`，`__doc__` 和 CPython 一样（对象的是 None，`coroutine_wrapper` 有 CPython 那句说明），不是 Rust 的文档注释（`#[classattr] __doc__`）。PyO3 的 `tp_name` 总是带模块（`builtins.generator`），报错信息（`cannot pickle 'generator' object`、`'generator' object is not subscriptable`）用的是它，所以 runtime 创建对象时把它换成不带模块的名字（`plain_type_name`），生成器表达式的对象也一样
 - **释放时的行为**：开始了没结束的协程和生成器在释放时 `close()`，`finally` 的输出顺序和 CPython 一样（`del` 时、`gc.collect()` 回收循环时），出错时经过 `sys.unraisablehook`，消息是 CPython 的 `Exception ignored while closing generator <..>`；从没开始的协程发出 `RuntimeWarning: coroutine '..' was never awaited`（经过 `warnings._warn_unawaited_coroutine`，调用方是 Python 代码时位置也一样，原生代码没有 Python 帧，§12）。CPython 在 `tp_finalize` 里做这些，PyO3 的类不能声明它，PyO3 的 `tp_dealloc` 也不调用终结器，所以和 M11 的 vectorcall 一样，在创建第一个对象时补上类型对象的 `tp_finalize`，并把 `tp_dealloc` 换成先调用 `PyObject_CallFinalizerFromDealloc` 再调用 PyO3 原来的那个
 - **`asyncio` 接受它们**：`collections.abc.Coroutine` 的 `__subclasshook__` 按方法认出 `rt::Coroutine`，所以 `asyncio.iscoroutine` 为 True，`create_task`、`gather`、取消都能用。函数对象的 `__code__` 带 `CO_COROUTINE`（生成器是 `CO_GENERATOR`），`inspect.iscoroutinefunction`、`inspect.isgeneratorfunction` 为 True。`inspect.iscoroutine` 为 False（§12）
-- **帧**：`rt::frame!` 的闭包可以是 `async` 闭包（Rust 1.85 起稳定），宏替它 `.await`。帧和函数体一样长寿，跨过多次暂停的异常只有一项，行号的 marker 照常工作，经过 `await` 往外传的异常的 traceback 和 CPython 一样（测试比较了帧的名字和行号）。`try`/`except` 和 `try`/`finally` 的 `try` 部分从同步代码的立即调用的闭包 `(|| { .. })()` 换成 `async { .. }.await`，`with` 的函数体会暂停时用 `frame.with_async(&manager, async |value| { .. }).await?`
+- **帧**：`#[rt::frame]` 用在 `async fn` 上时，函数体变成 `async` 闭包（Rust 1.85 起稳定），宏替它 `.await`。帧和函数体一样长寿，跨过多次暂停的异常只有一项，行号的 marker 照常工作，经过 `await` 往外传的异常的 traceback 和 CPython 一样（测试比较了帧的名字和行号）。`try`/`except` 和 `try`/`finally` 的 `try` 部分从同步代码的立即调用的闭包 `(|| { .. })()` 换成 `async { .. }.await`，`with` 的函数体会暂停时用 `frame.with_async(&manager, async |value| { .. }).await?`
 - **正在处理的异常**：CPython 的生成器有自己的异常状态（`gi_exc_state`），在 `except` 里暂停时 `sys.exception()` 不会泄漏给调用方，恢复后又回来，自己没有时看到调用方的。runtime 在 poll 前后做同样的保存和恢复（`State::Suspended` 的 `handled`），所以 `except E:` 里 `await` 之后 `raise F` 的 `F.__context__` 仍然是 `E`。`rt::Handling` 和同步代码完全一样，结束时恢复它开始时的异常，跨过暂停的块因此恢复的是开始那一次 poll 的调用方的异常，而不是结束时的调用方的（§12）。函数体在自己的 poll 以外被释放时（暂停在 `except` 里的生成器被释放或被 GC 清理），`Body` 在 drop 前后保存和恢复线程的正在处理的异常，块里的 `Handling` 不会改掉释放它的地方的状态。M13 曾经让 `Handling` 记住"之前的异常是调用方的"，并让直接委托的内层和 `throw` 进委托对象时看到调用方的异常，M14 之后的 review 为了简单去掉了这些（§12）
 - **直接 await 和递归**：两个原生的 `async def` 之间满足第 7 节直接调用条件的 `await f(x)` 直接 await Rust 的 future，没有 Python 对象；原生生成器之间的 `yield from g(x)` 也一样，内层的 `rt::yield_` 用的是同一次 poll 的通道，交出的值直接到外层的调用方，`send` 和 `throw` 也直接到内层。其余的经过函数对象和 `rt::await_`、`rt::yield_from`。递归的 `async fn` 要 `Box::pin`，lowering 按调用图给递归的直接 await 加上：`rt::delegate(Box::pin(countdown(m, &n.sub(1)?))).await?`
   - 直接 await 的 future 外面套一层 `rt::delegate`，它写明这里是委托，并且补上 CPython `_gen_throw` 对委托对象的特殊处理（M13/M14 之后的修复，`generator_close` 用例）。`close()` 和 `throw(GeneratorExit)` 不是简单地把 `GeneratorExit` 送到最里层：CPython 先关闭委托对象（`gen_close_iter`，内层收到一个新的 `GeneratorExit`，它的返回值丢掉），然后不管内层怎样结束，都在外层的 `yield from`/`await` 处抛出 `GeneratorExit`；内层又暂停时是 `RuntimeError: generator ignored GeneratorExit`，同样在外层的委托处抛出，内层随即被释放并再次关闭（终结器）；关闭内层出错时抛出那个错误。`rt::delegate` 在被暂停的 future 收到 `GeneratorExit` 时照这样做，多层直接委托时每一层各做一次，和 CPython 递归的 `gen_close` 一样。`throw` 进来的别的异常照常送到内层，从内层出来的异常（包括关闭内层的 `GeneratorExit` 和错误）在外层的委托处按外层正在处理的异常重新设置 `__context__`（`_gen_throw` 的 `gen_send_ex(.., exc=1)`），和 `rt::await_` 一样
@@ -915,20 +910,24 @@ runtime 的 helper（`crates/steelix-runtime/src/matching.rs`）各做 CPython �
 
 原生函数运行时没有 Python 帧。和 Cython 一样，异常离开函数时再把这个函数补进 traceback
 
-- 每个函数体包在 `rt::frame!(m, "qualname", def 所在行, |frame| { .. })` 里，模块体用 `<module>`，行号是 1。`RecursionGuard` 在它外面。函数体里不可能出错的（没有 `?`）不包。函数体不用 `frame`（没有 `raise`、`except`、`finally`、`with` 等）时闭包参数写 `|_|`
+- 每个函数的 fn 带属性 `#[rt::frame(m, "qualname", def 所在行)]`，模块体用 `<module>`，行号是 1，类体的第一个参数是 `ns`。函数体用到帧（`raise`、`except`、`finally`、`with` 等）时写成 `#[rt::frame(m, "qualname", 行号, frame)]`，第四个参数是函数体里帧的名字，不用时省略。函数体里不可能出错的（没有 `?`）不加属性。会递归的函数最后再加 `recursive`（§5）
+- 属性宏把函数体变成一个拿到帧的闭包，交给 `rt::frame::run`（`async fn` 是 `run_async`，宏替它 `.await`），所以 `?` 和 `return` 的含义和写出来的一样。函数体的 token 原样带着原来的 span 放回去，编辑器的跳转、补全和编译错误的位置不受影响，`frame` 的定义跳到属性里的那个名字
+- 宏在 `crates/steelix-runtime-macros`（proc macro，没有依赖），`steelix-runtime` 重新导出成 `rt::frame`。`macro_attr`（用 `macro_rules!` 写属性宏，rust-lang/rust#143547）稳定之后，它可以换成 runtime 里十几行的声明宏，去掉这个 crate，生成的代码不用变（`steelix-runtime-macros/src/lib.rs` 里的 TODO）。声明宏有卫生性，变不出函数体看得见的名字，这也是属性里写出 `frame` 的原因之一
 - 异常离开函数（或者到达 handler、`finally`、`with` 的 `__exit__`）时，`Frame` 用 `PyCode_NewEmpty` 和 `code.replace(co_qualname=..)` 创建 code 对象（每个函数只创建一次，`PyOnceLock` 缓存），`PyFrame_New` 创建帧，再用 `types.TracebackType(tb_next, frame, -1, line)` 插到 traceback 前面。同一次调用只创建一个帧对象，异常已经带有这个帧的条目时（在这里 `raise`，或者裸 `raise` 重新抛出）不再重复添加，和 CPython 一样
-- 默认（M9a 起）traceback 里原生帧的函数名、文件和帧的顺序都和 CPython 一样，行号是 `def` 所在的行（有装饰器时是第一个装饰器的行），显示的源码行也是这一行。例外是 `except` 的类型不是 builtin 异常类时，`frame.matches(&err, LINE, ..)` 要在 `except` 那一行求值类型，之后的行号停在这一行
+- 默认（M9a 起）traceback 里原生帧的函数名、文件和帧的顺序都和 CPython 一样，行号是 `def` 所在的行（有装饰器时是第一个装饰器的行），显示的源码行也是这一行
 - `--traceback-lines`（`CrateOptions.traceback_lines`）恢复精确到语句的行号，是调试和验证用的模式，e2e、`tests/apps`、`tests/projects` 的测试都用它和 CPython 逐行比较 traceback
   - 每条可能出错的语句前写 `frame.line(N);`，只是写一个 `Cell<u32>`。复合语句的 marker 写在头部（`if`、`while` 的条件，`for` 的迭代），循环体正常走完时把行号设回循环头，和 CPython 在 `JUMP_BACKWARD` 处的行号一致。不会出错的语句、`break`/`continue`、和上一条行号相同的语句不写
   - 多行语句的行号取值所在的那一行（`return`、赋值、表达式语句取值的第一行），traceback 只显示这一行源码。`tb_lasti` 是 -1，所以原生帧没有 `^^^` 定位，这是和 CPython traceback 唯一的文字差异
-  - 实现在 lowering 里（`StmtLowering.at_line` 和推导式的 `at_line`）：两种模式的行号记录完全一样，只是默认不输出 marker，`rustflow` 的分析本来就跳过 marker，所以两种模式生成的代码结构相同。除了 marker 和闭包参数（`|frame|`/`|_|`），唯一的区别是去掉 marker 后 `else { if .. }` 会合并成 `else if`。`rt::frame!` 的闭包体总是带花括号，只有一个表达式时也写 `|_| { expr }`，不让 rustfmt 把长表达式拆在宏调用的几行里
+  - 实现在 lowering 里（`StmtLowering.at_line` 和推导式的 `at_line`）：两种模式的行号记录完全一样，只是默认不输出 marker，`rustflow` 的分析本来就跳过 marker，所以两种模式生成的代码结构相同。除了 marker 和属性里的 `frame`，唯一的区别是去掉 marker 后 `else { if .. }` 会合并成 `else if`
 - 为什么默认不写 marker
   - 噪音：M9a 之前 marker 占 golden 非空行的 11.6%，转换后的标准库工具（`tests/apps`）的 14.1%。去掉之后 golden 从 20493 行变成 18114 行，`tests/apps` 的输出从 11041 行变成 9419 行
   - 会过期：生成的代码是要给人改的（第 15 节），改过的 Rust 里 marker 很容易和 Python 源码对不上，这时 traceback 会很肯定地报一个错的行号，比只报 `def` 行更误导人。`def` 行不会错，函数名加上 Rust 的源码已经足够定位
 - 示例（`total_size`，第 24 行起），默认
 
   ```rust
-  rt::frame!(m, "total_size", 24, |_| {
+  #[rt::frame(m, "total_size", 24)]
+  pub fn total_size<'py>(m: &rt::Module<'py>, paths: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+      let py = m.py();
       let mut text: Bound<'py, PyAny>;
       let mut total = rt::int(py, 0);
       for path in rt::iter(paths)? {
@@ -937,13 +936,15 @@ runtime 的 helper（`crates/steelix-runtime/src/matching.rs`）各做 CPython �
           total = rt::iadd(&total, text.len()?)?;
       }
       Ok(total)
-  })
+  }
   ```
 
   `--traceback-lines`
 
   ```rust
-  rt::frame!(m, "total_size", 24, |frame| {
+  #[rt::frame(m, "total_size", 24, frame)]
+  pub fn total_size<'py>(m: &rt::Module<'py>, paths: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+      let py = m.py();
       let mut text: Bound<'py, PyAny>;
       let mut total = rt::int(py, 0);
       frame.line(26);
@@ -956,18 +957,21 @@ runtime 的 helper（`crates/steelix-runtime/src/matching.rs`）各做 CPython �
           frame.line(26);
       }
       Ok(total)
-  })
+  }
   ```
 
 - 否决的方案
-  - `#[rt::frame]` 属性宏代替 `rt::frame!` 闭包：只省 2% 到 3% 的行，要多依赖一个 proc macro crate，函数体里的 `frame` 也会凭空出现
+  - `rt::frame!(m, "qualname", 行号, |frame| { .. })` 闭包包住函数体（0.2.0 及之前的写法，当时否决属性宏的理由是只省 2% 到 3% 的行、多一个 proc macro crate、`frame` 凭空出现）：每个函数体多一层缩进，嵌套函数的 qualname 一长，rustfmt 把宏拆成五行，函数体缩进两层。换成属性之后 golden 少 3.2% 的行，`frame` 在属性里写出名字，proc macro crate 没有依赖（`syn` 本来也在 PyO3 的依赖里）
+  - 隐式的 `frame`（属性不写名字，宏凭空引入变量）：编辑器里跳不到定义，声明宏也做不到，将来没法迁移到 `macro_attr`
+  - nightly 的 `try_blocks`：每个函数要三行（建帧、`try { .. }`、收尾），`try` 块只拦截 `?`，`return Err(..)` 会绕过帧。`try_trait_v2` 加 `#[track_caller]` 在每个 `?` 处补帧：不经过 `?` 的 `return Err(..)` 和尾表达式会漏帧，签名也不再是 `PyResult`
+  - 把帧放在 `rt::def!` 的包装层：原生函数之间的直接调用不经过包装层，会丢帧。Drop guard：drop 时拿不到返回的 `Err`
   - 只在调用 Python 的语句前写 marker：不可靠，运算符也会调用用户的 `__mod__` 等方法，几乎每条语句都可能进入 Python 代码
   - 每个函数一张行号表，语句处只写表的下标：每条语句仍然要一个 key，噪音没有少
   - 用 `#[track_caller]` 或 Rust 源码行号报告 Rust 的位置：rustfmt 和手工修改都会打乱和 Python 行号的对应关系。直接在 traceback 里报 Rust 文件和行号以后可以考虑，但那是另一个产品决定（traceback 指向 Rust 而不是 Python）
   - proc macro 改写函数体，或者把每个 `?` 改写成带行号的形式：生成的代码不再是普通 Rust，也增加编译时间
   - 为每条语句生成伪造的行号表（`co_linetable`），可以得到多行显示和 `^` 定位，但要在生成代码里放一张静态位置表，噪音太大
   - 在调用期间压入真正的解释器帧：没有公开 API，见下面的 logging
-  - 在 Rust AST 上做后处理删掉 marker（M9 原来的计划）：lowering 里不输出更简单，`|frame|`/`|_|` 也能一起决定
+  - 在 Rust AST 上做后处理删掉 marker（M9 原来的计划）：lowering 里不输出更简单，属性里要不要 `frame` 也能一起决定
 - 每次调用的代价是 `frame!` 里几个字段的初始化，`--traceback-lines` 时再加每条语句一次 `Cell::set`，`fib(27)` 和 `for i in range(n): total += i` 在 release 下测不出差别（M4 前后都是 21 ms 和 130 ms）
 - logging、warnings 仍然看不到原生帧。它们读的是线程状态里正在执行的解释器帧（`sys._getframe`、`PyEval_GetFrame`），原生函数运行时这个链上没有它，而在调用期间伪造一个解释器帧没有公开 API（`_PyInterpreterFrame` 是内部结构，`f_lineno` 只能在 trace 函数里设置），所以只记录为已知差异（第 12 节）
 
@@ -992,7 +996,7 @@ match int.call1((s,)) {
 
 - 表达式里查找 builtin 或全局名字的 `?` 提到 `match` 前面（`let int = ..;`），这样 scrutinee 里没有 `?`。还有别的 `?` 时写成 `(|| expr)()`
 - `else` 的语句放在 `Ok` 分支里
-- handler 的类型是 builtin 异常时写成 `err.is_instance_of::<PyX>(py)`，元组写成几个 `||`。其余写 `frame.matches(&err, LINE, || handler)?`：先把这一帧补进 traceback 并把异常设为正在处理的异常，再求值 handler 的类型。类型不是异常类时和 CPython 一样抛 `TypeError`，它的 `__context__` 是原来的异常。`LINE` 在 `--traceback-lines` 时是 `except` 所在的行，traceback 指向这一行；默认是 `def` 行，这样求值之后不会留下一个过期的 `except` 行号
+- handler 的类型是 builtin 异常时写成 `err.is_instance_of::<PyX>(py)`，元组写成几个 `||`。其余写 `frame.matches(&err, || handler)?`：先把这一帧补进 traceback 并把异常设为正在处理的异常，再求值 handler 的类型。类型不是异常类时和 CPython 一样抛 `TypeError`，它的 `__context__` 是原来的异常。`--traceback-lines` 时写成 `frame.matches_at(&err, LINE, || handler)?`，`LINE` 是 `except` 所在的行，traceback 指向这一行；默认的写法不带行号，行号留在 `def` 行，求值之后不会留下一个过期的 `except` 行号
 - body 不会失败的 `try` 只生成 body（§5）。scrutinee 是不带 `?` 的 `Ok(..)` 时写成 `Ok::<_, PyErr>(..)`，否则 rustc 推断不出错误类型（E0282）
 - 最后一个分支 `Err(err) => return Err(err)` 把没有匹配的异常传出去
 
@@ -1004,7 +1008,7 @@ match (|| -> PyResult<()> {
     Ok(())
 })() {
     Ok(()) => {}
-    Err(err) if frame.matches(&err, 66, || m.global("ValueError"))? => {
+    Err(err) if frame.matches(&err, || m.global("ValueError"))? => {
         let e = frame.catch(err);
         ..
     }
@@ -1070,39 +1074,36 @@ pub mod point {
 
     // point.py:6
     /// The body of `class Point`, run in its namespace `ns`.
+    #[rt::frame(ns, "Point", 6)]
     pub fn body<'py>(m: &rt::Module<'py>, ns: &rt::Namespace<'py>) -> PyResult<()> {
-        rt::frame!(ns, "Point", 6, |_| {
-            let __class__ = ns.class_cell();
-            rt::def!(ns, __init__(slf as "self", x, y))?;
-            rt::def!(ns, @property norm(slf as "self"))?;
-            rt::def!(ns, describe[&__class__](slf as "self"))?;
-            Ok(())
-        })
+        let __class__ = ns.class_cell();
+        rt::def!(ns, __init__(slf as "self", x, y))?;
+        rt::def!(ns, @property norm(slf as "self"))?;
+        rt::def!(ns, describe[&__class__](slf as "self"))?;
+        Ok(())
     }
 
     // point.py:7
+    #[rt::frame(m, "Point.__init__", 7)]
     pub fn __init__<'py>(
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.__init__", 7, |_| {
-            slf.set_attr("x", x)?;
-            slf.set_attr("y", y)?;
-            Ok(rt::none(m.py()))
-        })
+        slf.set_attr("x", x)?;
+        slf.set_attr("y", y)?;
+        Ok(rt::none(m.py()))
     }
 
     // point.py:19
+    #[rt::frame(m, "Point.describe", 19)]
     pub fn describe<'py>(
         m: &rt::Module<'py>,
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::frame!(m, "Point.describe", 19, |_| {
-            rt::str(m.py(), "point on ").add(rt::super_(__class__, slf)?.method0("describe")?)
-        })
+        rt::str(m.py(), "point on ").add(rt::super_(__class__, slf)?.method0("describe")?)
     }
 }
 
@@ -1123,7 +1124,7 @@ m.set_global(
 
 ### 类体
 
-- 类体在自己的帧里运行（`rt::frame!(ns, "Point", 6, ..)`，traceback 里是 `in Point`，`f_locals` 是命名空间）。`ns: &rt::Namespace` 包着 `__prepare__` 返回的命名空间，名字按 `LOAD_NAME` 的规则查找：先查命名空间（精确的 dict 走快速路径，别的 mapping 用 `__getitem__`，只接住 `KeyError`），再查 globals 和 builtins。读是 `ns.get("x")?`，写是 `ns.set("x", v)?`，`del x` 是 `ns.del("x")?`
+- 类体在自己的帧里运行（`#[rt::frame(ns, "Point", 6)]`，traceback 里是 `in Point`，`f_locals` 是命名空间）。`ns: &rt::Namespace` 包着 `__prepare__` 返回的命名空间，名字按 `LOAD_NAME` 的规则查找：先查命名空间（精确的 dict 走快速路径，别的 mapping 用 `__getitem__`，只接住 `KeyError`），再查 globals 和 builtins。读是 `ns.get("x")?`，写是 `ns.set("x", v)?`，`del x` 是 `ns.del("x")?`
 - 所以类体里的任意语句（`if`、`for`、`try`、`with`、嵌套类、条件定义的方法、有副作用的调用）都是原生代码，执行顺序和副作用与 CPython 一样
 - 方法、lambda 看不到类的命名空间（类作用域的规则），它们引用的名字照常是全局变量或闭包变量。方法里和类属性同名的全局变量读的仍是全局变量
 - 私有名字改编（类 `Point` 里的 `__x` 是 `_Point__x`）在 frontend 的 desugar 里按 `_Py_Mangle` 的规则做，和 symtable 一致，生成代码里直接写改编后的名字。`def`、`class` 的 `__name__` 不改编，只改编绑定的名字
@@ -1261,7 +1262,7 @@ CPython 直接运行 json 的驱动脚本是 27 ms（`python -c pass` 是 16 ms�
 
 - Rust 关键字用 `r#`（`type`、`match`、`loop`、`ref`、`move`、edition 2024 保留的 `gen` 等），PyO3 会去掉参数名的 `r#`
 - `self`、`super`、`crate` 不能做 raw identifier，`self` 改名为 `slf`
-- 生成代码自己使用的名字和 Python 名字冲突时，改名 Python 名字，加 `_` 后缀直到不冲突。函数体内保留 `py`、`_guard`、`frame`、`_handling`、`Ok`、`Err`、`Some`、`None`；模块级函数名保留 `exec_module`、`m`、`module`、`py`、`frame`，它们是生成的函数的局部变量（名为 `m` 的 Python 函数生成 `fn m_`）。不需要改名的名字优先保留原拼写，改名不会抢占它们
+- 生成代码自己使用的名字和 Python 名字冲突时，改名 Python 名字，加 `_` 后缀直到不冲突。函数体内保留 `py`、`frame`、`_handling`、`Ok`、`Err`、`Some`、`None`；模块级函数名保留 `exec_module`、`m`、`module`、`py`、`frame`，它们是生成的函数的局部变量（名为 `m` 的 Python 函数生成 `fn m_`）。不需要改名的名字优先保留原拼写，改名不会抢占它们
 - 模块上下文参数叫 `m`，和 `#[pymodule]` 函数的模块参数一样。函数里有名为 `m` 的 Python 局部变量（常见的是正则的 match 对象）时，保留局部变量的名字，这个函数的上下文参数改叫 `module`
 - 嵌套函数的 Rust fn 和外层函数的局部变量、临时变量在同一个命名空间，冲突时同样加 `_` 后缀
 - 类的 Rust mod 名是类名的 snake case（`TextCalendar` 是 `text_calendar`），和模块里别的 mod、`rt`、`pyo3`、`std`、`body`、Rust 关键字冲突时加 `_`。mod 里的方法 fn 避开 `body`、模块级函数名（`use super::*` 会被遮蔽）和生成代码自己的名字，类体 fn 的局部变量 `ns`、`__class__` 同样保留
@@ -1522,7 +1523,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - **生成代码检查器**（§2）在每次转换时运行，所以 golden、语料和 e2e 都经过它，`tests/test_verify.py` 另有针对每条规则的单元测试
 - **`PYO3_PYTHON` 必须显式设置**。`.cargo/config.toml` 只对仓库内的构建生效，生成到仓库外的 crate 会悄悄用系统 Python 构建
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：在源码 checkout 里运行时（测试和开发）用 path 依赖，指向仓库里的 `crates/steelix-runtime`；从 PyPI 安装的 steelix 找不到这个目录，写成 crates.io 上的版本（`emit/crate.py` 的 `RUNTIME_VERSION`，现在是 `"0.2"`）。`--runtime-path` 可以显式指定。所以 runtime 必须和 PyPI 上的 steelix 同步发布到 crates.io，版本的前两位一致
-- **发版**：PyPI 上的 `steelix` 和 crates.io 上的 `steelix-runtime` 一起发布，git tag 用 `v` 前缀（`v0.1.0`）。改了 runtime 的公开接口（生成代码用到的部分）时提升 `RUNTIME_VERSION`
+- **发版**：PyPI 上的 `steelix` 和 crates.io 上的 `steelix-runtime`、`steelix-runtime-macros`（runtime 依赖它，版本相同，先发布）一起发布，git tag 用 `v` 前缀（`v0.1.0`）。改了 runtime 的公开接口（生成代码用到的部分）时提升 `RUNTIME_VERSION`
 - 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
 - **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
 
@@ -1549,10 +1550,10 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 
 所以 `extract`/`into_pyobject` 只出现在适配层里，每个函数一个地方。
 
-生成的函数体包在 `rt::frame!(m, "name", N, |_| { .. })` 里（§9），改写时按情况处理
+生成的 fn 带 `#[rt::frame(m, "name", N)]` 属性（§9），改写时按情况处理
 
-- 函数自己的逻辑不再抛 Python 异常（错误由原生代码的 `Result` 表达，适配层只做转换）时，去掉这个包装，下面的 `percentile` 就是这样。这时 traceback 里没有这个函数的帧，异常显示在调用方的帧里
-- 想在 traceback 里继续看到这个函数时，保留两行的包装 `rt::frame!(m, "name", N, |_| { .. })` 把适配层包起来，`N` 仍是 `def` 行，不用跟着改写调整
+- 函数自己的逻辑不再抛 Python 异常（错误由原生代码的 `Result` 表达，适配层只做转换）时，去掉这个属性，下面的 `percentile` 就是这样。这时 traceback 里没有这个函数的帧，异常显示在调用方的帧里
+- 想在 traceback 里继续看到这个函数时，保留适配层上的属性 `#[rt::frame(m, "name", N)]`，`N` 仍是 `def` 行，不用跟着改写调整
 - 默认的输出里没有 `frame.line(N)` marker，改写时没有要同步的行号。用 `--traceback-lines` 生成的代码改写时，改过的部分直接删掉 marker 就行，留着过期的 marker 会让 traceback 报错的行号
 
 ```rust
@@ -1736,7 +1737,7 @@ impl Context {
     }
     ```
 
-- **抛项目自己的异常类。** `m.error("ParseError", (message,))` 按 globals 里的名字（同样是 import 的别名）构造异常，返回 `PyErr`，可以直接用在 `map_err` 里。查找、构造失败或者得到的不是异常时，返回的就是那个错误，和 `raise` 一样。异常的 traceback 由它经过的原生帧补上，适配层保留 `rt::frame!` 时有这一帧。它不设置 `__context__`，在 `except` 块里抛异常时仍用生成代码的写法 `frame.raise(m.global("ParseError")?.call1((..,))?)`
+- **抛项目自己的异常类。** `m.error("ParseError", (message,))` 按 globals 里的名字（同样是 import 的别名）构造异常，返回 `PyErr`，可以直接用在 `map_err` 里。查找、构造失败或者得到的不是异常时，返回的就是那个错误，和 `raise` 一样。异常的 traceback 由它经过的原生帧补上，适配层保留 `#[rt::frame]` 时有这一帧。它不设置 `__context__`，在 `except` 块里抛异常时仍用生成代码的写法 `frame.raise(m.global("ParseError")?.call1((..,))?)`
 
     ```rust
     let datum = native::parse(&text).map_err(|err| match err {

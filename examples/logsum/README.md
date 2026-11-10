@@ -53,45 +53,46 @@ Generated:
 ```rust
 // logsum.py:28
 /// Split one log line into a request record, or return None if it is malformed.
+#[rt::frame(m, "parse_line", 28)]
 pub fn parse_line<'py>(
     m: &rt::Module<'py>,
     line: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    rt::frame!(m, "parse_line", 28, |_| {
-        let parts = line.method0("split")?;
-        if parts.len()? < 10
-            || !parts
-                .get_item(3)?
-                .method1("startswith", ("[",))?
-                .is_truthy()?
-        {
-            return Ok(rt::none(py));
-        }
-        let status = parts.get_item(8)?;
-        if status.len()? != 3 || !status.method0("isdigit")?.is_truthy()? {
-            return Ok(rt::none(py));
-        }
-        let size = parts.get_item(9)?;
-        let mut millis = rt::none(py);
-        if parts.len()? > 10
-            && parts
-                .get_item(10)?
-                .method1("endswith", ("ms",))?
-                .is_truthy()?
-        {
-            millis = rt::builtin(py, "int")?.call1((parts
-                .get_item(10)?
-                .get_item(rt::slice(py, py.None(), -2)?)?,))?;
-        }
-        Ok([
-            ("ip", &parts.get_item(0)?),
-            // ... five more fields ...
-            ("ms", &millis),
-        ]
-        .into_py_dict(py)?
-        .into_any())
-    })
+    let parts = line.method0("split")?;
+    if parts.len()? < 10
+        || !parts
+            .get_item(3)?
+            .method1("startswith", ("[",))?
+            .is_truthy()?
+    {
+        return Ok(rt::none(py));
+    }
+    let status = parts.get_item(8)?;
+    if status.len()? != 3 || !status.method0("isdigit")?.is_truthy()? {
+        return Ok(rt::none(py));
+    }
+    let size = parts.get_item(9)?;
+    let mut millis = rt::none(py);
+    if parts.len()? > 10
+        && parts
+            .get_item(10)?
+            .method1("endswith", ("ms",))?
+            .is_truthy()?
+    {
+        millis = rt::builtin(py, "int")?.call1((parts.get_item(10)?.get_item(rt::slice(
+            py,
+            py.None(),
+            -2,
+        )?)?,))?;
+    }
+    Ok([
+        ("ip", &parts.get_item(0)?),
+        // ... five more fields ...
+        ("ms", &millis),
+    ]
+    .into_py_dict(py)?
+    .into_any())
 }
 ```
 

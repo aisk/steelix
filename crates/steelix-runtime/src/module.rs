@@ -70,7 +70,7 @@ impl<'py> Module<'py> {
     /// When looking the class up or calling it fails, or it returns something
     /// that is not an exception, that error is returned instead, like `raise`
     /// does. The exception gets its traceback entries from the native frames
-    /// it propagates through (the adapter's `rt::frame!`, if it keeps one),
+    /// it propagates through (the adapter's `#[rt::frame]`, if it keeps one),
     /// and no `__context__`: use `frame.raise` inside a handler.
     pub fn error(&self, name: &'static str, args: impl PyCallArgs<'py>) -> PyErr {
         match self.global(name).and_then(|class| class.call1(args)) {

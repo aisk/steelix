@@ -382,6 +382,10 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] 拆分大文件：`frontend/bindings.py` 拆成 `module_bindings.py`（模块级绑定）和 `locals.py`（局部变量的定值分析）；`lower/expr.py` 拆出 `calls.py`（调用）、`defs.py`（`def`/`lambda` 的函数对象）和它们共用的 `values.py`（`Kind`、`Value`）。有了 `values.py`，`comprehension.py` 里为避开循环 import 写在函数内的 import 也挪到了模块顶部
 - [x] `frame.catch` 和 `rt::Handling` 合成一个 RAII 的值 `rt::Caught`，`except` 块里只写 `let e = frame.catch(err);`（没有 `as` 时是 `_caught`）。`Caught` deref 成 `Bound`，实现了 `IntoPyObject`、`IntoException`，生成的代码里 `e` 的用法不变，golden 净少约 115 行。`rt::Handling` 仍然用在 `finally`、`with` 的 runtime 里
 - [x] 文档：§12 里不存在的 `--dynamic-globals` 改成"以后可以加"，§14 的 `traceback_lines/` golden 列表，§2 的流水线和 §3 的目录结构补上漏掉的模块、子命令和 runtime 文件，`CLAUDE.md` 是本地文件，不在仓库里
+- [x] `rt::frame!(m, "f", N, |frame| { .. })` 闭包换成 fn 上的属性 `#[rt::frame(m, "f", N)]`，函数体用到帧时第四个参数写出它的名字 `frame`（design §9）。函数体少一层缩进，qualname 长的嵌套函数不再被 rustfmt 拆成五行，golden 少约 3% 的行。宏在新的 `crates/steelix-runtime-macros`（proc macro，没有依赖），和 runtime 一起发布。`rt::frame!` 删掉了，是 runtime 公开接口的不兼容变化
+- [x] `let _guard = rt::RecursionGuard::enter(py)?;` 并进属性：会递归的函数写 `#[rt::frame(m, "fib", 1, recursive)]`。没有改成每个帧都检查：release 下每次直接调用多约 5 ns（300 万次 `add(total, i)` 从 124 ms 到 139 ms），而需要检查的只有调用图里有环的函数
+- [ ] `macro_attr`（rust-lang/rust#143547）稳定后把 `#[rt::frame]` 换成 runtime 里的声明宏，去掉 `steelix-runtime-macros`，生成的代码不变
+- [x] 默认模式下 `frame.matches(&err, N, || ..)` 的行号参数总是 `def` 行，去掉了（golden 里 152 处），写成 `frame.matches(&err, || ..)`。`--traceback-lines` 时是带行号的 `frame.matches_at(&err, N, || ..)`
 
 ## 性能的候选项（未排期）
 

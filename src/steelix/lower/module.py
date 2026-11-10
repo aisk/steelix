@@ -227,11 +227,13 @@ def _lower_exec_module(
     ok = rs.Call(rs.Path("Ok"), (rs.Tuple(()),))
 
     block = rs.Block(tuple(body), ok if ctx.flow.end_reachable else None)
+    framed, attrs = in_frame(CONTEXT, "<module>", 1, block)
     return rs.Fn(
         name="exec_module",
         params=(rs.Param(CONTEXT, "&rt::Module<'_>"),),
         ret="PyResult<()>",
-        body=bind_py(in_frame(CONTEXT, "<module>", 1, block), CONTEXT),
+        body=bind_py(framed, CONTEXT),
+        attrs=attrs,
         doc=(f"Executes the body of `{parsed.filename}` in the module `{CONTEXT}`.",),
     )
 
