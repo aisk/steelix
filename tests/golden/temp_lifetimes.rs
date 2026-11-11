@@ -23,7 +23,7 @@ pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<Bou
 #[rt::frame(m, "function", 64)]
 pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let e = PyDict::new(py).into_any();
+    let e = PyDict::new(py);
     e.set_item("k", make(m, &rt::str(py, "function item"))?)?;
     e.del_item("k")?;
     rt::builtins::print(py, ("after function item",))?;
@@ -48,10 +48,10 @@ pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 #[rt::frame(m, "loop", 78)]
 pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let mut e: Bound<'py, PyAny>;
+    let mut e: Bound<'py, PyDict>;
     for i in rt::iter(&rt::builtins::range(py, (2,))?)? {
         let i = i?;
-        e = PyDict::new(py).into_any();
+        e = PyDict::new(py);
         e.set_item(
             &i,
             make(m, &rt::fstring(py, ("loop ", rt::format(&i, "")?))?)?,

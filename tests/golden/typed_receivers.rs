@@ -66,7 +66,7 @@ pub fn containers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             PyList::new(py, [1, 2])?.contains(2)?,
             PyTuple::new(py, [1, 2])?.contains(3)?,
             [("a", 1)].into_py_dict(py)?.contains("a")?,
-            PySet::new(py, [1])?.contains(1)?,
+            PySet::new(py, [1])?.as_any().contains(1)?,
         ),
     )?;
     rt::builtins::print(
@@ -84,7 +84,7 @@ pub fn containers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     if !PyDict::new(py).is_truthy()? {
         rt::builtins::print(py, ("empty dict",))?;
     }
-    let xs = PyList::new(py, [1, 2, 3])?.into_any();
+    let xs = PyList::new(py, [1, 2, 3])?;
     if xs.try_iter()?.as_any().eq(xs.try_iter()?)? {
         rt::builtins::print(py, ("unreachable",))?;
     }

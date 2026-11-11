@@ -15,7 +15,7 @@ pub fn build<'py>(
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let items = PyList::new(py, [a, b, &a.add(b)?])?.into_any();
+    let items = PyList::new(py, [a, b, &a.add(b)?])?;
     let pair = PyTuple::new(py, [a, b])?.into_any();
     let single = PyTuple::new(py, [a])?.into_any();
     let empty = PyTuple::empty(py).into_any();
@@ -24,9 +24,8 @@ pub fn build<'py>(
         (&rt::str(py, "b"), b),
         (a, &rt::str(py, "first")),
     ]
-    .into_py_dict(py)?
-    .into_any();
-    let unique = PySet::new(py, [a, b, a])?.into_any();
+    .into_py_dict(py)?;
+    let unique = PySet::new(py, [a, b, a])?;
     rt::builtins::print(
         py,
         (
@@ -58,7 +57,7 @@ pub fn build<'py>(
             PySet::new(py, ["x"])?,
         ),
     )?;
-    Ok(items)
+    Ok(items.into_any())
 }
 
 // displays.py:18

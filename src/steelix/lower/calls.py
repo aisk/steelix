@@ -43,6 +43,11 @@ _SPECIAL_BUILTINS = {
 }
 
 
+# Methods of an exact container whose PyO3 method does exactly the same,
+# taking the argument as `impl IntoPyObject` and returning `PyResult<()>`.
+_CONTAINER_METHODS = {("PyList", "append"), ("PySet", "add")}
+
+
 def _try(expr: rs.Expr) -> rs.Expr:
     return rs.Try(expr)
 
@@ -146,6 +151,24 @@ class CallLowering:
                 call = obj.method("method0", name)
             return Value(_try(call), Kind.OWNED)
         return self.call_value(callee, values)
+
+    def container_call(
+        self: ExprLowering, func: ast.Attribute, args: list[ast.expr]
+    ) -> rs.Expr | None:
+        """`xs.append(x)` or `s.add(x)` as a statement, where `xs` is known
+        to be an exact `list` (`s` an exact `set`): PyO3's `xs.append(&x)?`,
+        which is the same `PyList_Append` the method of the builtin type
+        ends up in, and `()` instead of a `None` nobody uses. `None` if the
+        call is something else."""
+        if not isinstance(func.value, ast.Name) or len(args) != 1:
+            return None
+        if isinstance(args[0], ast.Starred):
+            return None
+        obj = self.value(func.value)  # a name: nothing to undo if it is not one
+        if (obj.typed, func.attr) not in _CONTAINER_METHODS or not obj.is_pure:
+            return None
+        item = self.value(args[0])
+        return _try(rs.MethodCall(obj.expr, func.attr, (item.arg(),), concrete=True))
 
     def is_global(self: ExprLowering, name: str) -> bool:
         """Whether `name` is looked up in the module globals (and builtins)."""

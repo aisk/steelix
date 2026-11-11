@@ -118,8 +118,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             PyList::new(py, [1, 2, 3])?.as_any(),
             &rt::str(py, "noise"),
         ],
-    )?
-    .into_any();
+    )?;
     frame.line(44);
     for request in requests.try_iter()? {
         let request = request?;

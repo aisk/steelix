@@ -75,6 +75,9 @@ class FunctionInfo:
     change it."""
     bool_locals: frozenset[str] = frozenset()
     """Locals that are a Rust `bool` (`frontend.booleans`, design §5)."""
+    container_locals: dict[str, str] = field(default_factory=dict)
+    """Locals that are a `Bound` of a concrete container type, `PyList`,
+    `PyDict` or `PySet` (`frontend.containers`, design §5)."""
     kind: str = "function"
     """`function`, `coroutine` or `generator` (`scope.function_kind`)."""
 
@@ -85,7 +88,9 @@ class FunctionInfo:
 
     def local_type(self, name: str) -> str:
         """The Rust type of an ordinary (not `Option`) local."""
-        return "bool" if name in self.bool_locals else "Bound<'py, PyAny>"
+        if name in self.bool_locals:
+            return "bool"
+        return f"Bound<'py, {self.container_locals.get(name, 'PyAny')}>"
 
     def is_cell(self, name: str) -> bool:
         """Whether `name` is a `rt::Cell` here: an owned cell that nested

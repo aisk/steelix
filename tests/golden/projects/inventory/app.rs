@@ -221,6 +221,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             let m = m?;
             let item = m.method1("split", (".",))?.get_item(0)?;
             if PySet::new(module.py(), ["store", "plugins", "config", "lazy", "app"])?
+                .as_any()
                 .contains(&item)?
             {
                 return Ok(Some(m));

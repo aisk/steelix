@@ -413,7 +413,8 @@ class ExprLowering(CallLowering, FunctionObjectLowering, ComprehensionLowering):
             # A later `:=` in the same expression may assign it.
             pure = False if name in fn.walrus_targets else None
             caught = name in fn.locals.handler_scoped
-            return Value(rs.Path(rust), Kind.PLACE, pure=pure, caught=caught)
+            typed = fn.container_locals.get(name)
+            return Value(rs.Path(rust), Kind.PLACE, pure=pure, caught=caught, typed=typed)
         return self.global_name(name)
 
     def global_name(self, name: str) -> Value:
@@ -583,6 +584,14 @@ class ExprLowering(CallLowering, FunctionObjectLowering, ComprehensionLowering):
                 return [v.expr for v in values]
         if values and all(v.kind is Kind.BOOL or _is_bool_literal(v) for v in values):
             return [v.expr for v in values]  # Rust `bool`s: `[found, x.is_none()]`
+        # After a first element that is a `&Bound<'py, PyAny>`, Rust coerces
+        # the others to it: `[&end, &xs]`. So it does among typed locals of
+        # one type, `[&xs, &ys]`.
+        first = values[0] if values else None
+        if first is not None and (first.typed or first.caught) and first.kind is not Kind.OWNED:
+            same = all(v.typed == first.typed and v.kind is Kind.PLACE for v in values)
+            if not same:
+                return [v.erased() for v in values]
         return [v.ref() for v in values]
 
     def sequence(self, type_name: str, elts: list[ast.expr]) -> Value:

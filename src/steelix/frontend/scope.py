@@ -168,7 +168,8 @@ def comprehension_variables(node: Comprehension | ast.GeneratorExp) -> frozenset
         name.id
         for generator in node.generators
         for name in ast.walk(generator.target)
-        if isinstance(name, ast.Name)
+        # `for xs[0] in ..` reads `xs`, a variable of the enclosing scope.
+        if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
     )
 
 

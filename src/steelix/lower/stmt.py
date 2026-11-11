@@ -300,6 +300,10 @@ class StmtLowering(HandlingLowering, MatchLowering):
                 then = self.nested(lambda: self.expr_stmt(body))
                 other = self.nested(lambda: self.expr_stmt(orelse))
                 return [rs.If(cond, then, other if other.stmts else None)]
+            case ast.Call(ast.Attribute() as func, args, []):
+                call = self.exprs.container_call(func, args)
+                if call is not None:
+                    return [rs.ExprStmt(call)]
         lowered = self.exprs.value(value)
         if lowered.is_pure or lowered.kind is Kind.PLACE:
             return []  # reading an assigned local has no effect
@@ -660,6 +664,9 @@ class StmtLowering(HandlingLowering, MatchLowering):
         if name in fn.bool_locals:
             assert value.kind is Kind.BOOL, value
             init = value.expr
+        elif name in fn.container_locals:
+            assert value.typed == fn.container_locals[name], value
+            init = value.concrete()
         if name in info.optional:
             init = rs.Call(rs.Path("Some"), (init,))
         if info.declared_at.get(name) is stmt:

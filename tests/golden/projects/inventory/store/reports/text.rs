@@ -46,10 +46,10 @@ pub fn render<'py>(
     inventory: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let out = PyList::empty(py).into_any();
+    let out = PyList::empty(py);
     for line in rt::iter(&m.global("lines")?.call1((inventory,))?)? {
         let line = line?;
-        out.method1("append", (&line,))?;
+        out.append(&line)?;
     }
     rt::str(py, "\n").method1("join", (&out,))
 }

@@ -52,7 +52,7 @@ pub fn py_scanstring<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = module.py();
     let mut end = end.clone();
-    let chunks = PyList::empty(py).into_any();
+    let chunks = PyList::empty(py);
     let _append = chunks.attr("append")?;
     let begin = end.sub(1)?;
     let mut chunk: Bound<'py, PyAny>;
@@ -324,7 +324,7 @@ pub fn JSONArray<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let [s, mut end] = rt::unpack(s_and_end)?;
-    let values = PyList::empty(py).into_any();
+    let values = PyList::empty(py);
     let mut nextchar = s.get_item(rt::slice(py, &end, end.add(1)?)?)?;
     if _ws.contains(&nextchar)? {
         end = _w.call1((&s, end.add(1)?))?.method0("end")?;
@@ -332,7 +332,7 @@ pub fn JSONArray<'py>(
     }
     // Look-ahead for trivial empty array
     if nextchar.eq("]")? {
-        return Ok(PyTuple::new(py, [&values, &end.add(1)?])?.into_any());
+        return Ok(PyTuple::new(py, [values.as_any(), &end.add(1)?])?.into_any());
     }
     let _append = values.attr("append")?;
     let mut value: Option<Bound<'py, PyAny>> = None;
@@ -398,7 +398,7 @@ pub fn JSONArray<'py>(
         }
         py.check_signals()?;
     }
-    Ok(PyTuple::new(py, [&values, &end])?.into_any())
+    Ok(PyTuple::new(py, [values.as_any(), &end])?.into_any())
 }
 
 /// Subclass of ValueError with the following additional properties:

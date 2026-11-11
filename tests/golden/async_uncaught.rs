@@ -47,12 +47,12 @@ pub async fn delegate<'py>(
 pub async fn leaf<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let sleep = m.global("asyncio")?.method1("sleep", (0,))?;
     rt::await_(sleep).await?;
-    let values = PyList::empty(m.py()).into_any();
+    let values = PyList::empty(m.py());
     for value in rt::iter(&m.global("delegate")?.call1((n,))?)? {
         let value = value?;
-        values.method1("append", (&value,))?;
+        values.append(&value)?;
     }
-    Ok(values)
+    Ok(values.into_any())
 }
 
 // async_uncaught.py:39

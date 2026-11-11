@@ -34,7 +34,7 @@ pub fn target_kinds<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         m.global("print")?.call1(("unpacked", &name, &size))?;
         Ok(())
     })?;
-    let holder = PyDict::new(py).into_any();
+    let holder = PyDict::new(py);
     frame.with(&m.global("Manager")?.call1(("d",))?, |value| {
         holder.set_item("value", value)?;
         Ok(())

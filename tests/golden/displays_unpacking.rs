@@ -29,22 +29,20 @@ pub fn lists<'py>(
     b: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let first = rt::list!(py, *a, b)?.into_any();
+    let first = rt::list!(py, *a, b)?;
     let second = rt::list!(
         py,
         trace(m, &rt::str(py, "x"), &rt::int(py, 0))?,
         *trace(m, &rt::str(py, "a"), &m.global("Noisy")?.call1(("a", a))?)?,
         trace(m, &rt::str(py, "b"), b)?,
         *m.global("Noisy")?.call1(("c", "cd"))?
-    )?
-    .into_any();
+    )?;
     let nested = rt::list!(
         py,
         *rt::list!(py, *a)?,
         *PyTuple::empty(py),
         *rt::builtins::range(py, (2,))?
-    )?
-    .into_any();
+    )?;
     // The comprehension needs statements first: they run after `Noisy` is iterated.
     let lazy = rt::list!(
         py,
@@ -65,8 +63,7 @@ pub fn lists<'py>(
             }
             list2.into_any()
         }
-    )?
-    .into_any();
+    )?;
     rt::builtins::print(py, (&first, &second, &nested, &lazy))?;
     Ok(rt::list!(py, *a)?.into_any())
 }
@@ -101,8 +98,7 @@ pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'
             &m.global("Noisy")?
                 .call1(("a", PyList::new(py, [&m.global("Key")?.call1(("k3",))?])?))?
         )?
-    )?
-    .into_any();
+    )?;
     // displays_unpacking.py:63
     #[rt::frame(m, "sets.<locals>.<genexpr>", 63)]
     fn genexpr<'py>(
@@ -133,15 +129,14 @@ pub fn dicts<'py>(
     v: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let merged = rt::dict!(py, **d, ("k", v))?.into_any();
+    let merged = rt::dict!(py, **d, ("k", v))?;
     let order = rt::dict!(
         py,
         ("a", 1),
         ("b", 2),
         **[("a", 3), ("c", 4)].into_py_dict(py)?,
         ("b", 5)
-    )?
-    .into_any();
+    )?;
     let keys = rt::dict!(
         py,
         (
@@ -153,8 +148,7 @@ pub fn dicts<'py>(
             2
         ),
         **d
-    )?
-    .into_any();
+    )?;
     rt::builtins::print(
         py,
         (&merged, &order, rt::builtins::list(py, (&order,))?, &keys),

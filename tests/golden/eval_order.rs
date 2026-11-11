@@ -75,7 +75,7 @@ pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 #[rt::frame(m, "augmented", 32)]
 pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let data = PyList::new(py, [10, 20])?.into_any();
+    let data = PyList::new(py, [10, 20])?;
     {
         let target = trace(m, &rt::str(py, "target"), &data)?;
         let index = trace(m, &rt::str(py, "index"), &rt::int(py, 0))?;

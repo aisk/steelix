@@ -14,7 +14,7 @@ pub async fn with_flow<'py>(
     m: &rt::Module<'py>,
     items: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let found = PyList::empty(m.py()).into_any();
+    let found = PyList::empty(m.py());
     for item in rt::iter(items)? {
         let item = item?;
         match frame
@@ -26,9 +26,9 @@ pub async fn with_flow<'py>(
                     return Ok(rt::Flow::Break);
                 }
                 if item.eq("return")? {
-                    return Ok(rt::Flow::Return(found.clone()));
+                    return Ok(rt::Flow::Return(found.clone().into_any()));
                 }
-                found.method1("append", (value,))?;
+                found.append(value)?;
                 Ok(rt::Flow::Next)
             })
             .await?
@@ -39,7 +39,7 @@ pub async fn with_flow<'py>(
             rt::Flow::Next => {}
         }
     }
-    Ok(found)
+    Ok(found.into_any())
 }
 
 // async_with_for.py:106
@@ -49,7 +49,7 @@ pub async fn for_flow<'py>(
     n: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let seen = PyList::empty(py).into_any();
+    let seen = PyList::empty(py);
     let mut i: Bound<'py, PyAny>;
     'for_else: {
         {
@@ -63,29 +63,29 @@ pub async fn for_flow<'py>(
                 if i.eq(1)? {
                     break 'for_else;
                 }
-                seen.method1("append", (&i,))?;
+                seen.append(&i)?;
                 py.check_signals()?;
             }
         }
-        seen.method1("append", ("no break",))?;
+        seen.append("no break")?;
     }
     {
         let iter = rt::aiter(&m.global("Countdown")?.call1((2,))?)?;
         while let Some(item2) = rt::anext(&iter).await? {
             i = item2;
-            seen.method1("append", (&i,))?;
+            seen.append(&i)?;
             py.check_signals()?;
         }
     }
-    seen.method1("append", ("else",))?;
+    seen.append("else")?;
     {
         let iter = rt::aiter(&m.global("SyncStop")?.call0()?)?;
         while let Some(underscore) = rt::anext(&iter).await? {
-            seen.method1("append", ("never",))?;
+            seen.append("never")?;
             py.check_signals()?;
         }
     }
-    Ok(seen)
+    Ok(seen.into_any())
 }
 
 // async_with_for.py:125
@@ -169,16 +169,16 @@ pub async fn found_in<'py>(
 #[rt::frame(m, "unpacking", 147)]
 pub async fn unpacking<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let pairs = PyList::empty(py).into_any();
+    let pairs = PyList::empty(py);
     {
         let iter = rt::aiter(&m.global("Pairs")?.call0()?)?;
         while let Some(item) = rt::anext(&iter).await? {
             let [a, b] = rt::unpack(&item)?;
-            pairs.attr("append")?.call1((a.add(&b)?,))?;
+            pairs.append(a.add(&b)?)?;
             py.check_signals()?;
         }
     }
-    Ok(pairs)
+    Ok(pairs.into_any())
 }
 
 // async_with_for.py:167

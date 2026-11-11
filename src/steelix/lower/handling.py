@@ -566,10 +566,8 @@ class HandlingLowering:
                 if len(args) <= MAX_CALL_ARGS:
                     return self.new_err(name, args)
         value = self.exprs.value(exc)
-        if value.kind is Kind.PLACE:
-            return rs.Ref(value.expr)
-        if value.kind is Kind.REF:
-            return value.ref()
+        if value.kind in (Kind.PLACE, Kind.REF):
+            return value.erased()
         return value.owned()
 
     def new_err(self: StmtLowering, name: str, args: list[ast.expr]) -> rs.Expr:

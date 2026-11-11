@@ -131,8 +131,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         ("indent", &options.attr("indent")?),
         ("ensure_ascii", &options.attr("ensure_ascii")?),
     ]
-    .into_py_dict(py)?
-    .into_any();
+    .into_py_dict(py)?;
     if options.attr("compact")?.is_truthy()? {
         dump_args.set_item("indent", py.None())?;
         dump_args.set_item("separators", PyTuple::new(py, [",", ":"])?)?;

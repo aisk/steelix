@@ -162,12 +162,12 @@ pub fn failing<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<Bou
     }
     let r#gen = rt::genexpr!(frame, genexpr(xs.try_iter()?))?;
     rt::builtins::print(py, ("created",))?;
-    let out = PyList::empty(py).into_any();
+    let out = PyList::empty(py);
     for value in rt::iter(&r#gen)? {
         let value = value?;
-        out.method1("append", (&value,))?;
+        out.append(&value)?;
     }
-    Ok(out)
+    Ok(out.into_any())
 }
 
 // generator_expressions.py:69
@@ -625,7 +625,7 @@ pub fn comprehension_variable<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
                 genexpr[&x_ as "x"](rt::builtins::range(py, (1,))?.try_iter()?)
             )?)?;
         }
-        list.into_any()
+        list
     };
     let list = PyList::empty(py);
     for g in rt::iter(&gens)? {

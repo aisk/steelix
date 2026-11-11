@@ -235,14 +235,12 @@ pub async fn outer<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
         n.mul(k)
     }
     let inner = rt::function!(frame, async inner[n](k))?;
-    let results = PyList::empty(py).into_any();
+    let results = PyList::empty(py);
     for k in rt::iter(&rt::builtins::range(py, (3,))?)? {
         let k = k?;
-        results
-            .attr("append")?
-            .call1((rt::await_(inner.call1((&k,))?).await?,))?;
+        results.append(rt::await_(inner.call1((&k,))?).await?)?;
     }
-    Ok(results)
+    Ok(results.into_any())
 }
 
 // async_basics.py:145
@@ -258,7 +256,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::delegate(is_odd(m, &rt::int(py, 7))).await?,
         ),
     )?;
-    let mut log = PyList::empty(py).into_any();
+    let mut log = PyList::empty(py);
     let gather = m.global("asyncio")?.attr("gather")?.call1((
         m.global("worker")?.call1(("a", 0.02, &log))?,
         m.global("worker")?.call1(("b", 0.01, &log))?,
@@ -266,7 +264,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     ))?;
     let results = rt::await_(gather).await?;
     rt::builtins::print(py, (&results, &log))?;
-    log = PyList::empty(py).into_any();
+    log = PyList::empty(py);
     let task = m
         .global("asyncio")?
         .attr("create_task")?

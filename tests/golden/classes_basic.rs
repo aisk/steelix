@@ -216,7 +216,7 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let yield_values = PyList::new(m.py(), [&slf.attr("x")?, &slf.attr("y")?])?.into_any();
+        let yield_values = PyList::new(m.py(), [&slf.attr("x")?, &slf.attr("y")?])?;
         Ok(yield_values.try_iter()?.into_any())
     }
 

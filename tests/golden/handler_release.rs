@@ -169,16 +169,14 @@ pub fn frame_names<'py>(
     err: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let names = PyList::empty(py).into_any();
+    let names = PyList::empty(py);
     let mut tb = err.attr("__traceback__")?;
     while !tb.is_none() {
-        names
-            .attr("append")?
-            .call1((tb.attr("tb_frame")?.attr("f_code")?.attr("co_name")?,))?;
+        names.append(tb.attr("tb_frame")?.attr("f_code")?.attr("co_name")?)?;
         tb = tb.attr("tb_next")?;
         py.check_signals()?;
     }
-    Ok(names)
+    Ok(names.into_any())
 }
 
 // handler_release.py:111

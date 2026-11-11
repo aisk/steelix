@@ -36,6 +36,7 @@ Python AST + 注释
   │  frontend/locals.py      局部变量的定值分析（definite assignment，§5），模块和类体的可达性
   │  frontend/regions.py     lowering 放进 Rust 闭包的代码（§9）
   │  frontend/booleans.py    只会是 bool 的局部变量（§5）
+  │  frontend/containers.py  只会是 list、dict、set 字面量的局部变量（§5）
   │  frontend/resolve.py     全局名字的引用怎样编译：直接调用、globals 查找、特化的 builtin（§7）
   │  frontend/callgraph.py   直接调用的调用图（递归、Box::pin）
   │  frontend/patterns.py    case 模式的分析（§8）
@@ -236,6 +237,14 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
   - 变量本身必须是普通的 Rust 局部变量：只由 `x = value` 赋值（没有 `for`、`with`、`except`、`import`、`del`、增量赋值、解包赋值和 `:=`），不会在可能未赋值时读取（那需要 `Option`，仍然用对象），没有被内层函数捕获，也不是单表达式 `try`（`try: x = expr`）的赋值目标（它的 `match` 得到的是对象）。函数里的 `locals()` 等本来就让整个函数保留为 Python
   - 赋值时右边按条件求值（`exprs.condition`），和 `if` 的条件写法一样。读取时是 `Kind.BOOL` 的值，和 `in`、`is` 的结果一样处理：条件里直接用，作为 `IntoPyObject` 参数（`print(found)`、`call1((found,))`）直接传 `found`，PyO3 转换成 `True`/`False`；需要 `Bound<PyAny>` 的地方（返回值、方法的接收者、`&Bound` 参数）写 `rt::bool(py, found)`。没有用 `PyBool::new(py, found)`，因为它返回 `Borrowed<PyBool>`，还要 `.to_owned().into_any()`；`found.into_pyobject(py)?` 也一样要擦除类型。全是 Rust `bool` 的列表、元组字面量直接写成 `[found, x.is_none()]`
   - 标准库 154 个模块里 7171 个转换的函数共有 12087 个局部变量，符合的有 128 个（99 个函数），`tests/apps` 的 6 个工具里有 4 个
+- 只会是 list、dict 或 set 字面量的局部变量（`frontend/containers.py`）声明成具体类型的 `Bound`，不擦除成 `PyAny`：`let xs = PyList::empty(py);`，没有赋值的声明是 `let xs: Bound<'py, PyList>;`。作为语句的 `xs.append(x)`、`s.add(x)` 写成 PyO3 的 `xs.append(&x)?`、`s.add(&x)?`，不再是 `xs.method1("append", (&x,))?`
+  - 条件是它每次被赋的值按 Python 的语义一定是精确的 `list`（或者每次都是 `dict`，或者每次都是 `set`），不会是子类。符合的值只有字面量（`[]`、`[a, *b]`、`{}`、`{"k": v, **d}`、`{a}`）、列表、字典、集合推导式和另一个同类型的这种局部变量。`list()`、`dict(x)` 不算，builtin 是调用时才查的，可能被换掉。条件表达式和 `and`/`or` 也不算，它们的 lowering 得到的是对象
+  - 变量本身的要求和 `bool` 局部变量一样（`booleans.plain_locals`）：只由 `x = value` 赋值，不是参数，不会在可能未赋值时读取，没有被内层函数捕获。所以别的代码没法把它换成别的对象，`xs.append` 查到的一定是 `list.append`
+  - 类型是给读者看的，所以带下标读取的变量（`xs[i]`、`d[k]`）以及 list 的 `xs[i] = v`、`del xs[i]` 仍然用对象：这些操作要走 `PyAnyMethods`，而 `Bound<PyList>` 自己的 `get_item` 等同名方法语义不同（§8），得写成 `xs.as_any().get_item(i)?`，不如对象上的 `xs.get_item(i)?` 好读。dict 的 `d[k] = v`、`del d[k]` 在精确的 dict 上就是 `PyDict` 自己的 `set_item`、`del_item`，不影响
+  - 读取时是带 `typed` 的 `Value`（§8），和 `*args`、容器字面量一样处理。用到 PyO3 具体类型方法的只有三处，在精确类型上和 Python 的操作是同一个 C API：`xs.append(x)` 是 `PyList_Append`，`s.add(x)` 是 `PySet_Add`（都只在调用恰好一个位置参数、结果不用的语句里；`r = xs.append(x)`、`xs.append(1, 2)`、`xs.append(*a)`、`f = xs.append` 照旧按属性查找和调用，参数个数不对时的 `TypeError` 也和 CPython 一样），以及原来就有的 `len`、list 和 dict 的 `in`、dict 的 `set_item`/`del_item`。其它方法（`extend`、`pop`、`get`、`update` 等）、迭代、比较、运算都还是对象上的写法
+  - 需要 `Bound<PyAny>` 的地方：返回值和存进别的变量时 `.into_any()`（`Ok(xs.into_any())`），参数声明成 `&Bound<'py, PyAny>` 的函数（生成的函数、runtime 的函数）直接传 `&xs`，Rust 在那里解引用成 `&Bound<PyAny>`，`impl IntoPyObject` 的参数也是 `&xs`
+  - 协程和生成器里一样处理，局部变量只是 `async fn` 的局部变量
+  - 标准库 154 个模块里转换的 7415 个函数（包括 lambda 和生成器表达式）共有 12820 个局部变量，符合的有 494 个（382 个函数，list 381 个、dict 102 个、set 11 个）；不排除带下标的变量是 594 个。`tests/apps` 的 6 个工具里有 20 个，`tests/corpus` 里有 33 个
 - `try` 体、`finally` 之前的部分和 `with` 体在立即调用的闭包里执行（第 9 节），闭包不能初始化外层 fn 里声明了但还没赋值的变量，所以（`frontend/regions.py`、`frontend/locals.py`）
   - 只在一个闭包区域内出现的局部变量在闭包里声明，规则同上（区域顶层第一次赋值处 `let`，否则在闭包开头声明），每次执行闭包都从未赋值开始
   - 在闭包里赋值、但在外面也用到的变量，进入闭包时必须已经确定赋值，否则是 `Option`
@@ -519,7 +528,9 @@ Rust 方法调用的形状会改变求值顺序，例如 `x in y` 写成 `y.cont
 
 lowering 给每个子表达式记录它在 Rust 里的形态（`lower/values.py` 的 `Value`）：拥有的 `Bound`、`&Bound` 参数、局部变量、可以直接作为 `IntoPyObject` 的字面量、代表 Python bool 的 Rust `bool`（`in`、`is`、`not`、`isinstance`），以及代表 int 的 Rust 整数（`len`）。每个使用点选最可读的写法，例如条件里直接用 Rust `bool`，`len(xs) > 3` 直接写 `xs.len()? > 3`。
 
-`Value` 还记录值的具体类型（`typed`），例如容器字面量是 `PyList`，`*args` 是 `PyTuple`，`str(x)` 是 `PyString`，`iter(x)` 是 `PyIterator`。这很重要：`Bound<PyDict>` 除了 `PyAnyMethods` 还有 `PyDictMethods`，同名时 Rust 优先选后者，而 `PyDict::get_item` 在 key 不存在时返回 `None`，不抛 `KeyError`。`Bound<PyIterator>` 实现了 `Iterator`，`eq`、`lt` 等会解析成 `Iterator` 的方法。所以生成的方法调用都经过 `Value.method(name, ..)`，它查 `rustast/pyo3.py` 的表，被遮蔽且行为不同的方法先 `.as_any()` 擦除类型。行为完全相同的（精确类型上的 `contains`、`len`，dict 的 `set_item`、`del_item`）保留原写法，其中 `len` 不会失败，写成 `args.len()`，不带 `?`。
+`Value` 还记录值的具体类型（`typed`），例如容器字面量是 `PyList`，`*args` 是 `PyTuple`，`str(x)` 是 `PyString`，`iter(x)` 是 `PyIterator`。这很重要：`Bound<PyDict>` 除了 `PyAnyMethods` 还有 `PyDictMethods`，同名时 Rust 优先选后者，而 `PyDict::get_item` 在 key 不存在时返回 `None`，不抛 `KeyError`。`Bound<PyIterator>` 实现了 `Iterator`，`eq`、`lt` 等会解析成 `Iterator` 的方法。所以生成的方法调用都经过 `Value.method(name, ..)`，它查 `rustast/pyo3.py` 的表，被遮蔽且行为不同的方法先 `.as_any()` 擦除类型。`Bound<PyString>` 实现了 `PartialEq`，`eq`、`ne` 也一样。行为完全相同的（精确类型上的 `len`，list、tuple、dict 的 `contains`，dict 的 `set_item`、`del_item`）保留原写法。set 的 `contains` 不算：`{1} in s` 会把不可哈希的 set 当作 frozenset 去查，`PySet_Contains` 直接抛 `TypeError`，所以写成 `s.as_any().contains(..)`，其中 `len` 不会失败，写成 `args.len()`，不带 `?`。
+
+具体类型的值传给别处时按下面的规则写（`Value.ref`、`Value.erased`）。参数类型写明是 `&Bound<'py, PyAny>` 的函数，直接传 `args`、`&xs`，Rust 把 `&Bound<PyTuple>` 解引用成 `&Bound<PyAny>`（`rt::iter(args)`、`g(m, &xs)`、`rt::unpack(&xs)`）。数组里的元素类型由第一个元素决定，第一个元素是 `&Bound<PyAny>` 时后面的也直接写（`[&end, &xs]`），都是同一种类型的局部变量时也是（`[&xs, &ys]`），否则写 `.as_any()`（`[xs.as_any(), &end]`、`[args.as_any(), kwargs.as_any()]`）。`&PyList::new(..)?` 这样带 `?` 的表达式不会被解引用，仍然写 `.as_any()`。`raise xs` 的参数是泛型的，也写 `.as_any()`。
 
 临时变量是语句前面的 `let`（prelude）。只有 Rust 的求值顺序与 Python 不同、或者一个值要用两次时才引入：
 

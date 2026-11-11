@@ -46,6 +46,25 @@ def bool_locals(
     """The locals of `fn` that are a Rust `bool` (see the module doc)."""
     if not isinstance(fn, ast.FunctionDef):
         return frozenset()
+    assigned = plain_locals(fn, scope, info)
+    candidates = set(assigned)
+    # Assignments from other candidates: drop locals until nothing changes.
+    changed = True
+    while changed:
+        changed = False
+        for name in sorted(candidates):
+            if not all(_is_bool(v, candidates, scope, bindings) for v in assigned[name]):
+                candidates.discard(name)
+                changed = True
+    return frozenset(candidates)
+
+
+def plain_locals(
+    fn: ast.FunctionDef, scope: FunctionScope, info: LocalsInfo
+) -> dict[str, list[ast.expr]]:
+    """The locals of `fn` that are ordinary Rust locals assigned only by
+    plain `x = value` statements (see the module doc), with the values
+    assigned to each."""
     candidates = set(scope.locals) - set(scope.params) - scope.cells - info.optional
     candidates -= set(walrus_targets(fn))
     assigned: dict[str, list[ast.expr]] = {}
@@ -71,16 +90,7 @@ def bool_locals(
         if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
             if id(node) not in plain_targets:
                 candidates.discard(node.id)
-    candidates &= set(assigned)
-    # Assignments from other candidates: drop locals until nothing changes.
-    changed = True
-    while changed:
-        changed = False
-        for name in sorted(candidates):
-            if not all(_is_bool(v, candidates, scope, bindings) for v in assigned[name]):
-                candidates.discard(name)
-                changed = True
-    return frozenset(candidates)
+    return {name: values for name, values in assigned.items() if name in candidates}
 
 
 def _walk(fn: ast.FunctionDef) -> list[ast.AST]:

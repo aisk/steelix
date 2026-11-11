@@ -39,7 +39,7 @@ pub fn in_while<'py>(
     values: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let out = PyList::empty(py).into_any();
+    let out = PyList::empty(py);
     let it = values.try_iter()?.into_any();
     let mut item: Bound<'py, PyAny>;
     loop {
@@ -47,10 +47,10 @@ pub fn in_while<'py>(
         if item.is_none() {
             break;
         }
-        out.attr("append")?.call1((&item,))?;
+        out.append(&item)?;
         py.check_signals()?;
     }
-    Ok(PyTuple::new(py, [&out, &item])?.into_any())
+    Ok(PyTuple::new(py, [out.as_any(), &item])?.into_any())
 }
 
 // walrus.py:24
@@ -104,8 +104,12 @@ pub fn in_comprehension<'py>(
         last = Some(last2.clone());
         list.append(&last2)?;
     }
-    let total = list.into_any();
-    Ok(PyTuple::new(py, [&total, rt::local(&last, "last")?, &found.get()?])?.into_any())
+    let total = list;
+    Ok(PyTuple::new(
+        py,
+        [total.as_any(), rt::local(&last, "last")?, &found.get()?],
+    )?
+    .into_any())
 }
 
 // walrus.py:39

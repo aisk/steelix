@@ -74,18 +74,27 @@ class Value:
         return self.expr
 
     def ref(self) -> rs.Expr:
-        """As a `&Bound<'py, PyAny>`, e.g. an argument of a generated function."""
+        """As an argument of a function whose parameter is declared as a
+        `&Bound<'py, PyAny>`: a generated function or a runtime helper. A
+        `&Bound<'py, PyList>` is coerced there (`Bound<T>` dereferences to
+        `Bound<PyAny>`)."""
         match self.kind:
             case Kind.REF:
-                # `&Bound<PyTuple>` only coerces to `&Bound<PyAny>` in some places.
-                return rs.MethodCall(self.expr, "as_any") if self.typed else self.expr
+                return self.expr
             case Kind.LITERAL | Kind.BOOL | Kind.NATIVE:
                 assert self.owned_literal is not None
                 return rs.Ref(self.owned_literal)
-        if self.typed:
+        if self.typed and self.kind is Kind.OWNED:
             # `&PyList::new(..)?` does not coerce: `?` needs the exact type.
             return rs.MethodCall(self.expr, "as_any")
         return rs.Ref(self.expr)
+
+    def erased(self) -> rs.Expr:
+        """As a `&Bound<'py, PyAny>` of exactly that type, where nothing
+        coerces: an array element, a generic argument."""
+        if self.typed and self.kind in (Kind.REF, Kind.PLACE):
+            return rs.MethodCall(self.expr, "as_any")
+        return self.ref()
 
     def method(self, name: str, *args: rs.Expr) -> rs.MethodCall:
         """`value.name(args)`, calling the `PyAnyMethods` method `name`.
@@ -130,6 +139,13 @@ class Value:
             case _:
                 expr = self.expr
         return rs.MethodCall(expr, "into_any") if self.typed else expr
+
+    def concrete(self) -> rs.Expr:
+        """As an owned `Bound<'py, T>` of its concrete type `T` (`typed`)."""
+        assert self.typed and self.kind in (Kind.OWNED, Kind.PLACE), self
+        if self.kind is Kind.PLACE and not self.temp:
+            return rs.MethodCall(self.expr, "clone")
+        return self.expr
 
     def result(self) -> rs.Expr:
         """As a `PyResult<Bound<'py, PyAny>>`, for returning from a function."""

@@ -675,7 +675,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         ))?;
         print.call1(("gather", rt::await_(gather).await?))?;
     }
-    let mut log = PyList::empty(py).into_any();
+    let mut log = PyList::empty(py);
     let mut task = m
         .global("asyncio")?
         .attr("create_task")?
@@ -709,7 +709,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .as_any(),
     )? {
         let make = make?;
-        log = PyList::empty(py).into_any();
+        log = PyList::empty(py);
         task = m
             .global("asyncio")?
             .attr("create_task")?

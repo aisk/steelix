@@ -103,7 +103,7 @@ pub fn return_in_finally_in_loop<'py>(
 #[rt::frame(m, "jumps_run_finally", 58, frame)]
 pub fn jumps_run_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let out = PyList::empty(py).into_any();
+    let out = PyList::empty(py);
     for i in rt::iter(&rt::builtins::range(py, (5,))?)? {
         let i = i?;
         let result = (|| -> PyResult<rt::Flow<'py>> {
@@ -113,18 +113,18 @@ pub fn jumps_run_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
             if i.eq(3)? {
                 return Ok(rt::Flow::Break);
             }
-            out.method1("append", (&i,))?;
+            out.append(&i)?;
             Ok(rt::Flow::Next)
         })();
         let finally = frame.finally(result);
-        out.attr("append")?.call1((i.neg()?,))?;
+        out.append(i.neg()?)?;
         match finally.resume()? {
             rt::Flow::Break => break,
             rt::Flow::Continue => continue,
             _ => {}
         }
     }
-    Ok(out)
+    Ok(out.into_any())
 }
 
 // try_finally.py:72
@@ -225,23 +225,23 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
 #[rt::frame(m, "finally_after_handler", 107, frame)]
 pub fn finally_after_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let events = PyList::empty(py).into_any();
+    let events = PyList::empty(py);
     let result = (|| -> PyResult<Bound<'py, PyAny>> {
         match (|| -> PyResult<()> {
-            events.method1("append", ("body",))?;
+            events.append("body")?;
             Err(frame.raise(PyIndexError::new_err("x")))
         })() {
             Ok(()) => unreachable!(),
             Err(err) if err.is_instance_of::<PyIndexError>(py) => {
                 let _caught = frame.catch(err);
-                events.method1("append", ("handler",))?;
-                Ok(events.clone())
+                events.append("handler")?;
+                Ok(events.clone().into_any())
             }
             Err(err) => Err(err),
         }
     })();
     let finally = frame.finally(result);
-    events.method1("append", ("finally",))?;
+    events.append("finally")?;
     finally.resume()
 }
 

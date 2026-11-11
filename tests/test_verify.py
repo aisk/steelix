@@ -158,6 +158,10 @@ def test_typed_locals() -> None:
     get = rs.ExprStmt(rs.MethodCall(p("xs"), "get_item", (rs.IntLit(0),)))
     assert problems(rs.Let("xs", init=new), get)
     assert not problems(rs.Let("xs", init=rs.MethodCall(new, "into_any")), get)
+    assert problems(rs.Let("xs", ty="Bound<'py, PyList>"), get)
+    assert not problems(rs.Let("xs", ty="Bound<'py, PyAny>"), get)
+    either = rs.IfExpr(p("flag"), rs.Block((), new), rs.Block((), new))
+    assert problems(rs.Let("xs", init=either), get)
 
 
 SOURCES = sorted(CASES_DIR.glob("*.py")) + sorted(CORPUS_DIR.glob("*.py"))

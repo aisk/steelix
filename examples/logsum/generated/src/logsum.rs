@@ -108,7 +108,7 @@ pub fn parse_line<'py>(
 #[rt::frame(m, "load", 51)]
 pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let requests = PyList::empty(py).into_any();
+    let requests = PyList::empty(py);
     let mut malformed = rt::int(py, 0);
     let mut request: Bound<'py, PyAny>;
     for line in
@@ -129,10 +129,10 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
         if request.is_none() {
             malformed = rt::iadd(&malformed, 1)?;
         } else {
-            requests.method1("append", (&request,))?;
+            requests.append(&request)?;
         }
     }
-    Ok(PyTuple::new(py, [&requests, &malformed])?.into_any())
+    Ok(PyTuple::new(py, [requests.as_any(), &malformed])?.into_any())
 }
 
 // logsum.py:70
@@ -176,14 +176,14 @@ pub fn tally<'py>(
     requests: &Bound<'py, PyAny>,
     field: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let counts = PyDict::new(m.py()).into_any();
+    let counts = PyDict::new(m.py());
     let mut key: Bound<'py, PyAny>;
     for request in rt::iter(requests)? {
         let request = request?;
         key = request.get_item(field)?;
         counts.set_item(&key, counts.method1("get", (&key, 0))?.add(1)?)?;
     }
-    Ok(counts)
+    Ok(counts.into_any())
 }
 
 // logsum.py:92
@@ -308,12 +308,12 @@ pub fn print_latency<'py>(
     slow: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let timed = PyList::empty(py).into_any();
+    let timed = PyList::empty(py);
     let mut request: Bound<'py, PyAny>;
     for item in rt::iter(requests)? {
         request = item?;
         if !request.get_item("ms")?.is_none() {
-            timed.attr("append")?.call1((request.get_item("ms")?,))?;
+            timed.append(request.get_item("ms")?)?;
         }
     }
     timed.method0("sort")?;
@@ -323,7 +323,7 @@ pub fn print_latency<'py>(
             py,
             (
                 "latency (",
-                rt::format(&rt::int(py, timed.len()?), "")?,
+                rt::format(&rt::int(py, timed.len()), "")?,
                 " timed requests)",
             ),
         )?,),
@@ -344,11 +344,11 @@ pub fn print_latency<'py>(
             )?,),
         )?;
     }
-    let slow_requests = PyList::empty(py).into_any();
+    let slow_requests = PyList::empty(py);
     for item2 in rt::iter(requests)? {
         request = item2?;
         if !request.get_item("ms")?.is_none() && request.get_item("ms")?.ge(slow)? {
-            slow_requests.method1("append", (&request,))?;
+            slow_requests.append(&request)?;
         }
     }
     rt::builtins::print(
@@ -357,7 +357,7 @@ pub fn print_latency<'py>(
             py,
             (
                 "  ",
-                rt::format(&rt::int(py, slow_requests.len()?), "")?,
+                rt::format(&rt::int(py, slow_requests.len()), "")?,
                 " slower than ",
                 rt::format(slow, "")?,
                 " ms",

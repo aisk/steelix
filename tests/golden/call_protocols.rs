@@ -61,7 +61,7 @@ pub fn mixed<'py>(
     d: &Bound<'py, PyAny>,
     kwargs: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    Ok(PyTuple::new(m.py(), [a, b, args.as_any(), c, d, kwargs.as_any()])?.into_any())
+    Ok(PyTuple::new(m.py(), [a, b, args, c, d, kwargs])?.into_any())
 }
 
 // call_protocols.py:28
@@ -71,7 +71,7 @@ pub fn posonly_kwargs<'py>(
     a: &Bound<'py, PyAny>,
     kwargs: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    Ok(PyTuple::new(m.py(), [a, kwargs.as_any()])?.into_any())
+    Ok(PyTuple::new(m.py(), [a, kwargs])?.into_any())
 }
 
 // call_protocols.py:32

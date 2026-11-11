@@ -219,8 +219,8 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err2) => return Err(err2),
     }
-    let circular = PyList::empty(py).into_any();
-    circular.method1("append", (&circular,))?;
+    let circular = PyList::empty(py);
+    circular.append(&circular)?;
     match (|| m.global("json")?.method1("dumps", (&circular,)))() {
         Ok(_) => {}
         Err(err) if frame.matches(&err, || m.global("ValueError"))? => {

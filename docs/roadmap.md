@@ -390,6 +390,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] 常用的 builtin 只用位置参数调用时写成 `rt::builtins::int(py, (&status,))?`，不再是 `rt::builtin(py, "int")?.call1((&status,))?`（design §8）。以前只有 `print`，现在是三十多个，runtime 里由一个宏生成。golden 里约 270 处。需要 runtime 发新版本（新增的公开函数，兼容）
 - [ ] `macro_attr`（rust-lang/rust#143547）稳定后把 `#[rt::frame]` 换成 runtime 里的声明宏，去掉 `steelix-runtime-macros`，生成的代码不变
 - [x] 默认模式下 `frame.matches(&err, N, || ..)` 的行号参数总是 `def` 行，去掉了（golden 里 152 处），写成 `frame.matches(&err, || ..)`。`--traceback-lines` 时是带行号的 `frame.matches_at(&err, N, || ..)`
+- [x] 只会是 list、dict、set 字面量或推导式的局部变量声明成具体类型（design §5，`frontend/containers.py`）：`let xs = PyList::empty(py);`，不再 `.into_any()`，语句 `xs.append(x)`、`s.add(x)` 写成 `xs.append(&x)?`、`s.add(&x)?`，`len(xs)` 不带 `?`。规则和 `bool` 局部变量一样保守，另外带下标读取的变量不算（否则每处都要 `xs.as_any().get_item(i)?`）。具体类型的值传给参数是 `&Bound<PyAny>` 的函数时不再写 `.as_any()`（`rt::iter(args)`）。原有的 golden 里有 39 个这样的变量，`method1("append", ..)`/`attr("append")?.call1(..)` 从 67 处减到 37 处，`.into_any()` 从 260 处减到 219 处，31 个文件净少 11 行；标准库里是 494 个变量（382 个函数）。`container_locals` 用例覆盖符合和不符合的情况。不需要改 runtime。验收时修了两个原有的问题：set 的 `x in s` 以前用 `PySet` 自己的 `contains`，`{1} in s` 会抛 `TypeError`（Python 把不可哈希的 set 当作 frozenset 去查），现在写成 `s.as_any().contains(..)`；`str(x) == x` 生成的 `x.str()?.eq(x)?` 编译不过（`Bound<PyString>` 的 `PartialEq`），现在先 `.as_any()`
 
 ## 性能的候选项（未排期）
 

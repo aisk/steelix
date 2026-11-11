@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import re
 from dataclasses import dataclass
 
 from steelix.diagnostics import SourceLocation, UnsupportedError
@@ -167,6 +168,7 @@ def _lower(
 
     if _uses_attributes(items):
         module.uses.add("steelix_runtime::Attributes")
+    module.uses.update(f"pyo3::types::{name}" for name in _declared_types(items))
     uses = ["pyo3::prelude::*"]
     uses += sorted(module.uses)
     uses.append("steelix_runtime as rt")
@@ -176,6 +178,25 @@ def _lower(
         inner_doc=_python_summary(parsed, tree, plan),
     )
     return LoweredModule(parsed.name, move_returned_locals(file), plan)
+
+
+_TYPED_DECLARATION = re.compile(r"Bound<'py, (Py(?:List|Dict|Set))>")
+
+
+def _declared_types(node: object) -> set[str]:
+    """The container types that declarations of typed locals name
+    (`let xs: Bound<'py, PyList>;`, design §5), which the module has to
+    import even if it builds no such container itself."""
+    if isinstance(node, rs.Let) and node.ty is not None:
+        return set(_TYPED_DECLARATION.findall(node.ty))
+    found: set[str] = set()
+    if isinstance(node, (list, tuple)):
+        for child in node:
+            found |= _declared_types(child)
+    elif dataclasses.is_dataclass(node):
+        for f in dataclasses.fields(node):
+            found |= _declared_types(getattr(node, f.name))
+    return found
 
 
 # The methods of `rt::Attributes`, which the module has to import.

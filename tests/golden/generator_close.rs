@@ -669,7 +669,7 @@ pub mod throwable {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         let list = PyList::empty(py);
-        for a in rt::iter(args.as_any())? {
+        for a in rt::iter(args)? {
             let a = a?;
             list.append(if a.is_instance(&rt::builtin(py, "type")?)? {
                 a.clone()

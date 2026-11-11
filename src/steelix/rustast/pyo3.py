@@ -43,7 +43,11 @@ _ITERATOR = frozenset(
     }
 )
 
+# `Bound<PyString>` implements `PartialEq`, whose `eq`/`ne` win as well.
+_STRING = frozenset({"eq", "ne"})
+
 SHADOWED: dict[str, frozenset[str]] = {
+    "PyString": _STRING,
     "PyDict": _DICT,
     "PyList": _LIST,
     "PyTuple": _TUPLE,
@@ -54,14 +58,17 @@ SHADOWED: dict[str, frozenset[str]] = {
 
 # Shadowing methods that behave exactly like the `PyAny` method on an exact
 # instance of the type, which every typed value of generated code is
-# (displays, `*args`, `**kwargs`, module globals). `len` returns a plain
+# (displays, `*args`, `**kwargs`, module globals, the locals of
+# `frontend.containers`). `len` returns a plain
 # `usize` instead of `PyResult<usize>`.
 EQUIVALENT: dict[str, frozenset[str]] = {
     "PyDict": frozenset({"len", "contains", "set_item", "del_item"}),
     "PyList": frozenset({"len", "contains"}),
     "PyTuple": frozenset({"len", "contains"}),
-    "PySet": frozenset({"len", "contains"}),
-    "PyFrozenSet": frozenset({"len", "contains"}),
+    # Not `contains`: `PySet_Contains` raises for an unhashable `set` key,
+    # where `{1} in s` looks up `frozenset({1})`.
+    "PySet": frozenset({"len"}),
+    "PyFrozenSet": frozenset({"len"}),
 }
 
 INFALLIBLE_LEN = frozenset(EQUIVALENT)

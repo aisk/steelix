@@ -43,7 +43,7 @@ pub fn collect<'py>(
     sep: &Bound<'py, PyAny>,
     options: &Bound<'py, PyDict>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    Ok(PyList::new(m.py(), [first, rest.as_any(), sep, options.as_any()])?.into_any())
+    Ok(PyList::new(m.py(), [first, rest, sep, options])?.into_any())
 }
 
 // defaults.py:18

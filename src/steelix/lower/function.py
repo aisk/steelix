@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 
 from steelix.frontend.booleans import bool_locals
+from steelix.frontend.containers import container_locals
 from steelix.frontend.desugar import annotation_source
 from steelix.frontend.locals import LocalsInfo, analyze_locals
 from steelix.frontend.scope import (
@@ -82,6 +83,7 @@ def lower_function(
         by_value,
         _walrus_targets(fn, scope),
         bool_locals(fn, scope, locals_info, module.bindings),
+        container_locals(fn, scope, locals_info),
         function_kind(fn),
     )
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))

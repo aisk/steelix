@@ -7,6 +7,7 @@ import pytest
 
 from steelix.frontend.booleans import bool_locals
 from steelix.frontend.callgraph import build_call_graph
+from steelix.frontend.containers import container_locals
 from steelix.frontend.locals import analyze_locals
 from steelix.frontend.module_bindings import analyze_module_bindings
 from steelix.frontend.parse import parse_source
@@ -1004,3 +1005,129 @@ def test_bool_locals_must_be_plain_locals() -> None:
         """
     )
     assert found == {"plain"}
+
+
+# --- container locals --------------------------------------------------------
+
+
+def containers_of(source: str, name: str = "f") -> dict[str, str]:
+    tree, src = parse(source)
+    fn = function(tree, name)
+    scopes = analyze_scopes(tree, src, "m.py")
+    scope = scopes.of(fn)
+    return container_locals(fn, scope, analyze_locals(scope, scopes))
+
+
+def test_locals_assigned_only_displays_are_container_locals() -> None:
+    found = containers_of(
+        """
+        def f(x, xs):
+            a = []
+            b = [x, *xs]
+            c = [i for i in xs]
+            d = {}
+            e = {x: 1, **xs}
+            g = {k: v for k, v in xs}
+            h = {x}
+            i = {y for y in xs}
+            j = a
+            k = j
+            if x:
+                a = [1]
+                k = b
+            return a, b, c, d, e, g, h, i, j, k
+        """
+    )
+    lists, dicts, sets = "abcjk", "deg", "hi"
+    assert found == (
+        dict.fromkeys(lists, "PyList")
+        | dict.fromkeys(dicts, "PyDict")
+        | dict.fromkeys(sets, "PySet")
+    )
+
+
+def test_values_python_does_not_guarantee_to_be_a_container() -> None:
+    found = containers_of(
+        """
+        def f(x, xs):
+            called = list()
+            called2 = dict(xs)
+            empty_set = set()
+            tupled = ()
+            either = [] or xs
+            chosen = [] if x else [1]
+            copied = xs
+            kinds = []
+            kinds = {}
+            other = []
+            if x:
+                other = None
+            alias = other
+            cycle = cycle2 = []
+            return called, called2, empty_set, tupled, either, chosen, copied, kinds, alias
+        """
+    )
+    assert found == {}
+
+
+def test_container_locals_must_be_plain_locals() -> None:
+    found = containers_of(
+        """
+        def f(flag, xs):
+            loop = []
+            for loop in xs:
+                pass
+            deleted = []
+            del deleted
+            captured = []
+            def g():
+                return captured
+            walrus = []
+            if (walrus := xs):
+                pass
+            if flag:
+                maybe = []
+            print(maybe)
+            augmented = []
+            augmented += xs
+            tupled = []
+            tupled, other = [], {}
+            flag = []
+            try:
+                attempt = []
+            except TypeError:
+                attempt = []
+            with xs as managed:
+                managed = []
+            plain = []
+            return loop, captured, walrus, augmented, tupled, other, attempt, managed, plain
+        """
+    )
+    assert found == {"plain": "PyList"}
+
+
+def test_subscripted_containers_stay_objects() -> None:
+    found = containers_of(
+        """
+        def f(i, v):
+            read = [1]
+            stored = [1]
+            removed = [1]
+            updated = [1]
+            looked_up = {}
+            filled = {}
+            emptied = {i: v}
+            counted = {}
+            inner = [[1]]
+            plain = [1]
+            stored[i] = v
+            del removed[i]
+            updated[i] += v
+            filled[i] = v
+            del emptied[i]
+            counted[i] += 1
+            plain.append([x[0] for x in inner])
+            return read[i], looked_up[i], [plain for plain[0] in inner]
+        """
+    )
+    assert found == {"filled": "PyDict", "emptied": "PyDict", "inner": "PyList"}

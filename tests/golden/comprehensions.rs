@@ -129,8 +129,8 @@ pub fn attribute_target<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
         r#box.set_attr("value", item?)?;
         list.append(r#box.attr("value")?)?;
     }
-    let values = list.into_any();
-    Ok(PyTuple::new(py, [&values, &r#box.attr("value")?])?.into_any())
+    let values = list;
+    Ok(PyTuple::new(py, [values.as_any(), &r#box.attr("value")?])?.into_any())
 }
 
 // comprehensions.py:46
@@ -182,15 +182,15 @@ pub fn shadow<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let x = x?;
         list.append(x.mul(&x)?)?;
     }
-    let squares = list.into_any();
-    Ok(PyTuple::new(py, [&squares, &m.global("x")?])?.into_any())
+    let squares = list;
+    Ok(PyTuple::new(py, [squares.as_any(), &m.global("x")?])?.into_any())
 }
 
 // comprehensions.py:72
 #[rt::frame(m, "first_iterable_outside", 72)]
 pub fn first_iterable_outside<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let x = PyList::new(py, [1, 2])?.into_any();
+    let x = PyList::new(py, [1, 2])?;
     // The first iterable is the function's `x`, then `x` is the item.
     let list = PyList::empty(py);
     for x in rt::iter(&x)? {
@@ -217,7 +217,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             i_.set(item?)?;
             list.append(rt::function!(frame, lambda as "<lambda>"[&i_ as "i"]())?)?;
         }
-        list.into_any()
+        list
     };
     let list = PyList::empty(py);
     for f in rt::iter(&funcs)? {
@@ -240,7 +240,7 @@ pub fn default_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
         let i = i?;
         list.append(rt::function!(frame, lambda as "<lambda>"(i = &i))?)?;
     }
-    let funcs = list.into_any();
+    let funcs = list;
     let list = PyList::empty(py);
     for f in rt::iter(&funcs)? {
         let f = f?;

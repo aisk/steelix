@@ -620,3 +620,97 @@ def test_coroutines_are_awaited_in_place_only_by_await() -> None:
     assert "rt::delegate(g(m)).await?;" in out
     assert "rt::def!(m, async f(x))?;" in out
     assert "rt::def!(m, gen g())?;" in out
+
+
+def test_container_locals_are_typed() -> None:
+    out = lower(
+        """
+        def f(items, flag):
+            xs = []
+            seen = {1}
+            d = {}
+            for item in items:
+                xs.append(item)
+                seen.add(item)
+                d[item] = len(xs)
+            if flag:
+                out = [len(d)]
+            else:
+                out = xs
+            return g(xs, out), [seen, d], [xs, out]
+
+        def g(a, b):
+            return a
+        """
+    )
+    assert "let xs = PyList::empty(py);" in out
+    assert "let seen = PySet::new(py, [1])?;" in out
+    assert "let d = PyDict::new(py);" in out
+    assert "xs.append(&item)?;" in out
+    assert "seen.add(&item)?;" in out
+    assert "d.set_item(&item, xs.len())?;" in out
+    assert "PyList::new(py, [&rt::int(py, d.len())])?\n" in out
+    assert "xs.clone()\n" in out
+    # Parameters declared `&Bound<'py, PyAny>` take them as they are; in an
+    # array only locals of one type do.
+    assert "g(m, &xs, &out)?" in out
+    assert "[seen.as_any(), d.as_any()]" in out
+    assert "[&xs, &out]" in out
+
+
+def test_container_methods_stay_python_calls_where_pyo3_differs() -> None:
+    out = lower(
+        """
+        def f(x):
+            xs = []
+            r = xs.append(x)
+            xs.append(x, x)
+            xs.append(*x)
+            xs.append(object=x)
+            xs.extend(x)
+            push = xs.append
+            ys = [1]
+            ys.append(ys[0])
+            zs = list()
+            zs.append(x)
+            return r, xs, push
+        """
+    )
+    assert 'let r = xs.method1("append", (x,))?;' in out
+    assert 'xs.method1("append", (x, x))?;' in out
+    assert 'rt::call!(xs.attr("append")?, *x)?;' in out
+    assert 'rt::call!(xs.attr("append")?, object = x)?;' in out
+    assert 'xs.method1("extend", (x,))?;' in out
+    assert 'let push = xs.attr("append")?;' in out
+    assert "let ys = PyList::new(py, [1])?.into_any();" in out
+    assert 'ys.attr("append")?.call1((ys.get_item(0)?,))?;' in out
+    assert 'zs.method1("append", (x,))?;' in out
+    assert ".append(x)?" not in out
+
+
+def test_typed_declaration_imports_its_type() -> None:
+    out = lower(
+        """
+        def f(flag, a):
+            if flag:
+                d = {**a}
+                print(d)
+            else:
+                d = {**a}
+            return d
+        """
+    )
+    assert "let d: Bound<'py, PyDict>;" in out
+    assert "use pyo3::types::PyDict;\n" in out
+    merged = lower(
+        """
+        def f(flag, a):
+            if flag:
+                s = {*a}
+            else:
+                s = {*a, 1}
+            return s
+        """
+    )
+    assert "let s = if" in merged
+    assert "use pyo3::types::PySet;" not in merged

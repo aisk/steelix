@@ -173,11 +173,14 @@ class _Verifier:
 
     def stmt(self, stmt: rs.Stmt, scope: _Scope) -> None:
         match stmt:
-            case rs.Let(pattern, _, _, init):
+            case rs.Let(pattern, _, declared, init):
                 if init is not None:
                     self.expr(init, scope)
                 names = _pattern_names(pattern)
                 ty = self.type_of(init, scope) if init is not None and len(names) == 1 else None
+                if declared is not None and (match := _BOUND_TYPE.fullmatch(declared)):
+                    # `let xs: Bound<'py, PyList>;`, assigned later.
+                    ty = match[1] if match[1] != "PyAny" else None
                 for name in names:
                     scope.locals[name] = ty
             case rs.Assign(target, value):
@@ -443,6 +446,9 @@ class _Verifier:
                 return _TYPED_CALLS.get(path)
             case rs.MethodCall(receiver, "clone"):
                 return self.type_of(receiver, scope)
+            case rs.IfExpr(_, rs.Block(_, tail)) if tail is not None:
+                # `let xs = if .. { PyList::empty(py) } else { .. };`
+                return self.type_of(tail, scope)
             case rs.MethodCall(_, method):
                 return _TYPED_METHODS.get(method)
         return None
