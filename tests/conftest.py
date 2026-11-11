@@ -73,9 +73,15 @@ def cargo_env(*, extension: bool) -> dict[str, str]:
     not apply to crates generated elsewhere. Extension modules and executables
     use separate target directories because `PYO3_BUILD_EXTENSION_MODULE`
     changes how pyo3-ffi links, which would otherwise rebuild PyO3 each time.
+    Incremental compilation and debug info are off to keep the target directory
+    small: every generated crate is built once, so the incremental cache is never
+    reused, and debug info roughly doubles the size of PyO3 and the runtime.
+    Set `CARGO_PROFILE_DEV_DEBUG` to override when a Rust backtrace needs lines.
     """
     env = dict(os.environ)
     env["PYO3_PYTHON"] = str(PYTHON)
+    env["CARGO_INCREMENTAL"] = "0"
+    env.setdefault("CARGO_PROFILE_DEV_DEBUG", "0")
     env["CARGO_TARGET_DIR"] = str(E2E_DIR / ("target-ext" if extension else "target"))
     env.pop("PYO3_BUILD_EXTENSION_MODULE", None)
     if extension:
