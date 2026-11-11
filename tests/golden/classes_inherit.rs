@@ -180,12 +180,15 @@ pub mod planet {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::builtin(py, "round")?.call1((
-            rt::float(py, 6.67e-11)
-                .mul(slf.attr("mass")?)?
-                .div(slf.attr("radius")?.pow(2, py.None())?)?,
-            2,
-        ))
+        rt::builtins::round(
+            py,
+            (
+                rt::float(py, 6.67e-11)
+                    .mul(slf.attr("mass")?)?
+                    .div(slf.attr("radius")?.pow(2, py.None())?)?,
+                2,
+            ),
+        )
     }
 }
 
@@ -367,8 +370,7 @@ pub mod worker {
         let py = m.py();
         slf.set_attr(
             "result",
-            rt::builtin(py, "sum")?
-                .call1((rt::builtin(py, "range")?.call1((slf.attr("n")?,))?,))?,
+            rt::builtins::sum(py, (rt::builtins::range(py, (slf.attr("n")?,))?,))?,
         )?;
         Ok(rt::none(py))
     }
@@ -399,11 +401,7 @@ pub mod upper {
         option_string: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::builtin(py, "setattr")?.call1((
-            namespace,
-            slf.attr("dest")?,
-            values.method0("upper")?,
-        ))?;
+        rt::builtins::setattr(py, (namespace, slf.attr("dest")?, values.method0("upper")?))?;
         Ok(rt::none(py))
     }
 }
@@ -432,7 +430,7 @@ pub mod reversed {
         let py = m.py();
         rt::super_(__class__, slf)?
             .attr("__init__")?
-            .call1((rt::builtin(py, "reversed")?.call1((items,))?,))?;
+            .call1((rt::builtins::reversed(py, (items,))?,))?;
         Ok(rt::none(py))
     }
 
@@ -504,7 +502,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             m.global("D")?.call0()?.is_instance(&m.global("A")?)?,
-            rt::builtin(py, "issubclass")?.call1((m.global("D")?, m.global("C")?))?,
+            rt::builtins::issubclass(py, (m.global("D")?, m.global("C")?))?,
             m.global("B")?.call0()?.is_instance(&m.global("C")?)?,
         ),
     )?;
@@ -530,7 +528,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "list")?.call1((m.global("Color")?,))?,
+            rt::builtins::list(py, (m.global("Color")?,))?,
             m.global("Color")?.get_item("BLUE")?.attr("value")?,
             m.global("Color")?.len()?,
         ),
@@ -567,7 +565,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             m.global("Flags")?
                 .attr("READ")?
                 .bitor(m.global("Flags")?.attr("WRITE")?)?,
-            rt::builtin(py, "int")?.call1((m.global("Flags")?.attr("READ")?,))?,
+            rt::builtins::int(py, (m.global("Flags")?.attr("READ")?,))?,
         ),
     )?;
     m.set_global(

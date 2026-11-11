@@ -232,10 +232,13 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         py,
         (
             "app: modules",
-            rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-                frame,
-                genexpr(m.global("sys")?.attr("modules")?.try_iter()?)
-            )?,))?,
+            rt::builtins::sorted(
+                py,
+                (rt::genexpr!(
+                    frame,
+                    genexpr(m.global("sys")?.attr("modules")?.try_iter()?)
+                )?,),
+            )?,
         ),
     )?;
     if m.global("sys")?

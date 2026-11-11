@@ -72,7 +72,7 @@ pub fn from_callee<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 #[rt::frame(m, "handler_continue", 54, frame)]
 pub fn handler_continue<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (2,))?)? {
         let i = i?;
         match (|| -> PyResult<()> {
             Err(frame.raise(
@@ -188,7 +188,7 @@ pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     // The exception from the callee usually gets the address of the one
     // raised here, which is gone by then; it still gets this frame in its
     // traceback.
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (3,))?)? {
         let i = i?;
         match (|| -> PyResult<()> {
             Err(frame.raise(

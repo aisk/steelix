@@ -18,7 +18,7 @@ pub fn captures<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         py,
         (
             "captures after the match:",
-            rt::builtin(py, "sorted")?.call1((m.global("alive")?,))?,
+            rt::builtins::sorted(py, (m.global("alive")?,))?,
         ),
     )?;
     Ok(rt::none(py))
@@ -35,7 +35,7 @@ pub fn unused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 py,
                 (
                     "unused capture:",
-                    rt::builtin(py, "sorted")?.call1((m.global("alive")?,))?,
+                    rt::builtins::sorted(py, (m.global("alive")?,))?,
                 ),
             )?;
         }
@@ -57,7 +57,7 @@ pub fn subject<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 py,
                 (
                     "in the body:",
-                    rt::builtin(py, "sorted")?.call1((m.global("alive")?,))?,
+                    rt::builtins::sorted(py, (m.global("alive")?,))?,
                 ),
             )?;
         }
@@ -181,7 +181,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             known differences are listed in `KNOWN_DIFFERENCES` in tests/test_e2e.py.",
     )?;
     m.set_global("collections", rt::import(m, "collections.abc")?)?;
-    m.set_global("alive", rt::builtin(py, "set")?.call0()?)?;
+    m.set_global("alive", rt::builtins::set(py, ())?)?;
     m.set_global(
         "T",
         rt::class!(m, "T"(), t::body, line = 9, attributes = ["name"])?,
@@ -205,7 +205,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             "at the end:",
-            rt::builtin(py, "sorted")?.call1((m.global("alive")?,))?,
+            rt::builtins::sorted(py, (m.global("alive")?,))?,
         ),
     )?;
     Ok(())

@@ -42,7 +42,7 @@ pub fn lists<'py>(
         py,
         *rt::list!(py, *a)?,
         *PyTuple::empty(py),
-        *rt::builtin(py, "range")?.call1((2,))?
+        *rt::builtins::range(py, (2,))?
     )?
     .into_any();
     // The comprehension needs statements first: they run after `Noisy` is iterated.
@@ -51,7 +51,7 @@ pub fn lists<'py>(
         *m.global("Noisy")?.call1(("g", "g"))?,
         {
             let list = PyList::empty(py);
-            for i in rt::iter(&rt::builtin(py, "range")?.call1((1,))?)? {
+            for i in rt::iter(&rt::builtins::range(py, (1,))?)? {
                 let i = i?;
                 list.append(trace(m, &rt::str(py, "comp"), &i)?)?;
             }
@@ -117,8 +117,8 @@ pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "sorted")?.call1((rt::genexpr!(frame, genexpr(s.try_iter()?))?,))?,
-            rt::set!(py, *a)?.rich_compare(rt::builtin(py, "set")?.call1((a,))?, CompareOp::Eq)?,
+            rt::builtins::sorted(py, (rt::genexpr!(frame, genexpr(s.try_iter()?))?,))?,
+            rt::set!(py, *a)?.rich_compare(rt::builtins::set(py, (a,))?, CompareOp::Eq)?,
             rt::set!(py, 1, *a)?,
         ),
     )?;
@@ -157,12 +157,7 @@ pub fn dicts<'py>(
     .into_any();
     rt::builtins::print(
         py,
-        (
-            &merged,
-            &order,
-            rt::builtin(py, "list")?.call1((&order,))?,
-            &keys,
-        ),
+        (&merged, &order, rt::builtins::list(py, (&order,))?, &keys),
     )?;
     rt::builtins::print(
         py,
@@ -322,7 +317,7 @@ pub mod key {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         rt::builtins::print(py, ("hash", slf.attr("name")?))?;
-        rt::builtin(py, "hash")?.call1((slf.attr("name")?,))
+        rt::builtins::hash(py, (slf.attr("name")?,))
     }
 
     // displays_unpacking.py:31
@@ -421,11 +416,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     )?;
     m.set_global(
         "values",
-        rt::list!(
-            py,
-            *rt::builtin(py, "range")?.call1((3,))?,
-            *rt::str(py, "xy")
-        )?,
+        rt::list!(py, *rt::builtins::range(py, (3,))?, *rt::str(py, "xy"))?,
     )?;
     rt::builtins::print(
         py,

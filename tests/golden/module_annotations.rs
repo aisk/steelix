@@ -114,7 +114,10 @@ E: undefined_name
     )?;
     rt::builtins::print(
         py,
-        (rt::builtin(py, "sorted")?.call1((m.global("__conditional_annotations__")?,))?,),
+        (rt::builtins::sorted(
+            py,
+            (m.global("__conditional_annotations__")?,),
+        )?,),
     )?;
     rt::builtins::print(py, (m.global("__annotate__")?.call1((1,))?,))?;
     Ok(())

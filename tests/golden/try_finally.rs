@@ -37,7 +37,7 @@ pub fn finally_swallows_exception<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
 #[rt::frame(m, "break_in_finally_swallows", 24, frame)]
 pub fn break_in_finally_swallows<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let mut i: Option<Bound<'py, PyAny>> = None;
-    for item in rt::iter(&rt::builtin(m.py(), "range")?.call1((3,))?)? {
+    for item in rt::iter(&rt::builtins::range(m.py(), (3,))?)? {
         i = Some(item?);
         let result = (|| -> PyResult<()> {
             Err(frame.raise(PyKeyError::new_err((rt::local(&i, "i")?.clone().unbind(),))))
@@ -56,7 +56,7 @@ pub fn continue_in_finally<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let mut count = rt::int(py, 0);
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (n,))?)? {
         let i = i?;
         let result = (|| -> PyResult<()> {
             if i.rem(2)?.is_truthy()? {
@@ -104,7 +104,7 @@ pub fn return_in_finally_in_loop<'py>(
 pub fn jumps_run_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let out = PyList::empty(py).into_any();
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((5,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (5,))?)? {
         let i = i?;
         let result = (|| -> PyResult<rt::Flow<'py>> {
             if i.eq(1)? {
@@ -380,7 +380,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     let finally = frame.finally(result);
     log(m, &PyTuple::new(py, ["module finally"])?)?;
     finally.resume()?;
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (3,))?)? {
         m.set_global("k", item?)?;
         let result = (|| -> PyResult<rt::Flow<'_>> {
             if m.global("k")?.eq(1)? {

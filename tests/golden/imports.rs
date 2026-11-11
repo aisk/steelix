@@ -21,7 +21,7 @@ pub fn local_import<'py>(
         py,
         [
             &textwrap.method1("shorten", (text, 12))?,
-            &rt::builtin(py, "round")?.call1((&PI, 3))?,
+            &rt::builtins::round(py, (&PI, 3))?,
             &sqrt.call1((16,))?,
         ],
     )?

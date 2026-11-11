@@ -41,7 +41,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         ),
     )?;
     let list = PyList::empty(py);
-    for n in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for n in rt::iter(&rt::builtins::range(py, (3,))?)? {
         let n = n?;
         list.append(repeat(m, &rt::str(py, "x"), &n)?)?;
     }

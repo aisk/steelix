@@ -81,9 +81,10 @@ pub mod retry {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::str(py, "retry ").add(rt::str(py, ", ").attr("join")?.call1((
-            rt::builtin(py, "map")?.call1((rt::builtin(py, "str")?, slf.attr("args")?))?,
-        ))?)
+        rt::str(py, "retry ").add(rt::str(py, ", ").attr("join")?.call1((rt::builtins::map(
+            py,
+            (rt::builtin(py, "str")?, slf.attr("args")?),
+        )?,))?)
     }
 }
 

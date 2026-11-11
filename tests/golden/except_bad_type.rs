@@ -44,8 +44,7 @@ pub fn bad_class<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 #[rt::frame(m, "missing_name", 20, frame)]
 pub fn missing_name<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let int = rt::builtin(py, "int")?;
-    match int.call1(("nope",)) {
+    match rt::builtins::int(py, ("nope",)) {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyKeyError>(py) => {
             let _caught = frame.catch(err);

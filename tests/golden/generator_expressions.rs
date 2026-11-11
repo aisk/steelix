@@ -61,7 +61,7 @@ pub fn short_circuit<'py>(
         }
         Ok(None)
     }
-    rt::builtin(m.py(), "any")?.call1((rt::genexpr!(frame, genexpr(xs.try_iter()?))?,))
+    rt::builtins::any(m.py(), (rt::genexpr!(frame, genexpr(xs.try_iter()?))?,))
 }
 
 // generator_expressions.py:26
@@ -83,9 +83,11 @@ pub fn infinite<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         frame,
         genexpr(m.global("itertools")?.method0("count")?.try_iter()?)
     )?;
-    let first = rt::builtin(py, "next")?.call1((&r#gen,))?;
-    let rest = rt::builtin(py, "list")?
-        .call1((m.global("itertools")?.method1("islice", (&r#gen, 3))?,))?;
+    let first = rt::builtins::next(py, (&r#gen,))?;
+    let rest = rt::builtins::list(
+        py,
+        (m.global("itertools")?.method1("islice", (&r#gen, 3))?,),
+    )?;
     Ok(PyTuple::new(py, [&first, &rest])?.into_any())
 }
 
@@ -108,10 +110,10 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     }
     let r#gen = rt::genexpr!(
         frame,
-        genexpr[&factor](rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
+        genexpr[&factor](rt::builtins::range(py, (3,))?.try_iter()?)
     )?;
     factor.set(10)?;
-    rt::builtin(py, "list")?.call1((&r#gen,))
+    rt::builtins::list(py, (&r#gen,))
 }
 
 // generator_expressions.py:40
@@ -132,7 +134,7 @@ pub fn first_iterable_now<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny
     }
     let r#gen = rt::genexpr!(frame, genexpr(noisy_iterable(m)?.try_iter()?))?;
     rt::builtins::print(py, ("created",))?;
-    rt::builtin(py, "list")?.call1((&r#gen,))
+    rt::builtins::list(py, (&r#gen,))
 }
 
 // generator_expressions.py:47
@@ -186,7 +188,7 @@ pub fn failing_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
         let iter = m.global("Bad")?.call0()?.try_iter()?;
         rt::genexpr!(frame, genexpr(iter))?
     };
-    rt::builtin(m.py(), "sum")?.call1((&r#gen,))
+    rt::builtins::sum(m.py(), (&r#gen,))
 }
 
 // generator_expressions.py:75
@@ -209,7 +211,7 @@ pub fn failing_condition<'py>(
         }
         Ok(None)
     }
-    rt::builtin(m.py(), "list")?.call1((rt::genexpr!(frame, genexpr(xs.try_iter()?))?,))
+    rt::builtins::list(m.py(), (rt::genexpr!(frame, genexpr(xs.try_iter()?))?,))
 }
 
 // generator_expressions.py:79
@@ -251,10 +253,7 @@ pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         break;
     }
     r#gen.method0("close")?;
-    rt::builtins::print(
-        py,
-        ("after close", rt::builtin(py, "list")?.call1((&r#gen,))?),
-    )?;
+    rt::builtins::print(py, ("after close", rt::builtins::list(py, (&r#gen,))?))?;
     // generator_expressions.py:94
     #[rt::frame(m, "closed_early.<locals>.<genexpr>", 94)]
     fn genexpr2<'py>(
@@ -269,7 +268,7 @@ pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let mut other = Some(rt::genexpr!(frame, genexpr2(source.call0()?.try_iter()?))?);
     rt::builtins::print(
         py,
-        (rt::builtin(py, "next")?.call1((rt::local(&other, "other")?,))?,),
+        (rt::builtins::next(py, (rt::local(&other, "other")?,))?,),
     )?;
     other = None;
     rt::builtins::print(py, ("deleted",))?;
@@ -302,11 +301,13 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(None)
     }
     match (|| -> PyResult<Bound<'py, PyAny>> {
-        let list = rt::builtin(py, "list")?;
-        let iter = rt::builtin(py, "range")?.call1((4,))?.try_iter()?;
+        let iter = rt::builtins::range(py, (4,))?.try_iter()?;
         rt::builtins::print(
             py,
-            (list.call1((rt::genexpr!(frame, genexpr[boom](iter))?,))?,),
+            (rt::builtins::list(
+                py,
+                (rt::genexpr!(frame, genexpr[boom](iter))?,),
+            )?,),
         )
     })() {
         Ok(_) => {}
@@ -342,10 +343,7 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Ok(None)
     }
-    let g = rt::genexpr!(
-        frame,
-        genexpr(rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
-    )?;
+    let g = rt::genexpr!(frame, genexpr(rt::builtins::range(py, (3,))?.try_iter()?))?;
     rt::builtins::print(
         py,
         (
@@ -377,7 +375,7 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         py,
         (
             g.method1("send", (py.None(),))?,
-            rt::builtin(py, "next")?.call1((&g,))?,
+            rt::builtins::next(py, (&g,))?,
         ),
     )?;
     match (|| {
@@ -394,8 +392,8 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "list")?.call1((&g,))?,
-            rt::builtin(py, "next")?.call1((&g, "exhausted"))?,
+            rt::builtins::list(py, (&g,))?,
+            rt::builtins::next(py, (&g, "exhausted"))?,
         ),
     )?;
     g.set_attr("__name__", "renamed")?;
@@ -435,7 +433,7 @@ pub fn consumers<'py>(
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "sum")?.call1((rt::genexpr!(frame, genexpr(words.try_iter()?))?,))?,
+            rt::builtins::sum(py, (rt::genexpr!(frame, genexpr(words.try_iter()?))?,))?,
             rt::str(py, "-")
                 .attr("join")?
                 .call1((rt::genexpr!(frame, genexpr2(words.try_iter()?))?,))?,
@@ -506,9 +504,8 @@ pub fn consumers<'py>(
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "tuple")?
-                .call1((rt::genexpr!(frame, genexpr5(words.try_iter()?))?,))?,
-            rt::builtin(py, "dict")?.call1((rt::genexpr!(frame, genexpr6(words.try_iter()?))?,))?,
+            rt::builtins::tuple(py, (rt::genexpr!(frame, genexpr5(words.try_iter()?))?,))?,
+            rt::builtins::dict(py, (rt::genexpr!(frame, genexpr6(words.try_iter()?))?,))?,
         ),
     )?;
     // generator_expressions.py:134
@@ -536,9 +533,8 @@ pub fn consumers<'py>(
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "all")?.call1((rt::genexpr!(frame, genexpr7(words.try_iter()?))?,))?,
-            rt::builtin(py, "set")?
-                .call1((rt::genexpr!(frame, genexpr8(words.try_iter()?))?,))?
+            rt::builtins::all(py, (rt::genexpr!(frame, genexpr7(words.try_iter()?))?,))?,
+            rt::builtins::set(py, (rt::genexpr!(frame, genexpr8(words.try_iter()?))?,))?
                 .rich_compare(PySet::new(py, ["a", "c"])?, CompareOp::Eq)?,
         ),
     )?;
@@ -556,14 +552,15 @@ pub fn consumers<'py>(
     }
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((rt::genexpr!(
-            frame,
-            genexpr9(
-                rt::builtin(py, "zip")?
-                    .call1((words, rt::builtin(py, "range")?.call1((3,))?))?
-                    .try_iter()?
-            )
-        )?,))?,),
+        (rt::builtins::list(
+            py,
+            (rt::genexpr!(
+                frame,
+                genexpr9(
+                    rt::builtins::zip(py, (words, rt::builtins::range(py, (3,))?))?.try_iter()?
+                )
+            )?,),
+        )?,),
     )?;
     Ok(rt::none(py))
 }
@@ -588,10 +585,13 @@ pub fn captures<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Ok(None)
         }
-        rt::builtin(py, "list")?.call1((rt::genexpr!(
-            frame,
-            genexpr[base](rt::builtin(py, "range")?.call1((2,))?.try_iter()?)
-        )?,))
+        rt::builtins::list(
+            py,
+            (rt::genexpr!(
+                frame,
+                genexpr[base](rt::builtins::range(py, (2,))?.try_iter()?)
+            )?,),
+        )
     }
     let inner = rt::function!(frame, inner[base]())?;
     inner.call0()
@@ -618,11 +618,11 @@ pub fn comprehension_variable<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
     let gens = {
         let x_ = rt::Cell::empty(py, "x")?;
         let list = PyList::empty(py);
-        for item in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+        for item in rt::iter(&rt::builtins::range(py, (3,))?)? {
             x_.set(item?)?;
             list.append(rt::genexpr!(
                 frame,
-                genexpr[&x_ as "x"](rt::builtin(py, "range")?.call1((1,))?.try_iter()?)
+                genexpr[&x_ as "x"](rt::builtins::range(py, (1,))?.try_iter()?)
             )?)?;
         }
         list.into_any()
@@ -630,7 +630,7 @@ pub fn comprehension_variable<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
     let list = PyList::empty(py);
     for g in rt::iter(&gens)? {
         let g = g?;
-        list.append(rt::builtin(py, "list")?.call1((&g,))?)?;
+        list.append(rt::builtins::list(py, (&g,))?)?;
     }
     Ok(list.into_any())
 }
@@ -658,7 +658,7 @@ pub fn collected<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     }
     g.set(rt::genexpr!(
         frame,
-        genexpr[&g](rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
+        genexpr[&g](rt::builtins::range(py, (3,))?.try_iter()?)
     )?)?;
     let r#ref = m.global("weakref")?.attr("ref")?.call1((g.get()?,))?;
     g.delete()?;
@@ -678,7 +678,7 @@ pub fn reentrant<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         g: &rt::Cell<'py>,
         x: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::builtin(m.py(), "next")?.call1((g.get()?,))
+        rt::builtins::next(m.py(), (g.get()?,))
     }
     let inner = rt::function!(frame, inner[&g](x))?;
     // generator_expressions.py:167
@@ -695,9 +695,9 @@ pub fn reentrant<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     }
     g.set(rt::genexpr!(
         frame,
-        genexpr[inner](rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
+        genexpr[inner](rt::builtins::range(py, (3,))?.try_iter()?)
     )?)?;
-    match (|| rt::builtin(py, "next")?.call1((g.get()?,)))() {
+    match (|| rt::builtins::next(py, (g.get()?,)))() {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyValueError>(py) => {
             let exc = frame.catch(err);
@@ -905,8 +905,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("module_gen")?,))?,
-            rt::builtin(py, "list")?.call1((m.global("module_gen")?,))?,
+            rt::builtins::next(py, (m.global("module_gen")?,))?,
+            rt::builtins::list(py, (m.global("module_gen")?,))?,
             m.global("module_gen")?.get_type().attr("__qualname__")?,
         ),
     )?;

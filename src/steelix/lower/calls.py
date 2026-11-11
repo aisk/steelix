@@ -21,6 +21,16 @@ if TYPE_CHECKING:
 
 # Builtins with a direct PyO3 spelling, by name and number of arguments. Only
 # used when the name can only be the builtin (design §12).
+# Builtins with a function of the same name in `rt::builtins`, called with
+# positional arguments only. Keep in sync with the runtime's `builtins.rs`.
+_SHORTCUT_BUILTINS = frozenset(
+    """
+    all any callable chr dict divmod enumerate filter float frozenset getattr
+    hasattr hash id int issubclass list map max min next open ord print range
+    reversed round set setattr sorted sum tuple zip
+    """.split()
+)
+
 _SPECIAL_BUILTINS = {
     ("len", 1),
     ("isinstance", 2),
@@ -192,13 +202,13 @@ class CallLowering:
             return self.direct_call(resolution, node)
         if resolution is not Lookup.BUILTIN or not plain:
             return None
-        if name == "print" and len(args) <= MAX_CALL_ARGS:
-            values = self.operands(list(args))
-            tuple_ = rs.Tuple(tuple(v.arg() for v in values))
-            call = rs.Call(rs.Path("rt::builtins::print"), (self.py(), tuple_))
-            return Value(_try(call), Kind.OWNED)
         if (name, len(args)) in _SPECIAL_BUILTINS:
             return self.builtin_call(name, self.operands(list(args)))
+        if name in _SHORTCUT_BUILTINS and len(args) <= MAX_CALL_ARGS:
+            values = self.operands(list(args))
+            tuple_ = rs.Tuple(tuple(v.arg() for v in values))
+            call = rs.Call(rs.Path(f"rt::builtins::{name}"), (self.py(), tuple_))
+            return Value(_try(call), Kind.OWNED)
         return None
 
     def zero_arg_super(self: ExprLowering, node: ast.Call) -> Value:

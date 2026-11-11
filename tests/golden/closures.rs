@@ -40,7 +40,7 @@ pub fn late_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     // Every closure sees the final value of `i`.
     let funcs = PyList::empty(py).into_any();
     let mut show: Bound<'py, PyAny>;
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (3,))?)? {
         i.set(item?)?;
         // closures.py:23
         #[rt::frame(m, "late_binding.<locals>.show", 23)]
@@ -67,7 +67,7 @@ pub fn early_binding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     // A default argument captures the value at definition time instead.
     let funcs = PyList::empty(py).into_any();
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (3,))?)? {
         let i = i?;
         // closures.py:34
         #[rt::frame(m, "early_binding.<locals>.<lambda>", 34)]

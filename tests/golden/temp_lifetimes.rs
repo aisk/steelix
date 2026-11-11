@@ -49,7 +49,7 @@ pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let mut e: Bound<'py, PyAny>;
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (2,))?)? {
         let i = i?;
         e = PyDict::new(py).into_any();
         e.set_item(
@@ -220,7 +220,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     // A comprehension's result is dropped once the statement is done with it.
     {
         let list = PyList::empty(py);
-        for i in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
+        for i in rt::iter(&rt::builtins::range(py, (2,))?)? {
             let i = i?;
             list.append(make(m, &rt::fstring(py, ("comp ", rt::format(&i, "")?))?)?)?;
         }
@@ -240,10 +240,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     m.set_global(
         "n",
-        rt::builtin(py, "sum")?.call1((rt::genexpr!(
-            m,
-            genexpr(PyList::new(py, [&make(m, &rt::str(py, "genexpr"))?])?.try_iter()?)
-        )?,))?,
+        rt::builtins::sum(
+            py,
+            (rt::genexpr!(
+                m,
+                genexpr(PyList::new(py, [&make(m, &rt::str(py, "genexpr"))?])?.try_iter()?)
+            )?,),
+        )?,
     )?;
     rt::builtins::print(py, ("after genexpr", m.global("n")?))?;
     rt::def!(m, augmented())?;

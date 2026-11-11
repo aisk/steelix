@@ -101,7 +101,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::def!(m, describe_ as "describe"(n))?;
         rt::builtins::print(py, ("native branch", m.global("mode")?))?;
     }
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((4,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (4,))?)? {
         m.set_global("i", item?)?;
         if m.global("i")?.eq(1)? {
             continue;

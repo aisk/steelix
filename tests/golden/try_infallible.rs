@@ -25,7 +25,7 @@ pub fn local_copy<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<B
 #[rt::frame(m, "nothing", 24)]
 pub fn nothing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let mut i: Option<Bound<'py, PyAny>> = None;
-    for item in rt::iter(&rt::builtin(m.py(), "range")?.call1((3,))?)? {
+    for item in rt::iter(&rt::builtins::range(m.py(), (3,))?)? {
         i = Some(item?);
         continue;
     }
@@ -84,7 +84,7 @@ pub fn deleted_in_loop<'py>(
     let py = m.py();
     let mut v = Some(rt::int(py, 0));
     let mut w: Bound<'py, PyAny>;
-    for underscore in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
+    for underscore in rt::iter(&rt::builtins::range(py, (n,))?)? {
         let underscore = underscore?;
         w = rt::local(&v, "v")?.clone();
         v = None;

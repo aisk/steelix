@@ -199,7 +199,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             "annotate cleared",
-            rt::builtin(py, "list")?.call1((m.global("f")?.attr("__annotations__")?,))?,
+            rt::builtins::list(py, (m.global("f")?.attr("__annotations__")?,))?,
         ),
     )?;
     // metadata_del.py:45
@@ -243,10 +243,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     m.set_global(
         "g",
-        rt::genexpr!(
-            m,
-            genexpr(rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
-        )?,
+        rt::genexpr!(m, genexpr(rt::builtins::range(py, (3,))?.try_iter()?))?,
     )?;
     let value = m.global("NastyName")?.call1(("renamed",))?;
     m.global("f")?.set_attr("__name__", value)?;
@@ -264,7 +261,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         (
             "generator name replaced",
             m.global("g")?.attr("__name__")?,
-            rt::builtin(py, "list")?.call1((m.global("g")?,))?,
+            rt::builtins::list(py, (m.global("g")?,))?,
         ),
     )?;
     // Another thread reads the metadata while a `__del__` runs in this thread and

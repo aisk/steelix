@@ -387,6 +387,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] 嵌套函数、lambda、生成器表达式的 qualname 不再写两遍：函数体里用帧作为定义的地方，`rt::function!(frame, increment[&count](step = 1))?`、`rt::genexpr!(frame, genexpr(..))?`，runtime 从帧推出 `f.<locals>.<名字>`（`Frame` 实现了 `Definer`）。以前带 `qualname = "f.<locals>.g"` 的宏调用常被 rustfmt 拆成五行
 - [x] fn 上面的位置注释用第一个装饰器的行，和属性里的行号一致（以前注释是 `def` 行，帧是装饰器行）
 - [x] ~~海象赋值之后的读取直接用临时变量（`rt::local(&y, "y")?` 换成 `&y2`）~~，不做。那是同一个表达式之外的另一次读取，要知道中间没有别的赋值得做逐次读取的定值分析，而这种写法在 golden 里只有个位数
+- [x] 常用的 builtin 只用位置参数调用时写成 `rt::builtins::int(py, (&status,))?`，不再是 `rt::builtin(py, "int")?.call1((&status,))?`（design §8）。以前只有 `print`，现在是三十多个，runtime 里由一个宏生成。golden 里约 270 处。需要 runtime 发新版本（新增的公开函数，兼容）
 - [ ] `macro_attr`（rust-lang/rust#143547）稳定后把 `#[rt::frame]` 换成 runtime 里的声明宏，去掉 `steelix-runtime-macros`，生成的代码不变
 - [x] 默认模式下 `frame.matches(&err, N, || ..)` 的行号参数总是 `def` 行，去掉了（golden 里 152 处），写成 `frame.matches(&err, || ..)`。`--traceback-lines` 时是带行号的 `frame.matches_at(&err, N, || ..)`
 

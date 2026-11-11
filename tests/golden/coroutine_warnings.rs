@@ -43,7 +43,7 @@ pub fn make_coroutines<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
 pub fn throw_three_arguments<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     let g = m.global("gen")?.call0()?;
-    rt::builtin(py, "next")?.call1((&g,))?;
+    rt::builtins::next(py, (&g,))?;
     g.attr("throw")?.call1((
         rt::builtin(py, "ValueError")?,
         rt::builtin(py, "ValueError")?.call1(("v",))?,

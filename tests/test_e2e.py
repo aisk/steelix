@@ -16,6 +16,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,6 +151,10 @@ def run_interrupted(args: list[str], cwd: Path) -> Outcome:
     )
     assert proc.stdout is not None
     first = proc.stdout.readline()
+    # Let the program get past the `print`: on a busy machine CPython may
+    # still be inside it and reports the interrupt on that line, while native
+    # code only checks for signals in loops.
+    time.sleep(0.2)
     proc.send_signal(signal.SIGINT)
     try:
         stdout, stderr = proc.communicate(timeout=30)

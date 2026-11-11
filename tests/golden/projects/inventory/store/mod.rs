@@ -27,10 +27,13 @@ pub fn total_value<'py>(
         }
         Ok(None)
     }
-    rt::builtin(m.py(), "sum")?.call1((rt::genexpr!(
-        frame,
-        genexpr(inventory.attr("items")?.method0("values")?.try_iter()?)
-    )?,))
+    rt::builtins::sum(
+        m.py(),
+        (rt::genexpr!(
+            frame,
+            genexpr(inventory.attr("items")?.method0("values")?.try_iter()?)
+        )?,),
+    )
 }
 
 /// Executes the body of `store/__init__.py` in the module `m`.

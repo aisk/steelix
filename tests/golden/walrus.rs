@@ -43,7 +43,7 @@ pub fn in_while<'py>(
     let it = values.try_iter()?.into_any();
     let mut item: Bound<'py, PyAny>;
     loop {
-        item = rt::builtin(py, "next")?.call1((&it, py.None()))?;
+        item = rt::builtins::next(py, (&it, py.None()))?;
         if item.is_none() {
             break;
         }
@@ -88,9 +88,11 @@ pub fn in_comprehension<'py>(
         }
         Ok(None)
     }
-    if rt::builtin(py, "any")?
-        .call1((rt::genexpr!(frame, genexpr[&found](values.try_iter()?))?,))?
-        .is_truthy()?
+    if rt::builtins::any(
+        py,
+        (rt::genexpr!(frame, genexpr[&found](values.try_iter()?))?,),
+    )?
+    .is_truthy()?
     {
         rt::builtins::print(py, ("found", found.get()?))?;
     }

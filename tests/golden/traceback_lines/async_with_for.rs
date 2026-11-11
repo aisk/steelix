@@ -385,7 +385,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     frame.line(197);
     let queue = m.global("asyncio")?.method0("Queue")?;
     frame.line(198);
-    for i in rt::builtin(py, "range")?.call1((3,))?.try_iter()? {
+    for i in rt::builtins::range(py, (3,))?.try_iter()? {
         let i = i?;
         frame.line(199);
         queue.method1("put_nowait", (&i,))?;

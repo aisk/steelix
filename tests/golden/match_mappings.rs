@@ -59,7 +59,7 @@ pub fn handle<'py>(
                 "id ",
                 rt::format(&ident, "")?,
                 " with ",
-                rt::format(&rt::builtin(py, "sorted")?.call1((&rest,))?, "")?,
+                rt::format(&rt::builtins::sorted(py, (&rest,))?, "")?,
             ),
         )
     } else if rt::match_mapping(message, 1)?
@@ -115,8 +115,7 @@ pub fn counts<'py>(
             py,
             (
                 "a is 1, rest",
-                rt::builtin(py, "dict")?
-                    .call1((rt::builtin(py, "sorted")?.call1((rest.method0("items")?,))?,))?,
+                rt::builtins::dict(py, (rt::builtins::sorted(py, (rest.method0("items")?,))?,))?,
                 rest.get_type().attr("__name__")?,
             ),
         )?;
@@ -127,8 +126,10 @@ pub fn counts<'py>(
             py,
             (
                 "everything",
-                rt::builtin(py, "dict")?
-                    .call1((rt::builtin(py, "sorted")?.call1((everything.method0("items")?,))?,))?,
+                rt::builtins::dict(
+                    py,
+                    (rt::builtins::sorted(py, (everything.method0("items")?,))?,),
+                )?,
                 everything.is(mapping),
             ),
         )?;
@@ -266,7 +267,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 py,
                 (
                     "not found, keys",
-                    rt::builtin(py, "list")?.call1((m.global("d")?,))?,
+                    rt::builtins::list(py, (m.global("d")?,))?,
                 ),
             )?;
         }
@@ -289,7 +290,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 py,
                 (
                     m.global("name")?,
-                    rt::builtin(py, "sorted")?.call1((m.global("meta")?,))?,
+                    rt::builtins::sorted(py, (m.global("meta")?,))?,
                 ),
             )?;
         }

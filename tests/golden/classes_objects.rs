@@ -137,7 +137,7 @@ pub mod tree {
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
         slf.set_attr("value", value)?;
-        slf.set_attr("children", rt::builtin(py, "list")?.call1((children,))?)?;
+        slf.set_attr("children", rt::builtins::list(py, (children,))?)?;
         Ok(rt::none(py))
     }
 
@@ -174,16 +174,21 @@ pub mod tree {
             Ok(None)
         }
         Ok(if false {
-            slf.attr("value")?
-                .add(rt::builtin(py, "sum")?.call1((rt::genexpr!(
+            slf.attr("value")?.add(rt::builtins::sum(
+                py,
+                (rt::genexpr!(
                     frame,
                     genexpr(slf.attr("children")?.try_iter()?)
-                )?,))?)?
+                )?,),
+            )?)?
         } else {
-            slf.attr("value")?.add(
-                rt::builtin(py, "sum")?.call1((rt::builtin(py, "map")?
-                    .call1((m.global("Tree")?.attr("total")?, slf.attr("children")?))?,))?,
-            )?
+            slf.attr("value")?.add(rt::builtins::sum(
+                py,
+                (rt::builtins::map(
+                    py,
+                    (m.global("Tree")?.attr("total")?, slf.attr("children")?),
+                )?,),
+            )?)?
         })
     }
 }
@@ -256,7 +261,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .is(m.global("p")?.attr("y")?),
         ),
     )?;
-    match (|| rt::builtin(py, "hash")?.call1((m.global("p")?,)))() {
+    match (|| rt::builtins::hash(py, (m.global("p")?,)))() {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyTypeError>(py) => {
             let exception = frame.catch(err);
@@ -271,7 +276,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             m.global("s")?.attr("a")?,
-            rt::builtin(py, "hasattr")?.call1((m.global("s")?, "__dict__"))?,
+            rt::builtins::hasattr(py, (m.global("s")?, "__dict__"))?,
             m.global("pickle")?
                 .attr("loads")?
                 .call1((m
@@ -338,8 +343,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         (
             m.global("p")?.is_instance(&m.global("Point")?)?,
             m.global("s")?.is_instance(&m.global("Point")?)?,
-            rt::builtin(py, "issubclass")?
-                .call1((m.global("Point")?, rt::builtin(py, "object")?))?,
+            rt::builtins::issubclass(py, (m.global("Point")?, rt::builtin(py, "object")?))?,
             m.global("p")?.get_type().attr("__mro__")?,
         ),
     )?;

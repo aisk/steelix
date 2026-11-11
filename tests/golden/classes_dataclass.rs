@@ -210,14 +210,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         (
             m.global("v")?,
             m.global("v")?.method0("bump")?,
-            rt::builtin(py, "sorted")?.call1((PyList::new(
+            rt::builtins::sorted(
                 py,
-                [
-                    &m.global("Version")?.call1((2,))?,
-                    &m.global("Version")?.call1((1, 5))?,
-                    &m.global("v")?,
-                ],
-            )?,))?,
+                (PyList::new(
+                    py,
+                    [
+                        &m.global("Version")?.call1((2,))?,
+                        &m.global("Version")?.call1((1, 5))?,
+                        &m.global("v")?,
+                    ],
+                )?,),
+            )?,
             m.global("v")?
                 .rich_compare(m.global("v")?.method0("bump")?, CompareOp::Lt)?,
         ),
@@ -239,12 +242,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         Err(err) => return Err(err),
     }
-    let value = rt::builtin(py, "hash")?
-        .call1((m.global("v")?,))?
-        .rich_compare(
-            rt::builtin(py, "hash")?.call1((m.global("Version")?.call1((1,))?,))?,
-            CompareOp::Eq,
-        )?;
+    let value = rt::builtins::hash(py, (m.global("v")?,))?.rich_compare(
+        rt::builtins::hash(py, (m.global("Version")?.call1((1,))?,))?,
+        CompareOp::Eq,
+    )?;
     let list = PyList::empty(py);
     for f in rt::iter(
         &m.global("dataclasses")?
@@ -367,7 +368,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             m.global("s")?,
             m.global("s")?.method0("total")?,
             m.global("Slotted")?.attr("__slots__")?,
-            rt::builtin(py, "hasattr")?.call1((m.global("s")?, "__dict__"))?,
+            rt::builtins::hasattr(py, (m.global("s")?, "__dict__"))?,
         ),
     )?;
     {

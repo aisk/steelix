@@ -223,7 +223,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     )?;
     rt::builtins::print(py, (spin(m, &rt::int(py, 4))?,))?;
     m.set_global("total", 0)?;
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((5,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (5,))?)? {
         m.set_global("x", item?)?;
         if m.global("x")?.eq(3)? {
             continue;

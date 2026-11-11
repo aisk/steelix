@@ -127,7 +127,7 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Err(err) if err.is_instance_of::<PyKeyError>(py) => value = rt::none(py),
         Err(err) => return Err(err),
     }
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (3,))?)? {
         let i = i?;
         let result: PyResult<rt::Flow<'py>> = async {
             if i.eq(1)? {
@@ -236,7 +236,7 @@ pub async fn outer<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
     }
     let inner = rt::function!(frame, async inner[n](k))?;
     let results = PyList::empty(py).into_any();
-    for k in rt::iter(&rt::builtin(py, "range")?.call1((3,))?)? {
+    for k in rt::iter(&rt::builtins::range(py, (3,))?)? {
         let k = k?;
         results
             .attr("append")?

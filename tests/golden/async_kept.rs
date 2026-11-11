@@ -53,7 +53,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     rt::builtins::print(py, (rt::delegate(native(m, &rt::int(py, 3))).await?,))?;
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m.global("native_gen")?.call0()?,))?,),
+        (rt::builtins::list(py, (m.global("native_gen")?.call0()?,))?,),
     )?;
     let legacy = m.global("legacy")?.call0()?;
     rt::builtins::print(py, (rt::await_(legacy).await?,))?;

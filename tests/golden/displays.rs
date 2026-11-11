@@ -35,7 +35,7 @@ pub fn build<'py>(
             &single,
             &empty,
             &lookup,
-            rt::builtin(py, "sorted")?.call1((&unique,))?,
+            rt::builtins::sorted(py, (&unique,))?,
             PyList::empty(py),
             PyDict::new(py),
         ),
@@ -107,7 +107,7 @@ pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     ns.set_attr("x", ns.attr("y")?.mul(10)?)?;
     rt::builtins::print(py, (ns.attr("x")?, ns.attr("y")?))?;
     ns.del_attr("y")?;
-    rt::builtins::print(py, (rt::builtin(py, "hasattr")?.call1((&ns, "y"))?, &ns))?;
+    rt::builtins::print(py, (rt::builtins::hasattr(py, (&ns, "y"))?, &ns))?;
     rt::builtins::print(
         py,
         (

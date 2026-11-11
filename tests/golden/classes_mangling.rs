@@ -246,7 +246,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         (
             m.global("a")?.method0("handler")?,
             m.global("a")?.method0("names")?,
-            rt::builtin(py, "hasattr")?.call1((m.global("a")?, "__owner"))?,
+            rt::builtins::hasattr(py, (m.global("a")?, "__owner"))?,
             m.global("Account")?
                 .attr("__dict__")?
                 .contains("_Account__secret")?,
@@ -280,10 +280,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         (
             m.global("_Under")?.call0()?.method0("call")?,
             m.global("___")?.call0()?.method0("call")?,
-            rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-                m,
-                genexpr(m.global("___")?.attr("__dict__")?.try_iter()?)
-            )?,))?,
+            rt::builtins::sorted(
+                py,
+                (rt::genexpr!(
+                    m,
+                    genexpr(m.global("___")?.attr("__dict__")?.try_iter()?)
+                )?,),
+            )?,
         ),
     )?;
     rt::builtins::print(py, (m.global("Account")?.attr("_Account__slots_like")?,))?;

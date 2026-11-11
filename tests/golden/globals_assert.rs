@@ -92,12 +92,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "hasattr")?.call1((
-                m.global("sys")?
-                    .attr("modules")?
-                    .get_item(m.global("__name__")?)?,
-                "counter",
-            ))?,
+            rt::builtins::hasattr(
+                py,
+                (
+                    m.global("sys")?
+                        .attr("modules")?
+                        .get_item(m.global("__name__")?)?,
+                    "counter",
+                ),
+            )?,
             m.global("names")?,
         ),
     )?;

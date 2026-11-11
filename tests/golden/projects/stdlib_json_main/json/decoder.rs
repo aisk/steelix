@@ -22,7 +22,7 @@ pub fn _decode_uXXXX<'py>(
     let py = module.py();
     let esc = _m.call1((s, pos.add(1)?))?;
     if !esc.is_none() {
-        match (|| rt::builtin(py, "int")?.call1((esc.method0("group")?, 16)))() {
+        match (|| rt::builtins::int(py, (esc.method0("group")?, 16)))() {
             Ok(value) => return Ok(value),
             Err(err) if err.is_instance_of::<PyValueError>(py) => {}
             Err(err) => return Err(err),
@@ -146,7 +146,7 @@ pub fn py_scanstring<'py>(
                     end = rt::iadd(&end, 6)?;
                 }
             }
-            char = rt::builtin(py, "chr")?.call1((&uni,))?;
+            char = rt::builtins::chr(py, (&uni,))?;
         }
         _append.call1((&char,))?;
         py.check_signals()?;
@@ -306,7 +306,7 @@ pub fn JSONObject<'py>(
         result = object_pairs_hook.call1((&pairs,))?;
         return Ok(PyTuple::new(py, [&result, &end])?.into_any());
     }
-    pairs = rt::builtin(py, "dict")?.call1((&pairs,))?;
+    pairs = rt::builtins::dict(py, (&pairs,))?;
     if !object_hook.is_none() {
         pairs = object_hook.call1((&pairs,))?;
     }
@@ -784,9 +784,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .bitor(m.global("re")?.attr("MULTILINE")?)?
             .bitor(m.global("re")?.attr("DOTALL")?)?,
     )?;
-    m.set_global("NaN", rt::builtin(py, "float")?.call1(("nan",))?)?;
-    m.set_global("PosInf", rt::builtin(py, "float")?.call1(("inf",))?)?;
-    m.set_global("NegInf", rt::builtin(py, "float")?.call1(("-inf",))?)?;
+    m.set_global("NaN", rt::builtins::float(py, ("nan",))?)?;
+    m.set_global("PosInf", rt::builtins::float(py, ("inf",))?)?;
+    m.set_global("NegInf", rt::builtins::float(py, ("-inf",))?)?;
     m.set_global(
         "JSONDecodeError",
         rt::class!(

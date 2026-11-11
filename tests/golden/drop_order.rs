@@ -68,7 +68,7 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Boun
     let py = m.py();
     let first = m.global("T")?.call1(("first",))?;
     let mut last: Option<Bound<'py, PyAny>> = None;
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (n,))?)? {
         let i = i?;
         last = Some(
             m.global("T")?
@@ -119,9 +119,8 @@ pub fn without_else<'py>(
 #[rt::frame(m, "in_try", 65, frame)]
 pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let int = rt::builtin(py, "int")?;
     let number: Bound<'py, PyAny>;
-    let value = match int.call1((text,)) {
+    let value = match rt::builtins::int(py, (text,)) {
         Ok(value2) => {
             number = value2;
             m.global("T")?

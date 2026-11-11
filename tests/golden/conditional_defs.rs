@@ -31,10 +31,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     )?;
     m.set_global("sys", rt::import(m, "sys")?)?;
     m.set_global("counter", 10)?;
-    if !rt::builtin(py, "hasattr")?
-        .call1((m.global("sys")?, "no_such_attribute"))?
-        .is_truthy()?
-    {
+    if !rt::builtins::hasattr(py, (m.global("sys")?, "no_such_attribute"))?.is_truthy()? {
         // conditional_defs.py:9
         /// Doc of helper.
         #[rt::frame(m, "helper", 9)]
@@ -68,7 +65,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         rt::def!(m, helper_ as "helper"(x, scale = 2))?;
     }
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (2,))?)? {
         m.set_global("i", item?)?;
         // conditional_defs.py:20
         fn in_loop<'py>(m: &rt::Module<'py>, y: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {

@@ -44,11 +44,11 @@ pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((&it,))?,
+            rt::builtins::next(py, (&it,))?,
             rt::int(py, x.len()?).neg()?.abs()?,
-            rt::builtin(py, "sorted")?.call1((x,))?,
-            rt::builtin(py, "min")?.call1((x,))?,
-            rt::builtin(py, "max")?.call1((x,))?,
+            rt::builtins::sorted(py, (x,))?,
+            rt::builtins::min(py, (x,))?,
+            rt::builtins::max(py, (x,))?,
         ),
     )?;
     Ok(rt::none(py))
@@ -80,10 +80,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "divmod")?.call1((7, 2))?,
-            rt::builtin(py, "round")?.call1((2.567, 2))?,
-            rt::builtin(py, "sum")?.call1((PyList::new(py, [1, 2, 3])?,))?,
-            rt::builtin(py, "list")?.call1((rt::builtin(py, "range")?.call1((3,))?,))?,
+            rt::builtins::divmod(py, (7, 2))?,
+            rt::builtins::round(py, (2.567, 2))?,
+            rt::builtins::sum(py, (PyList::new(py, [1, 2, 3])?,))?,
+            rt::builtins::list(py, (rt::builtins::range(py, (3,))?,))?,
         ),
     )?;
     Ok(())

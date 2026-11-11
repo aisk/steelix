@@ -158,7 +158,7 @@ pub fn joined<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
     sep.attr("join")?
-        .call1((rt::builtin(py, "map")?.call1((rt::builtin(py, "str")?, args))?,))?
+        .call1((rt::builtins::map(py, (rt::builtin(py, "str")?, args))?,))?
         .add(end)
 }
 
@@ -596,9 +596,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             m.global("getter")?.call0()?,
-            rt::builtin(py, "getattr")?
-                .call1((m.global("box")?, "add"))?
-                .call1((1,))?,
+            rt::builtins::getattr(py, (m.global("box")?, "add"))?.call1((1,))?,
         ),
     )?;
     // A function stored on the instance is not bound.
@@ -680,7 +678,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         x: &Bound<'py, PyAny>,
         kw: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        rt::builtin(m.py(), "sorted")?.call1((kw.method0("items")?,))
+        rt::builtins::sorted(m.py(), (kw.method0("items")?,))
     }
     rt::builtins::print(
         py,

@@ -273,19 +273,22 @@ def from_with(name):
     }
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((rt::genexpr!(
-            m,
-            genexpr(
-                PyList::new(
-                    py,
-                    [
-                        &m.global("Tracked")?.call1(("g1",))?,
-                        &m.global("Tracked")?.call1(("g2",))?
-                    ]
-                )?
-                .try_iter()?
-            )
-        )?,))?,),
+        (rt::builtins::list(
+            py,
+            (rt::genexpr!(
+                m,
+                genexpr(
+                    PyList::new(
+                        py,
+                        [
+                            &m.global("Tracked")?.call1(("g1",))?,
+                            &m.global("Tracked")?.call1(("g2",))?
+                        ]
+                    )?
+                    .try_iter()?
+                )
+            )?,),
+        )?,),
     )?;
     rt::builtins::print(py, ("end",))?;
     Ok(())

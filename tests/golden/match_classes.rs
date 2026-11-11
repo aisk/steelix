@@ -62,8 +62,7 @@ pub fn area<'py>(m: &rt::Module<'py>, shape: &Bound<'py, PyAny>) -> PyResult<Bou
                 rt::format(&y, "")?,
                 ": ",
                 rt::format(
-                    &rt::builtin(py, "round")?
-                        .call1((rt::float(py, 3.14159).mul(&r)?.mul(&r)?, 2))?,
+                    &rt::builtins::round(py, (rt::float(py, 3.14159).mul(&r)?.mul(&r)?, 2))?,
                     "",
                 )?,
             ),
@@ -443,7 +442,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     PyTuple::empty(py).as_any(),
                     [("k", 9)].into_py_dict(py)?.as_any(),
                     PySet::new(py, [1])?.as_any(),
-                    &rt::builtin(py, "frozenset")?.call0()?,
+                    &rt::builtins::frozenset(py, ())?,
                     &rt::none(py),
                 ],
             )?,

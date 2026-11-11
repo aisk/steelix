@@ -42,8 +42,7 @@ pub fn deco<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bou
         rt::builtins::print(py, ("apply", label, cls.attr("__name__")?))?;
         cls.set_attr(
             "decorated",
-            rt::builtin(py, "getattr")?
-                .call1((cls, "decorated", PyTuple::empty(py)))?
+            rt::builtins::getattr(py, (cls, "decorated", PyTuple::empty(py)))?
                 .add(PyTuple::new(py, [label])?)?,
         )?;
         Ok(cls.clone())
@@ -82,7 +81,7 @@ pub fn fake_meta<'py>(
             "fake_meta",
             name,
             bases,
-            rt::builtin(py, "sorted")?.call1((rt::genexpr!(frame, genexpr(ns.try_iter()?))?,))?,
+            rt::builtins::sorted(py, (rt::genexpr!(frame, genexpr(ns.try_iter()?))?,))?,
             kwargs,
         ),
     )?;
@@ -193,15 +192,12 @@ pub mod meta {
         kwargs: &Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::builtins::print(
-            py,
-            ("new", name, rt::builtin(py, "sorted")?.call1((kwargs,))?),
-        )?;
+        rt::builtins::print(py, ("new", name, rt::builtins::sorted(py, (kwargs,))?))?;
         rt::super_(__class__, mcls)?.attr("__new__")?.call1((
             mcls,
             name,
             bases,
-            rt::builtin(py, "dict")?.call1((ns,))?,
+            rt::builtins::dict(py, (ns,))?,
         ))
     }
 
@@ -1229,7 +1225,7 @@ def errors():
                 .attr("__qualname__")?,
         ),
     )?;
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((2,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (2,))?)? {
         m.set_global("i", item?)?;
         m.set_global(
             "InLoop",

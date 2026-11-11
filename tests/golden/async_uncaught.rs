@@ -11,7 +11,7 @@ pub async fn numbers<'py>(
     n: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    for i in rt::iter(&rt::builtin(py, "range")?.call1((n,))?)? {
+    for i in rt::iter(&rt::builtins::range(py, (n,))?)? {
         let i = i?;
         if i.eq(2)? {
             return Err(frame.raise(PyLookupError::new_err((rt::fstring(

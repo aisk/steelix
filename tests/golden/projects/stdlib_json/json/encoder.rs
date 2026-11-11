@@ -59,7 +59,7 @@ pub fn py_encode_basestring_ascii<'py>(
             Ok(value) => Ok(value),
             Err(err) if err.is_instance_of::<PyKeyError>(py) => {
                 let _caught = frame.catch(err);
-                n = rt::builtin(py, "ord")?.call1((&s,))?;
+                n = rt::builtins::ord(py, (&s,))?;
                 if n.lt(65536)? {
                     rt::str(py, "\\u{0:04x}").method1("format", (&n,))
                 } else {
@@ -161,7 +161,7 @@ pub fn _make_iterencode<'py>(
             newline_indent = rt::none(py);
             separator = _item_separator.clone();
         }
-        for item in rt::iter(&rt::builtin(py, "enumerate")?.call1((lst,))?)? {
+        for item in rt::iter(&rt::builtins::enumerate(py, (lst,))?)? {
             let [i, value] = rt::unpack(&item?)?;
             if i.is_truthy()? {
                 buf = separator.clone();
@@ -296,7 +296,7 @@ pub fn _make_iterencode<'py>(
         };
         let mut first = true;
         let items = if _sort_keys.is_truthy()? {
-            rt::builtin(py, "sorted")?.call1((dct.method0("items")?,))?
+            rt::builtins::sorted(py, (dct.method0("items")?,))?
         } else {
             dct.method0("items")?
         };
@@ -807,7 +807,7 @@ pub mod json_encoder {
         if !chunks.is_instance(
             PyTuple::new(py, [&rt::builtin(py, "list")?, &rt::builtin(py, "tuple")?])?.as_any(),
         )? {
-            chunks = rt::builtin(py, "list")?.call1((&chunks,))?;
+            chunks = rt::builtins::list(py, (&chunks,))?;
         }
         rt::str(py, "").method1("join", (&chunks,))
     }
@@ -1009,10 +1009,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         ]
         .into_py_dict(py)?,
     )?;
-    for item in rt::iter(&rt::builtin(py, "range")?.call1((32,))?)? {
+    for item in rt::iter(&rt::builtins::range(py, (32,))?)? {
         m.set_global("i", item?)?;
         m.global("ESCAPE_DCT")?.attr("setdefault")?.call1((
-            rt::builtin(py, "chr")?.call1((m.global("i")?,))?,
+            rt::builtins::chr(py, (m.global("i")?,))?,
             rt::str(py, "\\u{0:04x}")
                 .attr("format")?
                 .call1((m.global("i")?,))?,
@@ -1020,7 +1020,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     // ESCAPE_DCT.setdefault(chr(i), '\\u%04x' % (i,))
     m.del_global("i")?;
-    m.set_global("INFINITY", rt::builtin(py, "float")?.call1(("inf",))?)?;
+    m.set_global("INFINITY", rt::builtins::float(py, ("inf",))?)?;
     rt::def!(
         m,
         py_encode_basestring(s),

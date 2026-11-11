@@ -21,9 +21,10 @@ pub fn totals<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
     let list = PyList::empty(py);
     for row in rt::iter(rows)? {
         let row = row?;
-        list.append(
-            rt::builtin(py, "sum")?.call1((rt::genexpr!(frame, genexpr(row.try_iter()?))?,))?,
-        )?;
+        list.append(rt::builtins::sum(
+            py,
+            (rt::genexpr!(frame, genexpr(row.try_iter()?))?,),
+        )?)?;
     }
     Ok(list.into_any())
 }

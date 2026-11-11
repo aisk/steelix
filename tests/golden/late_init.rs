@@ -98,7 +98,7 @@ pub fn parse<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bou
     // `try` with `except` and `else` that both assign.
     let result = match (|| -> PyResult<()> {
         rt::builtins::print(py, ("parsing", text))?;
-        number = Some(rt::builtin(py, "int")?.call1((text,))?);
+        number = Some(rt::builtins::int(py, (text,))?);
         Ok(())
     })() {
         Ok(()) => rt::local(&number, "number")?.mul(2)?,

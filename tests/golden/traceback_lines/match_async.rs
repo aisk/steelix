@@ -66,8 +66,7 @@ pub async fn handle<'py>(
                     && let rest = rt::match_rest(&subject, ["action"])?
                 {
                     frame.line(26);
-                    extra = rt::delegate(fetch(m, &rt::builtin(py, "sorted")?.call1((&rest,))?))
-                        .await?;
+                    extra = rt::delegate(fetch(m, &rt::builtins::sorted(py, (&rest,))?)).await?;
                     frame.line(27);
                     return rt::fstring(
                         py,
@@ -183,13 +182,8 @@ pub async fn tokens<'py>(
                 && word.method0("isdigit")?.is_truthy()?
             {
                 frame.line(64);
-                let value = PyTuple::new(
-                    py,
-                    [
-                        &rt::str(py, "num"),
-                        &rt::builtin(py, "int")?.call1((&word,))?,
-                    ],
-                )?;
+                let value =
+                    PyTuple::new(py, [&rt::str(py, "num"), &rt::builtins::int(py, (&word,))?])?;
                 rt::yield_(value).await?;
             } else {
                 frame.line(65);
@@ -268,9 +262,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(72);
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m
-            .global("tokens")?
-            .call1(("1 + x * 22 # rest is a comment",))?,))?,),
+        (rt::builtins::list(
+            py,
+            (m.global("tokens")?
+                .call1(("1 + x * 22 # rest is a comment",))?,),
+        )?,),
     )?;
     rt::def!(
         m,
@@ -290,7 +286,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?,))?,
     )?;
     frame.line(88);
-    rt::builtins::print(py, (rt::builtin(py, "next")?.call1((m.global("gen")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::next(py, (m.global("gen")?,))?,))?;
     frame.line(89);
     rt::builtins::print(py, (m.global("gen")?.method1("send", ("x",))?,))?;
     frame.line(90);

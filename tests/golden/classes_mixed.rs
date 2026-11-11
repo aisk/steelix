@@ -364,10 +364,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     rt::builtins::print(
         py,
-        (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-            m,
-            genexpr(m.global("Mixed")?.attr("__dict__")?.try_iter()?)
-        )?,))?,),
+        (rt::builtins::sorted(
+            py,
+            (rt::genexpr!(
+                m,
+                genexpr(m.global("Mixed")?.attr("__dict__")?.try_iter()?)
+            )?,),
+        )?,),
     )?;
     m.set_global("coro", m.global("m")?.method0("kept_async")?)?;
     match (|| m.global("coro")?.method1("send", (py.None(),)))() {
@@ -400,7 +403,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             m.global("NativeSub")?
                 .call0()?
                 .is_instance(&m.global("Mixed")?)?,
-            rt::builtin(py, "issubclass")?.call1((m.global("KeptSub")?, m.global("Base")?))?,
+            rt::builtins::issubclass(py, (m.global("KeptSub")?, m.global("Base")?))?,
         ),
     )?;
     m.set_global("Outer", rt::class!(m, "Outer"(), outer::body, line = 75)?)?;

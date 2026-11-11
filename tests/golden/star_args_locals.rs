@@ -23,8 +23,8 @@ pub fn forward<'py>(
     options: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let py = m.py();
-    let extra = rt::builtin(py, "list")?.call1((items,))?;
-    let named = rt::builtin(py, "dict")?.call1((options,))?;
+    let extra = rt::builtins::list(py, (items,))?;
+    let named = rt::builtins::dict(py, (options,))?;
     let first = rt::call!(m.global("collect")?, *extra, **named)?;
     let second = rt::call!(m.global("collect")?, 0, *extra, flag = true, **named)?;
     Ok(PyTuple::new(py, [&first, &second, &extra, &named])?.into_any())

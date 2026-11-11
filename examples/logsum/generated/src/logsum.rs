@@ -70,11 +70,12 @@ pub fn parse_line<'py>(
             .method1("endswith", ("ms",))?
             .is_truthy()?
     {
-        millis = rt::builtin(py, "int")?.call1((parts.get_item(10)?.get_item(rt::slice(
+        millis = rt::builtins::int(
             py,
-            py.None(),
-            -2,
-        )?)?,))?;
+            (parts
+                .get_item(10)?
+                .get_item(rt::slice(py, py.None(), -2)?)?,),
+        )?;
     }
     Ok([
         ("ip", &parts.get_item(0)?),
@@ -87,13 +88,13 @@ pub fn parse_line<'py>(
             "path",
             &parts.get_item(6)?.method1("split", ("?",))?.get_item(0)?,
         ),
-        ("status", &rt::builtin(py, "int")?.call1((&status,))?),
+        ("status", &rt::builtins::int(py, (&status,))?),
         (
             "bytes",
             &(if size.eq("-")? {
                 rt::int(py, 0)
             } else {
-                rt::builtin(py, "int")?.call1((&size,))?
+                rt::builtins::int(py, (&size,))?
             }),
         ),
         ("ms", &millis),
@@ -147,7 +148,7 @@ pub fn percentile<'py>(
         return Ok(rt::int(py, 0));
     }
     let rank = pct.mul(sorted_values.len()?)?.add(99)?.floor_div(100)?;
-    sorted_values.get_item(rt::builtin(py, "max")?.call1((&rank, 1))?.sub(1)?)
+    sorted_values.get_item(rt::builtins::max(py, (&rank, 1))?.sub(1)?)
 }
 
 // logsum.py:78
@@ -162,7 +163,10 @@ pub fn bar<'py>(
     if peak.eq(0)? {
         return Ok(rt::str(py, ""));
     }
-    rt::str(py, "#").mul(rt::builtin(py, "max")?.call1((1, count.mul(width)?.floor_div(peak)?))?)
+    rt::str(py, "#").mul(rt::builtins::max(
+        py,
+        (1, count.mul(width)?.floor_div(peak)?),
+    )?)
 }
 
 // logsum.py:84
@@ -271,7 +275,7 @@ pub fn print_paths<'py>(
             py,
             (
                 "top ",
-                rt::format(&rt::builtin(py, "min")?.call1((top, ranked.len()?))?, "")?,
+                rt::format(&rt::builtins::min(py, (top, ranked.len()?))?, "")?,
                 " of ",
                 rt::format(&rt::int(py, ranked.len()?), "")?,
                 " paths",
@@ -406,7 +410,7 @@ pub fn print_hours<'py>(
         default = 0
     )?;
     rt::builtins::print(py, ("requests per hour",))?;
-    for hour in rt::iter(&rt::builtin(py, "sorted")?.call1((&hours,))?)? {
+    for hour in rt::iter(&rt::builtins::sorted(py, (&hours,))?)? {
         let hour = hour?;
         rt::builtins::print(
             py,
@@ -445,7 +449,7 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
     }
     let [requests, malformed] = rt::unpack(&load(m, &path)?)?;
     let mut total_bytes = rt::int(py, 0);
-    let clients = rt::builtin(py, "set")?.call0()?;
+    let clients = rt::builtins::set(py, ())?;
     for request in rt::iter(&requests)? {
         let request = request?;
         total_bytes = rt::iadd(&total_bytes, request.get_item("bytes")?)?;

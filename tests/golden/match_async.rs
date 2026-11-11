@@ -53,7 +53,7 @@ pub async fn handle<'py>(
         } else if let Some([action]) = rt::match_map(&subject, ["action"])?
             && let rest = rt::match_rest(&subject, ["action"])?
         {
-            extra = rt::delegate(fetch(m, &rt::builtin(py, "sorted")?.call1((&rest,))?)).await?;
+            extra = rt::delegate(fetch(m, &rt::builtins::sorted(py, (&rest,))?)).await?;
             return rt::fstring(
                 py,
                 (rt::format(&action, "")?, " with ", rt::format(&extra, "")?),
@@ -143,13 +143,7 @@ pub async fn tokens<'py>(
         } else if rt::match_instance(&word, &rt::builtin(py, "str")?)?
             && word.method0("isdigit")?.is_truthy()?
         {
-            let value = PyTuple::new(
-                py,
-                [
-                    &rt::str(py, "num"),
-                    &rt::builtin(py, "int")?.call1((&word,))?,
-                ],
-            )?;
+            let value = PyTuple::new(py, [&rt::str(py, "num"), &rt::builtins::int(py, (&word,))?])?;
             rt::yield_(value).await?;
         } else if rt::match_instance(&word, &rt::builtin(py, "str")?)?
             && word.method1("startswith", ("#",))?.is_truthy()?
@@ -210,9 +204,11 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     )?;
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m
-            .global("tokens")?
-            .call1(("1 + x * 22 # rest is a comment",))?,))?,),
+        (rt::builtins::list(
+            py,
+            (m.global("tokens")?
+                .call1(("1 + x * 22 # rest is a comment",))?,),
+        )?,),
     )?;
     rt::def!(
         m,
@@ -230,7 +226,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             ],
         )?,))?,
     )?;
-    rt::builtins::print(py, (rt::builtin(py, "next")?.call1((m.global("gen")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::next(py, (m.global("gen")?,))?,))?;
     rt::builtins::print(py, (m.global("gen")?.method1("send", ("x",))?,))?;
     rt::builtins::print(py, (m.global("gen")?.method1("send", ("y",))?,))?;
     Ok(())

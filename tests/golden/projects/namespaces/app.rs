@@ -96,7 +96,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             m.global("ns")?.attr("__spec__")?.attr("origin")?,
-            rt::builtin(py, "getattr")?.call1((m.global("ns")?, "__file__", py.None()))?,
+            rt::builtins::getattr(py, (m.global("ns")?, "__file__", py.None()))?,
         ),
     )?;
     // app.py:28
@@ -115,14 +115,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     rt::builtins::print(
         py,
-        (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-            m,
-            genexpr(
-                rt::builtin(py, "vars")?
-                    .call1((m.global("ns")?,))?
-                    .try_iter()?
-            )
-        )?,))?,),
+        (rt::builtins::sorted(
+            py,
+            (rt::genexpr!(
+                m,
+                genexpr(
+                    rt::builtin(py, "vars")?
+                        .call1((m.global("ns")?,))?
+                        .try_iter()?
+                )
+            )?,),
+        )?,),
     )?;
     // A regular package of the same name elsewhere on `sys.path` (here the
     // standard library's `json`) wins over the namespace package `json/`.

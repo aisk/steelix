@@ -152,10 +152,7 @@ pub fn mappings<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             && a.eq(1)?
             && let rest = rt::match_rest(&subject, (&key, "b"))?
         {
-            rt::builtins::print(
-                py,
-                ("match", &b, rt::builtin(py, "sorted")?.call1((&rest,))?),
-            )?;
+            rt::builtins::print(py, ("match", &b, rt::builtins::sorted(py, (&rest,))?))?;
         }
     }
     {

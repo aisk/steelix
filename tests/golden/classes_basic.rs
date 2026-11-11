@@ -98,7 +98,7 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let py = m.py();
-        rt::builtin(py, "hash")?.call1((PyTuple::new(py, [&slf.attr("x")?, &slf.attr("y")?])?,))
+        rt::builtins::hash(py, (PyTuple::new(py, [&slf.attr("x")?, &slf.attr("y")?])?,))
     }
 
     // classes_basic.py:28
@@ -338,12 +338,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "hash")?
-                .call1((m.global("v")?,))?
-                .rich_compare(
-                    rt::builtin(py, "hash")?.call1((m.global("Vector")?.call1((3, 4))?,))?,
-                    CompareOp::Eq,
-                )?,
+            rt::builtins::hash(py, (m.global("v")?,))?.rich_compare(
+                rt::builtins::hash(py, (m.global("Vector")?.call1((3, 4))?,))?,
+                CompareOp::Eq,
+            )?,
             PySet::new(
                 py,
                 [
@@ -373,9 +371,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "hasattr")?.call1((m.global("v")?, "_label"))?,
+            rt::builtins::hasattr(py, (m.global("v")?, "_label"))?,
             m.global("v")?.len()?,
-            rt::builtin(py, "list")?.call1((m.global("v")?,))?,
+            rt::builtins::list(py, (m.global("v")?,))?,
             m.global("v")?.get_item(1)?,
             m.global("v")?.is_truthy()?,
             m.global("Vector")?.method0("zero")?.is_truthy()?,
@@ -437,10 +435,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     rt::builtins::print(
         py,
-        (rt::builtin(py, "sorted")?.call1((rt::genexpr!(
-            m,
-            genexpr(m.global("Vector")?.attr("__dict__")?.try_iter()?)
-        )?,))?,),
+        (rt::builtins::sorted(
+            py,
+            (rt::genexpr!(
+                m,
+                genexpr(m.global("Vector")?.attr("__dict__")?.try_iter()?)
+            )?,),
+        )?,),
     )?;
     rt::builtins::print(
         py,

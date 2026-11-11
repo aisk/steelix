@@ -26,7 +26,7 @@ pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bou
     rt::builtins::print(py, (&first, &second))?;
     let ([head], rest, []) = rt::unpack_star(PyList::new(py, [1, 2, 3, 4])?.as_any())?;
     let ([], init, [last]) = rt::unpack_star(&rt::str(py, "abc"))?;
-    let ([left], middle, [right]) = rt::unpack_star(&rt::builtin(py, "range")?.call1((5,))?)?;
+    let ([left], middle, [right]) = rt::unpack_star(&rt::builtins::range(py, (5,))?)?;
     rt::builtins::print(py, (&head, &rest, &init, &last, &left, &middle, &right))?;
     let [x2, items] = [rt::int(py, 1), PyList::new(py, [2, 3])?.into_any()];
     let x = x2;
@@ -53,14 +53,16 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     a.method1("append", (6,))?;
     rt::builtins::print(py, (&r#box, &a, &b, a.is(&b)))?;
     let mut total = rt::int(py, 0);
-    for item3 in rt::iter(&rt::builtin(py, "enumerate")?.call1((PyList::new(
+    for item3 in rt::iter(&rt::builtins::enumerate(
         py,
-        [
-            PyTuple::new(py, [1, 2])?.as_any(),
-            PyTuple::new(py, [3, 4])?.as_any(),
-        ],
-    )?,))?)?
-    {
+        (PyList::new(
+            py,
+            [
+                PyTuple::new(py, [1, 2])?.as_any(),
+                PyTuple::new(py, [3, 4])?.as_any(),
+            ],
+        )?,),
+    )?)? {
         let [i, items] = rt::unpack(&item3?)?;
         let [x, y] = rt::unpack(&items)?;
         total = total.add(i.mul(x.add(&y)?)?)?;

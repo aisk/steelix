@@ -191,10 +191,13 @@ pub fn calls<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         py,
         (
             trace(m, &rt::str(py, "arg"), PyList::new(py, [1, 2])?.as_any())?.len()?,
-            rt::builtin(py, "max")?.call1((
-                trace(m, &rt::str(py, "first"), &rt::int(py, 3))?,
-                trace(m, &rt::str(py, "second"), &rt::int(py, 4))?,
-            ))?,
+            rt::builtins::max(
+                py,
+                (
+                    trace(m, &rt::str(py, "first"), &rt::int(py, 3))?,
+                    trace(m, &rt::str(py, "second"), &rt::int(py, 4))?,
+                ),
+            )?,
         ),
     )?;
     rt::builtins::print(

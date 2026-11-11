@@ -27,10 +27,13 @@ pub fn run<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Ok(None)
     }
-    rt::builtin(py, "list")?.call1((rt::genexpr!(
-        frame,
-        genexpr(rt::builtin(py, "range")?.call1((3,))?.try_iter()?)
-    )?,))
+    rt::builtins::list(
+        py,
+        (rt::genexpr!(
+            frame,
+            genexpr(rt::builtins::range(py, (3,))?.try_iter()?)
+        )?,),
+    )
 }
 
 /// Executes the body of `genexpr_stop_iteration.py` in the module `m`.

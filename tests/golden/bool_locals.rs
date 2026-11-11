@@ -173,7 +173,7 @@ pub fn in_try<'py>(m: &rt::Module<'py>, values: &Bound<'py, PyAny>) -> PyResult<
     let mut good: Option<Bound<'py, PyAny>> = None;
     let result = (|| -> PyResult<()> {
         match (|| -> PyResult<()> {
-            rt::builtin(py, "int")?.call1((values.get_item(0)?,))?;
+            rt::builtins::int(py, (values.get_item(0)?,))?;
             good = Some(rt::bool(py, true));
             Ok(())
         })() {

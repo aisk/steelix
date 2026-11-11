@@ -440,7 +440,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 .method1("join", ("a", "b"))?,
             m.global("Body")?.method1("root", (16,))?,
             m.global("Body")?.attr("builtin")?,
-            rt::builtin(py, "hasattr")?.call1((m.global("Body")?, "err"))?,
+            rt::builtins::hasattr(py, (m.global("Body")?, "err"))?,
         ),
     )?;
     rt::builtins::print(
@@ -552,8 +552,7 @@ def failing_body():
             m.global("u")?.attr("missing")?,
             m.global("u")?.contains("x")?,
             m.global("u")?.rich_compare(m.global("u")?, CompareOp::Lt)?,
-            rt::builtin(py, "sorted")?
-                .call1((PyList::new(py, [&m.global("u")?, &m.global("u")?])?,))?
+            rt::builtins::sorted(py, (PyList::new(py, [&m.global("u")?, &m.global("u")?])?,))?
                 .get_item(0)?
                 .is(m.global("u")?),
         ),

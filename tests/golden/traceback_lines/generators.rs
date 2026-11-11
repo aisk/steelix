@@ -611,7 +611,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(184);
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m.global("count")?.call1((4,))?,))?,),
+        (rt::builtins::list(py, (m.global("count")?.call1((4,))?,))?,),
     )?;
     frame.line(185);
     m.set_global("g", m.global("averager")?.call0()?)?;
@@ -619,7 +619,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("g")?,))?,
+            rt::builtins::next(py, (m.global("g")?,))?,
             m.global("g")?.method1("send", (10,))?,
             m.global("g")?.method1("send", (20,))?,
         ),
@@ -642,8 +642,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("b")?,))?,
-            rt::builtin(py, "next")?.call1((m.global("b")?,))?,
+            rt::builtins::next(py, (m.global("b")?,))?,
+            rt::builtins::next(py, (m.global("b")?,))?,
         ),
     )?;
     frame.line(195);
@@ -661,7 +661,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(200);
     m.set_global("c", m.global("with_cleanup")?.call1((m.global("log")?,))?)?;
     frame.line(201);
-    rt::builtins::print(py, (rt::builtin(py, "next")?.call1((m.global("c")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::next(py, (m.global("c")?,))?,))?;
     frame.line(202);
     m.global("c")?.method0("close")?;
     frame.line(203);
@@ -672,12 +672,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("c")?,))?,
-            rt::builtin(py, "next")?.call1((m.global("c")?,))?,
+            rt::builtins::next(py, (m.global("c")?,))?,
+            rt::builtins::next(py, (m.global("c")?,))?,
         ),
     )?;
     frame.line(207);
-    match (|| rt::builtin(py, "next")?.call1((m.global("c")?,)))() {
+    match (|| rt::builtins::next(py, (m.global("c")?,)))() {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
             let _caught = frame.catch(err);
@@ -689,7 +689,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(211);
     m.set_global("r", m.global("catches")?.call0()?)?;
     frame.line(212);
-    rt::builtins::print(py, (rt::builtin(py, "next")?.call1((m.global("r")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::next(py, (m.global("r")?,))?,))?;
     frame.line(213);
     rt::builtins::print(
         py,
@@ -698,7 +698,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .call1((rt::builtin(py, "ValueError")?.call1(("boom",))?,))?,),
     )?;
     frame.line(214);
-    rt::builtins::print(py, (rt::builtin(py, "next")?.call1((m.global("r")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::next(py, (m.global("r")?,))?,))?;
     frame.line(216);
     match (|| {
         m.global("r")?
@@ -731,12 +731,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         )?,))?,
     )?;
     frame.line(222);
-    rt::builtins::print(
-        py,
-        (rt::builtin(py, "list")?.call1((m.global("loops")?,))?,),
-    )?;
+    rt::builtins::print(py, (rt::builtins::list(py, (m.global("loops")?,))?,))?;
     frame.line(224);
-    match (|| rt::builtin(py, "next")?.call1((m.global("loops")?,)))() {
+    match (|| rt::builtins::next(py, (m.global("loops")?,)))() {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
             let exception = frame.catch(err);
@@ -750,15 +747,16 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(227);
     rt::builtins::print(
         py,
-        (
-            rt::builtin(py, "list")?.call1((m.global("in_loops")?.call1((PyList::new(
+        (rt::builtins::list(
+            py,
+            (m.global("in_loops")?.call1((PyList::new(
                 py,
                 [
                     PyList::new(py, [&rt::int(py, 1), &rt::str(py, "end"), &rt::int(py, 2)])?
                         .as_any(),
                 ],
-            )?,))?,))?,
-        ),
+            )?,))?,),
+        )?,),
     )?;
     frame.line(229);
     m.set_global(
@@ -767,7 +765,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .call1((m.global("Manager")?.call1((3,))?,))?,
     )?;
     frame.line(230);
-    rt::builtins::print(py, (rt::builtin(py, "list")?.call1((m.global("w")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::list(py, (m.global("w")?,))?,))?;
     frame.line(231);
     m.set_global(
         "w",
@@ -775,7 +773,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .call1((m.global("Manager")?.call1((4,))?,))?,
     )?;
     frame.line(232);
-    rt::builtins::print(py, (rt::builtin(py, "next")?.call1((m.global("w")?,))?,))?;
+    rt::builtins::print(py, (rt::builtins::next(py, (m.global("w")?,))?,))?;
     frame.line(233);
     m.global("w")?.method0("close")?;
     frame.line(234);
@@ -785,7 +783,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             .call1((m.global("Manager")?.call1((5,))?,))?,
     )?;
     frame.line(235);
-    rt::builtin(py, "next")?.call1((m.global("w")?,))?;
+    rt::builtins::next(py, (m.global("w")?,))?;
     frame.line(237);
     match (|| {
         m.global("w")?
@@ -806,9 +804,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("p")?,))?,
-            rt::builtin(py, "next")?.call1((m.global("p")?,))?,
-            rt::builtin(py, "next")?.call1((m.global("p")?,))?,
+            rt::builtins::next(py, (m.global("p")?,))?,
+            rt::builtins::next(py, (m.global("p")?,))?,
+            rt::builtins::next(py, (m.global("p")?,))?,
             m.global("p")?.method1("send", (4,))?,
             m.global("p")?.method1("send", (6,))?,
         ),
@@ -834,7 +832,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("n")?,))?,
+            rt::builtins::next(py, (m.global("n")?,))?,
             m.global("n")?.method1("send", (1,))?,
             m.global("n")?.method1("send", (3,))?,
         ),
@@ -844,12 +842,12 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         py,
         (
             m.global("n")?.method1("send", (py.None(),))?,
-            rt::builtin(py, "next")?.call1((m.global("n")?,))?,
-            rt::builtin(py, "next")?.call1((m.global("n")?,))?,
+            rt::builtins::next(py, (m.global("n")?,))?,
+            rt::builtins::next(py, (m.global("n")?,))?,
         ),
     )?;
     frame.line(252);
-    match (|| rt::builtin(py, "next")?.call1((m.global("n")?,)))() {
+    match (|| rt::builtins::next(py, (m.global("n")?,)))() {
         Ok(_) => {}
         Err(err) if err.is_instance_of::<PyStopIteration>(py) => {
             let exception = frame.catch(err);
@@ -866,8 +864,9 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(256);
     rt::builtins::print(
         py,
-        (
-            rt::builtin(py, "list")?.call1((m.global("tree")?.call1((PyList::new(
+        (rt::builtins::list(
+            py,
+            (m.global("tree")?.call1((PyList::new(
                 py,
                 [
                     &rt::int(py, 1),
@@ -875,13 +874,13 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                     PyList::empty(py).as_any(),
                     &rt::int(py, 5),
                 ],
-            )?,))?,))?,
-        ),
+            )?,))?,),
+        )?,),
     )?;
     frame.line(257);
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m.global("ping")?.call1((4,))?,))?,),
+        (rt::builtins::list(py, (m.global("ping")?.call1((4,))?,))?,),
     )?;
     frame.line(259);
     m.set_global("bag", m.global("Bag")?.call1((1, 2, 3))?)?;
@@ -889,15 +888,15 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "list")?.call1((m.global("bag")?,))?,
-            rt::builtin(py, "list")?.call1((m.global("bag")?.method0("pairs")?,))?,
-            rt::builtin(py, "list")?.call1((m.global("bag")?.attr("doubled")?,))?,
+            rt::builtins::list(py, (m.global("bag")?,))?,
+            rt::builtins::list(py, (m.global("bag")?.method0("pairs")?,))?,
+            rt::builtins::list(py, (m.global("bag")?.attr("doubled")?,))?,
         ),
     )?;
     frame.line(261);
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m.global("Sub")?.call1((7, 8))?,))?,),
+        (rt::builtins::list(py, (m.global("Sub")?.call1((7, 8))?,))?,),
     )?;
     frame.line(263);
     frame.with(&m.global("tag")?.call1(("a",))?, |value| {
@@ -920,8 +919,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("counter")?,))?,
-            rt::builtin(py, "next")?.call1((m.global("counter")?,))?,
+            rt::builtins::next(py, (m.global("counter")?,))?,
+            rt::builtins::next(py, (m.global("counter")?,))?,
         ),
     )?;
     frame.line(271);
@@ -929,7 +928,10 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     frame.line(272);
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?.call1((m.global("gen_with_nested")?.call0()?,))?,),
+        (rt::builtins::list(
+            py,
+            (m.global("gen_with_nested")?.call0()?,),
+        )?,),
     )?;
     frame.line(274);
     m.set_global("gen", m.global("count")?.call1((2,))?)?;
@@ -946,7 +948,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "next")?.call1((m.global("gen")?,))?,
+            rt::builtins::next(py, (m.global("gen")?,))?,
             m.global("gen")?.attr("gi_running")?,
             m.global("gen")?.attr("gi_suspended")?,
         ),
@@ -955,7 +957,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::builtins::print(
         py,
         (
-            rt::builtin(py, "list")?.call1((m.global("gen")?,))?,
+            rt::builtins::list(py, (m.global("gen")?,))?,
             m.global("gen")?.attr("gi_suspended")?,
         ),
     )?;

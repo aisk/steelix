@@ -103,18 +103,22 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     rt::builtins::print(
         py,
-        (
-            rt::builtin(py, "list")?.call1((rt::builtin(py, "map")?.call1((
-                rt::function!(m, lambda5(p), qualname = "<lambda>")?,
-                PyList::new(
-                    py,
-                    [
-                        PyTuple::new(py, [1, 2])?.as_any(),
-                        PyTuple::new(py, [3, 4])?.as_any(),
-                    ],
-                )?,
-            ))?,))?,
-        ),
+        (rt::builtins::list(
+            py,
+            (rt::builtins::map(
+                py,
+                (
+                    rt::function!(m, lambda5(p), qualname = "<lambda>")?,
+                    PyList::new(
+                        py,
+                        [
+                            PyTuple::new(py, [1, 2])?.as_any(),
+                            PyTuple::new(py, [3, 4])?.as_any(),
+                        ],
+                    )?,
+                ),
+            )?,),
+        )?,),
     )?;
     Ok(())
 }

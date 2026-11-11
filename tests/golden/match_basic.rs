@@ -354,8 +354,7 @@ pub fn nested_functions<'py>(
         first.get()?.rich_compare(0, CompareOp::Gt)
     }
     if let Some([items]) = rt::match_class(value, &rt::builtin(py, "list")?, 1, [])?
-        && rt::builtin(py, "all")?
-            .call1((rt::genexpr!(frame, genexpr(items.try_iter()?))?,))?
+        && rt::builtins::all(py, (rt::genexpr!(frame, genexpr(items.try_iter()?))?,))?
             .is_truthy()?
     {
         return Ok(rt::str(py, "strings"));
@@ -460,7 +459,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 PyList::new(py, [1, 2])?.as_any(),
                 PyList::new(py, [1, 2, 3])?.as_any(),
                 PyTuple::new(py, [1, 2, 3, 4, 5])?.as_any(),
-                &rt::builtin(py, "range")?.call1((3,))?,
+                &rt::builtins::range(py, (3,))?,
                 &rt::str(py, "abc"),
                 PyList::new(py, [5, 6, 1])?.as_any(),
             ],
@@ -577,7 +576,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     )?;
     // At module level the captures are globals.
     {
-        let subject = rt::builtin(py, "sorted")?.call1((m.global("EXITS")?,))?;
+        let subject = rt::builtins::sorted(py, (m.global("EXITS")?,))?;
         if let Some(([first], others, [])) = rt::match_seq_star(&subject)? {
             m.set_global("first", &first)?;
             m.set_global("others", &others)?;

@@ -38,9 +38,10 @@ pub fn use_counter<'py>(
         .call1((start,))?
         .method0("bump")?
         .method0("bump")?;
-    counter
-        .attr("value")?
-        .add(rt::builtin(m.py(), "sum")?.call1((m.global("evens")?.call1((5,))?,))?)
+    counter.attr("value")?.add(rt::builtins::sum(
+        m.py(),
+        (m.global("evens")?.call1((5,))?,),
+    )?)
 }
 
 // mixed_mode.py:71
@@ -250,8 +251,10 @@ def twice():
     rt::def!(m, @trace gen chunks(items))?;
     rt::builtins::print(
         py,
-        (rt::builtin(py, "list")?
-            .call1((m.global("chunks")?.call1((PyList::new(py, [1, 2])?,))?,))?,),
+        (rt::builtins::list(
+            py,
+            (m.global("chunks")?.call1((PyList::new(py, [1, 2])?,))?,),
+        )?,),
     )?;
     rt::builtins::print(py, (m.global("events")?,))?;
     // `:=` in a comprehension binds a global, here shadowing a builtin.
