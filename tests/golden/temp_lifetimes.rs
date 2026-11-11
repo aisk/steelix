@@ -13,15 +13,14 @@ pub fn make<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<Boun
 
 // temp_lifetimes.py:32
 #[rt::frame(m, "gone", 32)]
-pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    rt::builtins::print(py, ("weakref gone",))?;
-    Ok(rt::none(py))
+pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<()> {
+    rt::builtins::print(m.py(), ("weakref gone",))?;
+    Ok(())
 }
 
 // temp_lifetimes.py:64
 #[rt::frame(m, "function", 64)]
-pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let e = PyDict::new(py);
     e.set_item("k", make(m, &rt::str(py, "function item"))?)?;
@@ -41,12 +40,12 @@ pub fn function<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         .attr("ref")?
         .call1((make(m, &rt::str(py, "function weak"))?, m.global("gone")?))?;
     rt::builtins::print(py, ("after function weak", r.call0()?.is_none()))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // temp_lifetimes.py:78
 #[rt::frame(m, "loop", 78)]
-pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let mut e: Bound<'py, PyDict>;
     for i in rt::iter(&rt::builtins::range(py, (2,))?)? {
@@ -59,19 +58,19 @@ pub fn r#loop<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         e.del_item(&i)?;
         rt::builtins::print(py, ("after loop", &i))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // temp_lifetimes.py:95
 #[rt::frame(m, "augmented", 95)]
-pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn augmented<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let holder = m.global("Holder")?.call0()?;
     holder.set_attr("attr", make(m, &rt::str(py, "function attr"))?)?;
     make(m, &rt::str(py, "function aug target"))?.set_attr("attr", 0)?;
     holder.set_attr("attr", rt::iadd(&holder.attr("attr")?, 1)?)?;
     rt::builtins::print(py, ("after function aug",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 pub mod tracked {
@@ -94,20 +93,16 @@ pub mod tracked {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // temp_lifetimes.py:14
     #[rt::frame(m, "Tracked.__del__", 14)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("del", slf.attr("name")?))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("del", slf.attr("name")?))?;
+        Ok(())
     }
 
     // temp_lifetimes.py:17

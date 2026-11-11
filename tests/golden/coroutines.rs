@@ -633,8 +633,7 @@ pub fn frames<'py>(m: &rt::Module<'py>, e: &Bound<'py, PyAny>) -> PyResult<Bound
 
 // coroutines.py:345
 #[rt::frame(m, "unraisable", 345)]
-pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<()> {
     let message = {
         let sub = m.global("re")?.attr("sub")?;
         let err_msg = u.attr("err_msg")?;
@@ -644,7 +643,7 @@ pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<B
             if err_msg.is_truthy()? {
                 err_msg
             } else {
-                rt::str(py, "")
+                rt::str(m.py(), "")
             },
         ))?
     };
@@ -655,7 +654,7 @@ pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<B
         "|",
         &message,
     ))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // coroutines.py:353
@@ -869,10 +868,10 @@ pub fn report<'py>(
     m: &rt::Module<'py>,
     r#loop: &Bound<'py, PyAny>,
     context: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     m.global("print")?
         .call1(("exception handler:", context.get_item("message")?))?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // coroutines.py:757
@@ -924,9 +923,9 @@ pub mod suspend {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("value", value)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // coroutines.py:21
@@ -1001,9 +1000,9 @@ pub mod request {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         args: &Bound<'py, PyTuple>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("args", args)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // coroutines.py:337
@@ -1056,21 +1055,17 @@ pub mod owner {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         tag: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    ) -> PyResult<()> {
         slf.set_attr("tag", tag)?;
-        slf.set_attr("values", PyList::new(py, [1, 2])?)?;
-        Ok(rt::none(py))
+        slf.set_attr("values", PyList::new(m.py(), [1, 2])?)?;
+        Ok(())
     }
 
     // coroutines.py:741
     #[rt::frame(m, "Owner.__del__", 741)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         m.global("print")?.call1(("del owner", slf.attr("tag")?))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -1087,12 +1082,9 @@ pub mod last {
 
     // coroutines.py:776
     #[rt::frame(m, "Last.__del__", 776)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         m.global("print")?.call1(("del last",))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

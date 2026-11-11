@@ -75,6 +75,25 @@ pub type Body = for<'py> fn(
     &[Bound<'py, PyAny>],
 ) -> PyResult<Bound<'py, PyAny>>;
 
+/// What the Rust fn of a plain function returns: the object, or `()` for a
+/// function that only ever returns `None`. `function!` hands the object to
+/// Python either way.
+pub trait IntoReturn<'py> {
+    fn into_return(self, py: Python<'py>) -> Bound<'py, PyAny>;
+}
+
+impl<'py, T> IntoReturn<'py> for Bound<'py, T> {
+    fn into_return(self, _py: Python<'py>) -> Bound<'py, PyAny> {
+        self.into_any()
+    }
+}
+
+impl<'py> IntoReturn<'py> for () {
+    fn into_return(self, py: Python<'py>) -> Bound<'py, PyAny> {
+        crate::none(py)
+    }
+}
+
 /// What a call of the function runs.
 pub enum Kind {
     /// A plain function: the body runs right away.

@@ -4,11 +4,11 @@ use steelix_runtime::Attributes;
 
 // builtin_names.py:9
 #[rt::frame(m, "show", 9)]
-pub fn show<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn show<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, (m.global("answer")?,))?;
     rt::builtins::print(py, (m.global("__annotations__")?,))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `builtin_names.py` in the module `m`.

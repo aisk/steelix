@@ -5,7 +5,7 @@ use steelix_runtime as rt;
 
 // function_headers.py:6
 #[rt::frame(m, "report", 6, frame)]
-pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     // function_headers.py:7
     #[rt::frame(m, "report.<locals>.<lambda>", 7)]
@@ -81,7 +81,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bo
             rt::builtins::print(py, ("small c",))?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `function_headers.py` in the module `m`.

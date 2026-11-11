@@ -15,7 +15,7 @@ use steelix_runtime::Attributes;
 
 // generator_expressions.py:11
 #[rt::frame(m, "show", 11)]
-pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, (exc.get_type().attr("__name__")?, exc))?;
     for frame_ in rt::iter(
@@ -34,7 +34,7 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
             ),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_expressions.py:17
@@ -216,7 +216,7 @@ pub fn failing_condition<'py>(
 
 // generator_expressions.py:79
 #[rt::frame(m, "closed_early", 79, frame)]
-pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // generator_expressions.py:80
     #[rt::frame(m, "closed_early.<locals>.source", 80, frame)]
@@ -272,12 +272,12 @@ pub fn closed_early<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     )?;
     other = None;
     rt::builtins::print(py, ("deleted",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_expressions.py:100
 #[rt::frame(m, "stop_iteration", 100, frame)]
-pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // generator_expressions.py:101
     #[rt::frame(m, "stop_iteration.<locals>.boom", 101, frame)]
@@ -325,12 +325,12 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_expressions.py:112
 #[rt::frame(m, "protocol", 112, frame)]
-pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // generator_expressions.py:113
     #[rt::frame(m, "protocol.<locals>.<genexpr>", 113)]
@@ -398,15 +398,12 @@ pub fn protocol<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     )?;
     g.set_attr("__name__", "renamed")?;
     rt::builtins::print(py, (g.attr("__name__")?,))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_expressions.py:130
 #[rt::frame(m, "consumers", 130, frame)]
-pub fn consumers<'py>(
-    m: &rt::Module<'py>,
-    words: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn consumers<'py>(m: &rt::Module<'py>, words: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     // generator_expressions.py:131
     #[rt::frame(m, "consumers.<locals>.<genexpr>", 131)]
@@ -562,7 +559,7 @@ pub fn consumers<'py>(
             )?,),
         )?,),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_expressions.py:138
@@ -730,10 +727,7 @@ pub mod bad {
 
     // generator_expressions.py:65
     #[rt::frame(m, "Bad.__next__", 65, frame)]
-    pub fn __next__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __next__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         Err(frame.raise(PyValueError::new_err("next failed")))
     }
 }

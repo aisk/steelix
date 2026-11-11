@@ -9,15 +9,14 @@ use steelix_runtime::Attributes;
 
 // match_order.py:9
 #[rt::frame(m, "log", 9)]
-pub fn log<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyTuple>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    rt::call!(rt::builtin(py, "print")?, "  ", *args)?;
-    Ok(rt::none(py))
+pub fn log<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyTuple>) -> PyResult<()> {
+    rt::call!(rt::builtin(m.py(), "print")?, "  ", *args)?;
+    Ok(())
 }
 
 // match_order.py:125
 #[rt::frame(m, "sequences", 125)]
-pub fn sequences<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn sequences<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ("unpacked by iteration",))?;
     {
@@ -28,7 +27,10 @@ pub fn sequences<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         {
             rt::builtins::print(py, ("no",))?;
         } else if let Some([a, b, c]) = rt::match_seq(&subject)?
-            && log(m, &PyTuple::new(py, [&rt::str(py, "guard"), &a, &b, &c])?)?.is_truthy()?
+            && {
+                log(m, &PyTuple::new(py, [&rt::str(py, "guard"), &a, &b, &c])?)?;
+                false
+            }
         {
             rt::builtins::print(py, ("no",))?;
         } else if let Some(([a], rest, [])) = rt::match_seq_star(&subject)? {
@@ -76,12 +78,12 @@ pub fn sequences<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::builtins::print(py, ("at least one",))?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_order.py:153
 #[rt::frame(m, "values_and_eq", 153)]
-pub fn values_and_eq<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn values_and_eq<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ("value patterns",))?;
     {
@@ -118,12 +120,12 @@ pub fn values_and_eq<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::builtins::print(py, ("matched [5]",))?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_order.py:176
 #[rt::frame(m, "mappings", 176)]
-pub fn mappings<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn mappings<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ("mapping patterns",))?;
     {
@@ -166,12 +168,12 @@ pub fn mappings<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::builtins::print(py, ("keys only after the mapping check",))?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_order.py:194
 #[rt::frame(m, "classes", 194)]
-pub fn classes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn classes<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ("class patterns",))?;
     let obj = rt::call!(m.global("Obj")?, a = 1, b = 2, c = 3)?;
@@ -188,7 +190,10 @@ pub fn classes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     {
         rt::builtins::print(py, ("no",))?;
     } else if let Some([a, b, c]) = rt::match_class(&obj, &m.global("Obj")?, 2, ["c"])?
-        && log(m, &PyTuple::new(py, [&rt::str(py, "guard"), &a, &b, &c])?)?.is_truthy()?
+        && {
+            log(m, &PyTuple::new(py, [&rt::str(py, "guard"), &a, &b, &c])?)?;
+            false
+        }
     {
         rt::builtins::print(py, ("no",))?;
     } else if let Some([c2, a2]) = rt::match_class(&obj, &m.global("Obj")?, 0, ["c", "a"])?
@@ -205,7 +210,7 @@ pub fn classes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::builtins::print(py, ("an int",))?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 pub mod seq {
@@ -228,9 +233,9 @@ pub mod seq {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         items: &Bound<'py, PyTuple>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("items", items)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_order.py:17
@@ -294,10 +299,10 @@ pub mod eq {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
         result: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
         slf.set_attr("result", result)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_order.py:37
@@ -361,9 +366,9 @@ pub mod map {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         items: &Bound<'py, PyDict>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("items", items)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_order.py:53
@@ -510,9 +515,9 @@ pub mod obj {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         attrs: &Bound<'py, PyDict>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.attr("__dict__")?.method1("update", (attrs,))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_order.py:100
@@ -521,7 +526,7 @@ pub mod obj {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         log(
             m,
@@ -574,13 +579,13 @@ pub mod stored {
         slf: &Bound<'py, PyAny>,
         key: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         if !key.method1("startswith", ("__",))?.is_truthy()? {
             log(m, &PyTuple::new(py, [&rt::str(py, "store"), key, value])?)?;
         }
         rt::super_(__class__, slf)?.method1("__setitem__", (key, value))?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 

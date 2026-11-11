@@ -32,7 +32,7 @@ pub fn default<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<
 
 // decorators_uncaught.py:22
 #[rt::frame(m, "boom", 22, frame)]
-pub fn boom<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn boom<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<()> {
     Err(frame.raise(
         m.global("ValueError")?
             .call1((rt::str(m.py(), "boom applied to ").add(r#fn.attr("__qualname__")?)?,))?,
@@ -119,13 +119,9 @@ pub mod tags {
 
     // decorators_uncaught.py:27
     #[rt::frame(m, "Tags.__init__", 27)]
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        slf.set_attr("seen", PyList::empty(py))?;
-        Ok(rt::none(py))
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        slf.set_attr("seen", PyList::empty(m.py()))?;
+        Ok(())
     }
 
     // decorators_uncaught.py:30
@@ -205,19 +201,16 @@ pub mod shape {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("_label", value.method0("upper")?)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // decorators_uncaught.py:61
     #[rt::frame(m, "Shape.label", 61)]
-    pub fn label__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn label__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         slf.set_attr("_label", "deleted")?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // decorators_uncaught.py:65
@@ -331,11 +324,8 @@ pub mod broken {
     }
 
     // decorators_uncaught.py:164
-    pub fn method<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        Ok(rt::none(m.py()))
+    pub fn method<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        Ok(())
     }
 }
 
@@ -459,8 +449,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     ))?;
     match (|| -> PyResult<()> {
         // decorators_uncaught.py:150
-        fn failing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            Ok(rt::none(m.py()))
+        fn failing<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+            Ok(())
         }
         rt::def!(
             m,

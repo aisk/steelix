@@ -46,14 +46,14 @@ pub mod vector {
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
         slf.set_attr("y", y)?;
         {
             let Vector = m.global("Vector")?;
             Vector.set_attr("instances", rt::iadd(&Vector.attr("instances")?, 1)?)?;
         }
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_basic.py:17
@@ -165,23 +165,18 @@ pub mod vector {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("setting label", value))?;
+    ) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("setting label", value))?;
         slf.set_attr("_label", value)?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // classes_basic.py:52
     #[rt::frame(m, "Vector.label", 52)]
-    pub fn label__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("deleting label",))?;
+    pub fn label__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("deleting label",))?;
         slf.del_attr("_label")?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // classes_basic.py:57

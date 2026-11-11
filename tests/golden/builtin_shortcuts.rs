@@ -10,7 +10,7 @@ use steelix_runtime::Attributes;
 
 // builtin_shortcuts.py:6
 #[rt::frame(m, "shortcuts", 6)]
-pub fn shortcuts<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn shortcuts<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -71,15 +71,12 @@ pub fn shortcuts<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<B
             rt::builtins::callable(py, (rt::builtin(py, "len")?,))?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // builtin_shortcuts.py:15
 #[rt::frame(m, "not_shortcuts", 15)]
-pub fn not_shortcuts<'py>(
-    m: &rt::Module<'py>,
-    xs: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn not_shortcuts<'py>(m: &rt::Module<'py>, xs: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     // Keyword and star arguments keep the general call.
     rt::builtins::print(
@@ -91,12 +88,12 @@ pub fn not_shortcuts<'py>(
             rt::call!(rt::builtin(py, "max")?, PyList::empty(py), default = 0)?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // builtin_shortcuts.py:20
 #[rt::frame(m, "errors", 20, frame)]
-pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match rt::builtins::int(py, ("x",)) {
         Ok(_) => {}
@@ -122,7 +119,7 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // builtin_shortcuts.py:35
@@ -158,7 +155,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     m.global("builtins")?.set_attr("max", original)?;
     m.global("builtins")?.del_attr("min")?;
     match (|| shortcuts(m, PyList::new(py, [3, 1, 2])?.as_any()))() {
-        Ok(_) => {}
+        Ok(()) => {}
         Err(err) if err.is_instance_of::<PyNameError>(py) => {
             let exception = frame.catch(err);
             m.set_global("e", &exception)?;

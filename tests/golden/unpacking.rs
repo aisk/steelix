@@ -41,7 +41,7 @@ pub fn unpack<'py>(m: &rt::Module<'py>, seq: &Bound<'py, PyAny>) -> PyResult<Bou
 
 // unpacking.py:23
 #[rt::frame(m, "targets", 23)]
-pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let r#box = PyList::new(py, [0, 0, 0])?.into_any();
     let [item, item2] = [rt::str(py, "a"), rt::str(py, "c")];
@@ -77,17 +77,17 @@ pub fn targets<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         rt::builtins::print(py, (rt::local(&key, "key")?, &value))?;
     }
     rt::builtins::print(py, (rt::local(&key, "key")?,))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // unpacking.py:38
 #[rt::frame(m, "empty_star", 38)]
-pub fn empty_star<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn empty_star<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let ([a], b, []) = rt::unpack_star(PyList::new(py, [1])?.as_any())?;
     let ([], c, [d]) = rt::unpack_star(PyList::new(py, [2])?.as_any())?;
     rt::builtins::print(py, (&a, &b, &c, &d))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `unpacking.py` in the module `m`.

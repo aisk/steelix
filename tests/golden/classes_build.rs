@@ -139,11 +139,10 @@ pub mod logged {
         slf: &Bound<'py, PyAny>,
         key: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("set", key))?;
+    ) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("set", key))?;
         rt::super_(__class__, slf)?.method1("__setitem__", (key, value))?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 
@@ -211,11 +210,10 @@ pub mod meta {
         bases: &Bound<'py, PyAny>,
         ns: &Bound<'py, PyAny>,
         kwargs: &Bound<'py, PyDict>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("init", name))?;
+    ) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("init", name))?;
         rt::super_(__class__, cls)?.method1("__init__", (name, bases, ns))?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 
@@ -273,7 +271,7 @@ pub mod plugin {
         cls: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
         kwargs: &Bound<'py, PyDict>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         rt::call!(
             rt::super_(__class__, cls)?.attr("__init_subclass__")?,
             **kwargs
@@ -290,7 +288,7 @@ pub mod plugin {
             .attr("registry")?
             .attr("append")?
             .call1((cls.attr("plugin_name")?,))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -333,11 +331,10 @@ pub mod field {
         slf: &Bound<'py, PyAny>,
         owner: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("set_name", owner.attr("__name__")?, name))?;
+    ) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("set_name", owner.attr("__name__")?, name))?;
         slf.set_attr("name", name)?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // classes_build.py:95

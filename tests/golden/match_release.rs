@@ -5,7 +5,7 @@ use steelix_runtime::Attributes;
 
 // match_release.py:44
 #[rt::frame(m, "captures", 44)]
-pub fn captures<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn captures<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     {
         let subject2 = m.global("Fresh")?.call1(("a",))?;
@@ -21,12 +21,12 @@ pub fn captures<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::builtins::sorted(py, (m.global("alive")?,))?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_release.py:52
 #[rt::frame(m, "unused", 52)]
-pub fn unused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn unused<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     {
         let subject2 = m.global("Fresh")?.call1(("b",))?;
@@ -40,12 +40,12 @@ pub fn unused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_release.py:58
 #[rt::frame(m, "subject", 58)]
-pub fn subject<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn subject<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // CPython has released the subject and the attribute here.
     {
@@ -62,7 +62,7 @@ pub fn subject<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 pub mod t {
@@ -83,22 +83,19 @@ pub mod t {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
         m.global("alive")?.method1("add", (name,))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_release.py:14
     #[rt::frame(m, "T.__del__", 14)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         m.global("alive")?
             .attr("discard")?
             .call1((slf.attr("name")?,))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -129,20 +126,17 @@ pub mod fresh {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         names: &Bound<'py, PyTuple>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("names", names)?;
         m.global("alive")?.method1("add", ("subject",))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_release.py:27
     #[rt::frame(m, "Fresh.__del__", 27)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         m.global("alive")?.method1("discard", ("subject",))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // match_release.py:30

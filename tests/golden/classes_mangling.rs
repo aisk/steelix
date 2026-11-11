@@ -48,7 +48,7 @@ pub mod account {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         owner: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("_Account__owner", owner)?;
         {
             let __class__ = slf.attr("__class__")?;
@@ -64,7 +64,7 @@ pub mod account {
                 rt::iadd(&Account.attr("_Account__count")?, 0)?,
             )?;
         }
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_mangling.py:13

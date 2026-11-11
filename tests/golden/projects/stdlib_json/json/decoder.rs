@@ -441,7 +441,7 @@ pub mod json_decode_error {
         msg: &Bound<'py, PyAny>,
         doc: &Bound<'py, PyAny>,
         pos: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         let lineno = doc.method1("count", ("\n", 0, pos))?.add(1)?;
         let colno = pos.sub(doc.method1("rfind", ("\n", 0, pos))?)?;
@@ -453,7 +453,7 @@ pub mod json_decode_error {
         slf.set_attr("pos", pos)?;
         slf.set_attr("lineno", &lineno)?;
         slf.set_attr("colno", &colno)?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // json/decoder.py:45
@@ -641,7 +641,7 @@ pub mod json_decoder {
         parse_constant: &Bound<'py, PyAny>,
         strict: &Bound<'py, PyAny>,
         object_pairs_hook: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         slf.set_attr("object_hook", object_hook)?;
         slf.set_attr(
@@ -678,7 +678,7 @@ pub mod json_decoder {
             "scan_once",
             m.global("scanner")?.method1("make_scanner", (slf,))?,
         )?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // json/decoder.py:343

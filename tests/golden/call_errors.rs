@@ -8,10 +8,9 @@ use steelix_runtime::Attributes;
 
 // call_errors.py:6
 #[rt::frame(m, "report", 6)]
-pub fn report<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn report<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyAny>) -> PyResult<()> {
     rt::builtins::print(
-        py,
+        m.py(),
         (
             args.attr("exc_value")?
                 .get_type()
@@ -20,7 +19,7 @@ pub fn report<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyAny>) -> PyResult<Bo
             args.attr("exc_value")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // call_errors.py:13
@@ -30,7 +29,7 @@ pub fn attempt<'py>(
     f: &Bound<'py, PyAny>,
     args: &Bound<'py, PyTuple>,
     kwargs: &Bound<'py, PyDict>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     // A thread reports the exception through `threading.excepthook`.
     let worker = rt::call!(
         m.global("threading")?.attr("Thread")?,
@@ -40,7 +39,7 @@ pub fn attempt<'py>(
     )?;
     worker.method0("start")?;
     worker.method0("join")?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // call_errors.py:20

@@ -4,7 +4,7 @@ use steelix_runtime as rt;
 
 // constants.py:1
 #[rt::frame(m, "describe", 1)]
-pub fn describe<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn describe<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -71,7 +71,7 @@ pub fn describe<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::int(py, -3).abs()?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `constants.py` in the module `m`.
@@ -86,6 +86,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("z", &value)?;
     }
     rt::builtins::print(py, (m.global("x")?, m.global("y")?, m.global("z")?))?;
-    rt::builtins::print(py, (describe(m)?,))?;
+    describe(m)?;
+    rt::builtins::print(py, (py.None(),))?;
     Ok(())
 }

@@ -51,9 +51,9 @@ pub fn twice<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // mixed_mode.py:82
 #[rt::frame(m, "set_mode", 82)]
-pub fn set_mode<'py>(m: &rt::Module<'py>, mode: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn set_mode<'py>(m: &rt::Module<'py>, mode: &Bound<'py, PyAny>) -> PyResult<()> {
     m.set_global("MODE", mode)?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // mixed_mode.py:92
@@ -103,9 +103,9 @@ pub mod counter {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         start: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("value", start)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // mixed_mode.py:25

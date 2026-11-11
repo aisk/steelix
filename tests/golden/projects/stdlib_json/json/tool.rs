@@ -49,7 +49,7 @@ pub fn _colorize_json<'py>(
 
 // json/tool.py:47
 #[rt::frame(m, "main", 47, frame)]
-pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let description = rt::str(
         py,
@@ -217,7 +217,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `json/tool.py` in the module `m`.
@@ -261,7 +261,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::def!(m, main())?;
     if m.global("__name__")?.eq("__main__")? {
         match main(m) {
-            Ok(_) => {}
+            Ok(()) => {}
             Err(err) if err.is_instance_of::<PyBrokenPipeError>(py) => {
                 let exception = frame.catch(err);
                 m.set_global("exc", &exception)?;

@@ -7,34 +7,32 @@ use steelix_runtime::Attributes;
 
 // handler_release.py:19
 #[rt::frame(m, "gone", 19)]
-pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    rt::builtins::print(py, ("weakref gone",))?;
-    Ok(rt::none(py))
+pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<()> {
+    rt::builtins::print(m.py(), ("weakref gone",))?;
+    Ok(())
 }
 
 // handler_release.py:23
 #[rt::frame(m, "raise_big", 23, frame)]
-pub fn raise_big<'py>(m: &rt::Module<'py>, tag: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn raise_big<'py>(m: &rt::Module<'py>, tag: &Bound<'py, PyAny>) -> PyResult<()> {
     Err(frame.raise(m.global("Big")?.call1((tag,))?))
 }
 
 // handler_release.py:27
 #[rt::frame(m, "empty_handler", 27, frame)]
-pub fn empty_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn empty_handler<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match (|| -> PyResult<()> { Err(frame.raise(m.global("Big")?.call1(("empty",))?)) })() {
         Ok(()) => unreachable!(),
         Err(err) if frame.matches(&err, || m.global("Big"))? => {}
         Err(err) => return Err(err),
     }
-    rt::builtins::print(py, ("after empty handler",))?;
-    Ok(rt::none(py))
+    rt::builtins::print(m.py(), ("after empty handler",))?;
+    Ok(())
 }
 
 // handler_release.py:35
 #[rt::frame(m, "builtin_class", 35, frame)]
-pub fn builtin_class<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn builtin_class<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let mut arg = Some(m.global("Arg")?.call1(("value-error",))?);
     let r#ref = m
@@ -52,25 +50,25 @@ pub fn builtin_class<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     }
     arg = None;
     rt::builtins::print(py, ("after builtin handler", r#ref.call0()?.is_none()))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // handler_release.py:46
 #[rt::frame(m, "from_callee", 46, frame)]
-pub fn from_callee<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn from_callee<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match raise_big(m, &rt::str(py, "callee")) {
-        Ok(_) => {}
+        Ok(()) => {}
         Err(err) if frame.matches(&err, || m.global("Big"))? => {}
         Err(err) => return Err(err),
     }
     rt::builtins::print(py, ("after callee handler",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // handler_release.py:54
 #[rt::frame(m, "handler_continue", 54, frame)]
-pub fn handler_continue<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn handler_continue<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     for i in rt::iter(&rt::builtins::range(py, (2,))?)? {
         let i = i?;
@@ -86,13 +84,12 @@ pub fn handler_continue<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
         }
     }
     rt::builtins::print(py, ("after loop",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // handler_release.py:63
 #[rt::frame(m, "handler_break", 63, frame)]
-pub fn handler_break<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn handler_break<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     loop {
         match (|| -> PyResult<()> { Err(frame.raise(m.global("Big")?.call1(("break",))?)) })() {
             Ok(()) => unreachable!(),
@@ -100,14 +97,13 @@ pub fn handler_break<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) => return Err(err),
         }
     }
-    rt::builtins::print(py, ("after break",))?;
-    Ok(rt::none(py))
+    rt::builtins::print(m.py(), ("after break",))?;
+    Ok(())
 }
 
 // handler_release.py:72
 #[rt::frame(m, "reraise_caught_outside", 72, frame)]
-pub fn reraise_caught_outside<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn reraise_caught_outside<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match (|| -> PyResult<()> {
         match (|| -> PyResult<()> { Err(frame.raise(m.global("Big")?.call1(("inner",))?)) })() {
             Ok(()) => unreachable!(),
@@ -122,13 +118,13 @@ pub fn reraise_caught_outside<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, P
         Err(err) if frame.matches(&err, || m.global("Big"))? => {}
         Err(err) => return Err(err),
     }
-    rt::builtins::print(py, ("after nested",))?;
-    Ok(rt::none(py))
+    rt::builtins::print(m.py(), ("after nested",))?;
+    Ok(())
 }
 
 // handler_release.py:83
 #[rt::frame(m, "finally_then_handler", 83, frame)]
-pub fn finally_then_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn finally_then_handler<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match (|| -> PyResult<()> {
         let result =
@@ -143,12 +139,12 @@ pub fn finally_then_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
         Err(err) => return Err(err),
     }
     rt::builtins::print(py, ("after finally",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // handler_release.py:94
 #[rt::frame(m, "handler_as", 94, frame)]
-pub fn handler_as<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn handler_as<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match (|| -> PyResult<()> { Err(frame.raise(m.global("Big")?.call1(("as",))?)) })() {
         Ok(()) => unreachable!(),
@@ -159,7 +155,7 @@ pub fn handler_as<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Err(err2) => return Err(err2),
     }
     rt::builtins::print(py, ("after as",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // handler_release.py:102
@@ -181,7 +177,7 @@ pub fn frame_names<'py>(
 
 // handler_release.py:111
 #[rt::frame(m, "address_reused", 111, frame)]
-pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // The exception from the callee usually gets the address of the one
     // raised here, which is gone by then; it still gets this frame in its
@@ -199,7 +195,7 @@ pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err2) => return Err(err2),
         }
         match (|| raise_big(m, &rt::fstring(py, ("callee ", rt::format(&i, "")?))?))() {
-            Ok(_) => {}
+            Ok(()) => {}
             Err(err) if frame.matches(&err, || m.global("Big"))? => {
                 let err = frame.catch(err);
                 rt::builtins::print(py, ("traceback", frame_names(m, &err)?))?;
@@ -207,20 +203,19 @@ pub fn address_reused<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err2) => return Err(err2),
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // handler_release.py:126
 #[rt::frame(m, "leaves", 126, frame)]
-pub fn leaves<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn leaves<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match (|| -> PyResult<()> { Err(frame.raise(m.global("Big")?.call1(("leaves",))?)) })() {
         Ok(()) => unreachable!(),
         Err(err) if frame.matches(&err, || m.global("Big"))? => {}
         Err(err) => return Err(err),
     }
-    raise_big(m, &rt::str(py, "uncaught here"))?;
-    Ok(rt::none(py))
+    raise_big(m, &rt::str(m.py(), "uncaught here"))?;
+    Ok(())
 }
 
 pub mod big {
@@ -236,13 +231,9 @@ pub mod big {
 
     // handler_release.py:10
     #[rt::frame(m, "Big.__del__", 10)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("del", slf.attr("args")?.get_item(0)?))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("del", slf.attr("args")?.get_item(0)?))?;
+        Ok(())
     }
 }
 
@@ -263,9 +254,9 @@ pub mod arg {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         tag: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("tag", tag)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -324,7 +315,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         rt::builtins::print(py, ("returned from", m.global("case")?.attr("__name__")?))?;
     }
     match leaves(m) {
-        Ok(_) => {}
+        Ok(()) => {}
         Err(err) if frame.matches(&err, || m.global("Big"))? => {
             let exception = frame.catch(err);
             m.set_global("err", &exception)?;

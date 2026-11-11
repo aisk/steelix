@@ -60,11 +60,11 @@ pub mod item {
         name: &Bound<'py, PyAny>,
         price: &Bound<'py, PyAny>,
         quantity: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
         slf.set_attr("price", price)?;
         slf.set_attr("quantity", quantity)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // store/items.py:20
@@ -127,10 +127,10 @@ pub mod perishable {
         price: &Bound<'py, PyAny>,
         quantity: &Bound<'py, PyAny>,
         days: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         rt::super_(__class__, slf)?.method1("__init__", (name, price, quantity))?;
         slf.set_attr("days", days)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

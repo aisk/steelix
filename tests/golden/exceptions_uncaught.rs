@@ -66,7 +66,7 @@ pub fn process<'py>(m: &rt::Module<'py>, keys: &Bound<'py, PyAny>) -> PyResult<B
 
 // exceptions_uncaught.py:36
 #[rt::frame(m, "main", 36, frame)]
-pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let cleanup: Bound<'py, PyAny>;
     match (|| process(m, PyList::new(py, ["a", "b"])?.as_any()))() {
@@ -78,7 +78,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `exceptions_uncaught.py` in the module `m`.

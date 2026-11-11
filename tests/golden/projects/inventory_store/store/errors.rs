@@ -33,7 +33,7 @@ pub mod out_of_stock {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
         wanted: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         rt::super_(__class__, slf)?
             .attr("__init__")?
@@ -43,7 +43,7 @@ pub mod out_of_stock {
                 rt::fstring(py, ("not enough ", rt::format(name, "")?))?
             },))?;
         slf.set_attr("wanted", wanted)?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 

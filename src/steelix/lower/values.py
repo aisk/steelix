@@ -48,6 +48,9 @@ class Value:
     """A `PLACE` that is the `rt::Caught` of an `except` block
     (`let e = frame.catch(err);`): used like a `Bound`, which it
     dereferences to, but returning it clones the `Bound`."""
+    unit: rs.Expr | None = None
+    """For the `None` of a direct call of a function whose Rust fn returns
+    `()`: the call `f(m, &x)?`, which is a statement of the prelude."""
     awaited: bool = False
     """The result of a native coroutine or generator awaited in place,
     `rt::delegate(f(m, &x)).await?` for `await f(x)` or `yield from f(x)`."""
@@ -159,6 +162,8 @@ class Value:
 
     def truthy(self) -> rs.Expr:
         """As a Rust `bool` that is Python's truth value of the object."""
+        if self.unit is not None:
+            return rs.BoolLit(False)
         match self.kind:
             case Kind.BOOL:
                 return self.expr

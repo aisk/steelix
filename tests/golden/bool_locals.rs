@@ -70,7 +70,7 @@ pub fn flags<'py>(
 
 // bool_locals.py:51
 #[rt::frame(m, "not_bools", 51)]
-pub fn not_bools<'py>(m: &rt::Module<'py>, w: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn not_bools<'py>(m: &rt::Module<'py>, w: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     // The value of a rich comparison is whatever `__eq__` returned.
     let eq = w.rich_compare(1, CompareOp::Eq)?;
@@ -93,7 +93,7 @@ pub fn not_bools<'py>(m: &rt::Module<'py>, w: &Bound<'py, PyAny>) -> PyResult<Bo
             mixed.clone()
         },),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // bool_locals.py:67
@@ -134,9 +134,9 @@ pub fn captured<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let seen = rt::Cell::new(m.py(), "seen", false)?;
     // bool_locals.py:90
     #[rt::frame(m, "captured.<locals>.mark", 90)]
-    fn mark<'py>(m: &rt::Module<'py>, seen: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn mark<'py>(m: &rt::Module<'py>, seen: &rt::Cell<'py>) -> PyResult<()> {
         seen.set(true)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
     let mark = rt::function!(frame, mark[&seen]())?;
     mark.call0()?;
@@ -261,9 +261,9 @@ pub mod weird {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // bool_locals.py:10

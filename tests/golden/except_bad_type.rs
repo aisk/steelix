@@ -10,7 +10,7 @@ use steelix_runtime::Attributes;
 
 // except_bad_type.py:6
 #[rt::frame(m, "report", 6)]
-pub fn report<'py>(m: &rt::Module<'py>, error: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn report<'py>(m: &rt::Module<'py>, error: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let mut tb = error.attr("__traceback__")?;
     while !tb.attr("tb_next")?.is_none() {
@@ -25,24 +25,23 @@ pub fn report<'py>(m: &rt::Module<'py>, error: &Bound<'py, PyAny>) -> PyResult<B
             tb.attr("tb_lineno")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // except_bad_type.py:13
 #[rt::frame(m, "bad_class", 13, frame)]
-pub fn bad_class<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn bad_class<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match Err(frame.raise(PyValueError::new_err("x"))) {
         Ok(()) => unreachable!(),
-        Err(err) if frame.matches(&err, || Ok(rt::int(py, 42)))? => {}
+        Err(err) if frame.matches(&err, || Ok(rt::int(m.py(), 42)))? => {}
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // except_bad_type.py:20
 #[rt::frame(m, "missing_name", 20, frame)]
-pub fn missing_name<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn missing_name<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match rt::builtins::int(py, ("nope",)) {
         Ok(_) => {}
@@ -55,12 +54,12 @@ pub fn missing_name<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // except_bad_type.py:29
 #[rt::frame(m, "handled_while_testing", 29, frame)]
-pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // except_bad_type.py:30
     #[rt::frame(m, "handled_while_testing.<locals>.pick", 30)]
@@ -82,7 +81,7 @@ pub fn handled_while_testing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         Err(err) => return Err(err),
     }
     rt::builtins::print(py, ("after", m.global("sys")?.method0("exception")?))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // except_bad_type.py:41

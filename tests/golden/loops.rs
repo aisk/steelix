@@ -11,7 +11,7 @@ pub fn find<'py>(
     m: &rt::Module<'py>,
     items: &Bound<'py, PyAny>,
     target: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     'for_else: {
         for item in rt::iter(items)? {
@@ -23,7 +23,7 @@ pub fn find<'py>(
         }
         rt::builtins::print(py, ("not found", target))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // loops.py:13
@@ -91,7 +91,7 @@ pub fn pairs<'py>(m: &rt::Module<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<
 
 // loops.py:48
 #[rt::frame(m, "nested", 48)]
-pub fn nested<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn nested<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     for row in rt::iter(rows)? {
         let row = row?;
@@ -110,7 +110,7 @@ pub fn nested<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<Bo
             rt::builtins::print(py, ("row done",))?;
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // loops.py:61

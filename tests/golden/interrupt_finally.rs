@@ -7,7 +7,7 @@ use steelix_runtime as rt;
 // steelix-test: interrupt after the first line of output
 // interrupt_finally.py:6
 #[rt::frame(m, "spin", 6, frame)]
-pub fn spin<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn spin<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let mut n = rt::int(py, 0);
     let result = (|| -> PyResult<()> {

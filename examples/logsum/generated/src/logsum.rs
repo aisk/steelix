@@ -188,10 +188,7 @@ pub fn tally<'py>(
 
 // logsum.py:92
 #[rt::frame(m, "print_statuses", 92, frame)]
-pub fn print_statuses<'py>(
-    m: &rt::Module<'py>,
-    requests: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn print_statuses<'py>(m: &rt::Module<'py>, requests: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let classes = PyDict::new(py).into_any();
     let mut name: Bound<'py, PyAny>;
@@ -247,7 +244,7 @@ pub fn print_statuses<'py>(
             )?,),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // logsum.py:103
@@ -256,7 +253,7 @@ pub fn print_paths<'py>(
     m: &rt::Module<'py>,
     requests: &Bound<'py, PyAny>,
     top: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     let paths = tally(m, requests, &rt::str(py, "path"))?;
     // logsum.py:105
@@ -297,7 +294,7 @@ pub fn print_paths<'py>(
             )?,),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // logsum.py:111
@@ -306,7 +303,7 @@ pub fn print_latency<'py>(
     m: &rt::Module<'py>,
     requests: &Bound<'py, PyAny>,
     slow: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     let timed = PyList::empty(py);
     let mut request: Bound<'py, PyAny>;
@@ -393,15 +390,12 @@ pub fn print_latency<'py>(
             )?,),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // logsum.py:129
 #[rt::frame(m, "print_hours", 129)]
-pub fn print_hours<'py>(
-    m: &rt::Module<'py>,
-    requests: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn print_hours<'py>(m: &rt::Module<'py>, requests: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let hours = tally(m, requests, &rt::str(py, "hour"))?;
     let peak = rt::call!(
@@ -430,7 +424,7 @@ pub fn print_hours<'py>(
             )?,),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // logsum.py:137

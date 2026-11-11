@@ -70,7 +70,7 @@ pub fn lists<'py>(
 
 // displays_unpacking.py:56
 #[rt::frame(m, "tuples", 56)]
-pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let one = rt::tuple!(py, *a)?.into_any();
     rt::builtins::print(
@@ -81,12 +81,12 @@ pub fn tuples<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound
             one.get_type().attr("__name__")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // displays_unpacking.py:61
 #[rt::frame(m, "sets", 61, frame)]
-pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let s = rt::set!(
         py,
@@ -118,7 +118,7 @@ pub fn sets<'py>(m: &rt::Module<'py>, a: &Bound<'py, PyAny>) -> PyResult<Bound<'
             rt::set!(py, 1, *a)?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // displays_unpacking.py:66
@@ -127,7 +127,7 @@ pub fn dicts<'py>(
     m: &rt::Module<'py>,
     d: &Bound<'py, PyAny>,
     v: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     let merged = rt::dict!(py, **d, ("k", v))?;
     let order = rt::dict!(
@@ -161,12 +161,12 @@ pub fn dicts<'py>(
             rt::dict!(py, **d, **d)?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // displays_unpacking.py:74
 #[rt::frame(m, "errors", 74, frame)]
-pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // displays_unpacking.py:76
     #[rt::frame(m, "errors.<locals>.<lambda>", 76)]
@@ -235,7 +235,7 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) => return Err(err),
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// An iterable that reports when it is iterated.
@@ -259,10 +259,10 @@ pub mod noisy {
         slf: &Bound<'py, PyAny>,
         label: &Bound<'py, PyAny>,
         items: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("label", label)?;
         slf.set_attr("items", items)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // displays_unpacking.py:16
@@ -298,9 +298,9 @@ pub mod key {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // displays_unpacking.py:27

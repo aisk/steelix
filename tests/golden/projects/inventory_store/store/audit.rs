@@ -13,7 +13,7 @@ pub fn record<'py>(
     m: &rt::Module<'py>,
     action: &Bound<'py, PyAny>,
     item: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     m.global("LOG")?
         .attr("append")?
@@ -29,7 +29,7 @@ pub fn record<'py>(
     {
         return Err(frame.raise(PyAssertionError::new_err(())));
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `store/audit.py` in the module `m`.

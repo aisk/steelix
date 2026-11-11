@@ -19,6 +19,8 @@
 /// The Rust function takes the module, the captured variables and then one
 /// argument per parameter, all as `&Bound` (`*args` and `**kwargs` as
 /// `&Bound<PyTuple>` and `&Bound<PyDict>`, captured cells as `&rt::Cell`).
+/// It returns a `PyResult` of the object, or of `()` when the function only
+/// ever returns `None` (not a coroutine or generator).
 ///
 /// ```ignore
 /// rt::function!(m, greet(name, greeting = "Hello"))?;      // fn greet(m, name, greeting)
@@ -272,9 +274,10 @@ macro_rules! function {
         let $c = $crate::Cell::free($c, $cn);
     };
     // `module` is passed in as a token so that it keeps the hygiene context
-    // of the closure parameter above.
+    // of the closure parameter above. The fn returns an object or `()`.
     (@call $f:ident($module:ident; $($c:ident),*; $($p:ident,)*)) => {
         $f($module, $(&$c,)* $($p),*)
+            .map(|value| $crate::function::IntoReturn::into_return(value, $module.py()))
     };
     (@opt name [name = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };
     (@opt qualname [qualname = $value:literal $(, $($rest:tt)*)?]) => { ::std::option::Option::Some($value) };

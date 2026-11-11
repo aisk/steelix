@@ -49,17 +49,16 @@ pub mod config_error {
         slf: &Bound<'py, PyAny>,
         key: &Bound<'py, PyAny>,
         problem: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    ) -> PyResult<()> {
         rt::super_(__class__, slf)?
             .attr("__init__")?
             .call1((rt::fstring(
-                py,
+                m.py(),
                 (rt::format(key, "")?, ": ", rt::format(problem, "")?),
             )?,))?;
         slf.set_attr("key", key)?;
         slf.set_attr("problem", problem)?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 
@@ -132,12 +131,12 @@ pub mod broken {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         if value.lt(0)? {
             return Err(frame.raise(PyValueError::new_err("negative")));
         }
         slf.set_attr("value", value)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

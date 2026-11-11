@@ -5,10 +5,9 @@ use steelix_runtime as rt;
 
 // operators.py:4
 #[rt::frame(m, "unary", 4)]
-pub fn unary<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    rt::builtins::print(py, (x.neg()?, x.pos()?, x.bitnot()?, !x.is_truthy()?))?;
-    Ok(rt::none(py))
+pub fn unary<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<()> {
+    rt::builtins::print(m.py(), (x.neg()?, x.pos()?, x.bitnot()?, !x.is_truthy()?))?;
+    Ok(())
 }
 
 // operators.py:8
@@ -17,7 +16,7 @@ pub fn logic<'py>(
     m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -45,7 +44,7 @@ pub fn logic<'py>(
     } else {
         rt::builtins::print(py, ("none",))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // operators.py:18
@@ -117,7 +116,7 @@ pub fn values<'py>(
     m: &rt::Module<'py>,
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     let lt = a.rich_compare(b, CompareOp::Lt)?;
     rt::builtins::print(
@@ -169,7 +168,7 @@ pub fn values<'py>(
     if !(rt::int(py, 0).le(b)? && b.lt(10)?) {
         rt::builtins::print(py, ("not a digit",))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `operators.py` in the module `m`.

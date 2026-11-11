@@ -456,7 +456,7 @@ class _Verifier:
 
 # Enum variants and paths that patterns name, which bind nothing.
 _PATTERN_PATHS = frozenset(
-    {"Ok", "Err", "Some", "None", "rt", "Flow", "Next", "Break", "Continue", "Return"}
+    {"Ok", "Err", "Some", "None", "rt", "Flow", "Jump", "Next", "Break", "Continue", "Return"}
 )
 
 

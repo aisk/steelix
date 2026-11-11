@@ -5,7 +5,7 @@ use steelix_runtime::Attributes;
 
 // decorator_lines.py:7
 #[rt::frame(m, "boom", 7, frame)]
-pub fn boom<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn boom<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<()> {
     Err(
         frame.raise(PyValueError::new_err((rt::str(m.py(), "applying to ")
             .add(r#fn.attr("__qualname__")?)?
@@ -15,7 +15,7 @@ pub fn boom<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Boun
 
 // decorator_lines.py:11
 #[rt::frame(m, "fails", 11, frame)]
-pub fn fails<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn fails<'py>(m: &rt::Module<'py>, label: &Bound<'py, PyAny>) -> PyResult<()> {
     Err(
         frame.raise(PyValueError::new_err((rt::str(m.py(), "evaluating ")
             .add(label)?
@@ -30,7 +30,7 @@ pub fn ok<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<Bound<
 
 // decorator_lines.py:19
 #[rt::frame(m, "show", 19)]
-pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, (exc.get_type().attr("__name__")?, exc))?;
     for frame_ in rt::iter(
@@ -49,22 +49,24 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
             ),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // decorator_lines.py:101
 #[rt::frame(m, "nested", 101, frame)]
 pub fn nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let py = m.py();
     // decorator_lines.py:102
-    fn inner<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-        Ok(rt::none(m.py()))
+    fn inner<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+        Ok(())
     }
-    let inner = rt::function!(
-        frame,
-        @ok
-        @(fails(m, &rt::str(m.py(), "in nested"))?)
-        inner()
-    )?;
+    let inner = {
+        let decorator = m.global("ok")?;
+        fails(m, &rt::str(py, "in nested"))?;
+        let function = rt::function!(frame, inner())?;
+        let function = rt::none(py).call1((&function,))?;
+        decorator.call1((function,))?
+    };
     Ok(inner)
 }
 
@@ -92,11 +94,8 @@ pub mod in_body {
     }
 
     // decorator_lines.py:78
-    pub fn method<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        Ok(rt::none(m.py()))
+    pub fn method<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        Ok(())
     }
 }
 
@@ -113,16 +112,13 @@ pub mod single {
     }
 
     // decorator_lines.py:89
-    pub fn fine<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-        Ok(rt::none(m.py()))
+    pub fn fine<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+        Ok(())
     }
 
     // decorator_lines.py:93
-    pub fn method<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        Ok(rt::none(m.py()))
+    pub fn method<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        Ok(())
     }
 }
 
@@ -140,10 +136,18 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     rt::def!(m, show(exc))?;
     match (|| -> PyResult<()> {
         // decorator_lines.py:27
-        fn evaluated<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            Ok(rt::none(m.py()))
+        fn evaluated<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+            Ok(())
         }
-        rt::def!(m, @ok @(fails(m, &rt::str(py, "second"))?) @ok evaluated())?;
+        {
+            let decorator = m.global("ok")?;
+            fails(m, &rt::str(py, "second"))?;
+            let decorator2 = m.global("ok")?;
+            let function = rt::function!(m, evaluated())?;
+            let function = decorator2.call1((&function,))?;
+            let function = rt::none(py).call1((&function,))?;
+            m.set_global("evaluated", decorator.call1((function,))?)?;
+        }
         Ok(())
     })() {
         Ok(()) => {}
@@ -157,13 +161,17 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     match (|| -> PyResult<()> {
         // decorator_lines.py:38
-        fn defaulted<'py>(
-            m: &rt::Module<'py>,
-            x: &Bound<'py, PyAny>,
-        ) -> PyResult<Bound<'py, PyAny>> {
-            Ok(rt::none(m.py()))
+        fn defaulted<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<()> {
+            Ok(())
         }
-        rt::def!(m, @ok @ok defaulted(x = fails(m, &rt::str(py, "default"))?))?;
+        {
+            let decorator = m.global("ok")?;
+            let decorator2 = m.global("ok")?;
+            fails(m, &rt::str(py, "default"))?;
+            let function = rt::function!(m, defaulted(x = py.None()))?;
+            let function = decorator2.call1((&function,))?;
+            m.set_global("defaulted", decorator.call1((function,))?)?;
+        }
         Ok(())
     })() {
         Ok(()) => {}
@@ -177,8 +185,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     match (|| -> PyResult<()> {
         // decorator_lines.py:48
-        fn applied<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            Ok(rt::none(m.py()))
+        fn applied<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+            Ok(())
         }
         rt::def!(m, @ok @boom @ok applied())?;
         Ok(())
@@ -194,8 +202,8 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     }
     match (|| -> PyResult<()> {
         // decorator_lines.py:59
-        fn single<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-            Ok(rt::none(m.py()))
+        fn single<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+            Ok(())
         }
         rt::def!(m, @boom single())?;
         Ok(())

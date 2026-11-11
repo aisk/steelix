@@ -237,6 +237,27 @@ def function_kind(fn: FunctionNode) -> str:
     return "generator" if yields else "function"
 
 
+def returns_unit(fn: FunctionNode) -> bool:
+    """Whether `fn` only ever returns `None` without saying which value:
+    a plain `def` (no coroutine or generator) whose `return` statements
+    are all bare or `return None`. Its Rust fn returns `PyResult<()>`
+    (design §6)."""
+    if not isinstance(fn, ast.FunctionDef) or function_kind(fn) != "function":
+        return False
+    pending: list[ast.AST] = list(fn.body)
+    while pending:
+        node = pending.pop()
+        match node:
+            case ast.Return(ast.expr() as value):
+                if not (isinstance(value, ast.Constant) and value.value is None):
+                    return False
+            case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef():
+                continue
+        if isinstance(node, ast.stmt | ast.ExceptHandler | ast.match_case):
+            pending.extend(ast.iter_child_nodes(node))
+    return True
+
+
 def nested_functions(nodes: list[ast.AST], skip: Collection[ast.AST] = ()) -> list[FunctionNode]:
     return [n for node in nodes for n in walk_scope(node, skip) if isinstance(n, FunctionNode)]
 

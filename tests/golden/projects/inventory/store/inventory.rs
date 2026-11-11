@@ -18,13 +18,9 @@ pub mod inventory_ {
 
     // store/inventory.py:8
     #[rt::frame(m, "Inventory.__init__", 8)]
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        slf.set_attr("items", PyDict::new(py))?;
-        Ok(rt::none(py))
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        slf.set_attr("items", PyDict::new(m.py()))?;
+        Ok(())
     }
 
     // store/inventory.py:11
@@ -33,10 +29,10 @@ pub mod inventory_ {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         item: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.attr("items")?.set_item(item.attr("name")?, item)?;
         m.global("audit")?.method1("record", ("add", item))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // store/inventory.py:15
@@ -46,13 +42,12 @@ pub mod inventory_ {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
         quantity: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    ) -> PyResult<()> {
         if !slf.attr("items")?.contains(name)? {
-            return Err(frame.raise(
-                m.global("StoreError")?
-                    .call1((rt::fstring(py, ("unknown item ", rt::format(name, "")?))?,))?,
-            ));
+            return Err(frame.raise(m.global("StoreError")?.call1((rt::fstring(
+                m.py(),
+                ("unknown item ", rt::format(name, "")?),
+            )?,))?));
         }
         let item = slf.attr("items")?.get_item(name)?;
         if item.attr("quantity")?.lt(quantity)? {
@@ -60,7 +55,7 @@ pub mod inventory_ {
         }
         item.set_attr("quantity", rt::isub(&item.attr("quantity")?, quantity)?)?;
         m.global("audit")?.method1("record", ("take", &item))?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 

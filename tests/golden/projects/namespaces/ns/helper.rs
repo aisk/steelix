@@ -10,7 +10,7 @@ pub fn double<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound
 
 // ns/helper.py:5
 #[rt::frame(m, "fail", 5, frame)]
-pub fn fail<'py>(m: &rt::Module<'py>, message: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn fail<'py>(m: &rt::Module<'py>, message: &Bound<'py, PyAny>) -> PyResult<()> {
     Err(frame.raise(PyRuntimeError::new_err((message.clone().unbind(),))))
 }
 

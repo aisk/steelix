@@ -160,7 +160,8 @@ def test_option_local_and_none_return() -> None:
     assert "let mut x: Option<Bound<'py, PyAny>> = None;" in out
     assert "x = Some(rt::int(py, 1));" in out
     assert 'rt::local(&x, "x")?' in out
-    assert "Ok(rt::none(py))" in out
+    assert "-> PyResult<()> {" in out
+    assert "    Ok(())\n}\n\n" in out
 
 
 def test_globals_builtin_reads_the_module_dict() -> None:
@@ -292,14 +293,14 @@ def test_py_is_bound_once_or_spelled_in_place() -> None:
     out = lower(
         """
         def once():
-            return None
+            return 1
 
         def twice(x):
             return [x, 1, "a"]
         """
     )
     assert "pub fn once<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {" in out
-    assert "Ok(rt::none(m.py()))" in out
+    assert "Ok(rt::int(m.py(), 1))" in out
     assert '#[rt::frame(m, "twice", 5)]' in out
     assert ") -> PyResult<Bound<'py, PyAny>> {\n    let py = m.py();\n" in out
     assert "Ok(PyList::new(py, [x, &rt::int(py, 1)" in out
@@ -714,3 +715,50 @@ def test_typed_declaration_imports_its_type() -> None:
     )
     assert "let s = if" in merged
     assert "use pyo3::types::PySet;" not in merged
+
+
+def test_function_without_a_return_value_returns_unit() -> None:
+    out = lower(
+        """
+        def log(x):
+            if not x:
+                return
+            if x == 1:
+                return None
+            print(x)
+
+        def mixed(x):
+            if x:
+                return x
+
+        def uses(x):
+            log(x)
+            y = log(x)
+            return [x, log(y)]
+        """
+    )
+    assert "pub fn log<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<()> {" in out
+    assert out.count("return Ok(());") == 2
+    assert "rt::builtins::print(m.py(), (x,))?;\n    Ok(())\n}" in out
+    assert "pub fn mixed<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound" in out
+    assert "Ok(rt::none(m.py()))" in out
+    # The call is a statement, its value is `None`.
+    assert "    log(m, x)?;\n    log(m, x)?;\n    let y = rt::none(py);\n    log(m, &y)?;\n" in out
+    assert "PyList::new(py, [x, &rt::none(py)])" in out
+
+
+def test_return_in_a_closure_of_a_unit_function_is_a_jump() -> None:
+    out = lower(
+        """
+        def f(lock, x):
+            with lock:
+                if x:
+                    return
+                print(x)
+            print("after")
+        """
+    )
+    assert "if let rt::Jump::Return = frame.with(lock, |_| {" in out
+    assert "return Ok(rt::Jump::Return);" in out
+    assert "Ok(rt::Jump::Next)" in out
+    assert "    })? {\n        return Ok(());\n    }" in out

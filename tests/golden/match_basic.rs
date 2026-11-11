@@ -55,7 +55,7 @@ pub fn command<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<B
 // match_basic.py:31
 /// A named star at each position, and `*_` with the items around it.
 #[rt::frame(m, "stars", 31)]
-pub fn stars<'py>(m: &rt::Module<'py>, value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn stars<'py>(m: &rt::Module<'py>, value: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     if let Some(([], rest, [])) = rt::match_seq_star(value)? {
         rt::builtins::print(py, ("all", &rest))?;
@@ -90,7 +90,7 @@ pub fn stars<'py>(m: &rt::Module<'py>, value: &Bound<'py, PyAny>) -> PyResult<Bo
     } else {
         rt::builtins::print(py, ("other",))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_basic.py:63
@@ -186,10 +186,7 @@ pub fn nested<'py>(m: &rt::Module<'py>, point: &Bound<'py, PyAny>) -> PyResult<B
 /// A guard that fails still leaves the captures bound (CPython stores
 /// them before the guard runs).
 #[rt::frame(m, "guard_binds", 115, frame)]
-pub fn guard_binds<'py>(
-    m: &rt::Module<'py>,
-    values: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn guard_binds<'py>(m: &rt::Module<'py>, values: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let mut x: Option<Bound<'py, PyAny>> = None;
     let mut y: Option<Bound<'py, PyAny>> = None;
@@ -221,13 +218,13 @@ pub fn guard_binds<'py>(
         }
         Err(err2) => return Err(err2),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_basic.py:137
 /// Captures used after the match are stored in the function's locals.
 #[rt::frame(m, "counts", 137)]
-pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let mut seen = rt::int(py, 0);
     let mut n: Option<Bound<'py, PyAny>> = None;
@@ -253,15 +250,12 @@ pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<B
         }
     }
     rt::builtins::print(py, ("total", &seen, "last n", rt::local(&n, "n")?))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_basic.py:156
 #[rt::frame(m, "walrus_guard", 156)]
-pub fn walrus_guard<'py>(
-    m: &rt::Module<'py>,
-    value: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn walrus_guard<'py>(m: &rt::Module<'py>, value: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let mut doubled: Option<Bound<'py, PyAny>> = None;
     if let Some([a]) = rt::match_seq(value)?
@@ -275,15 +269,12 @@ pub fn walrus_guard<'py>(
     } else {
         rt::builtins::print(py, ("small", rt::local(&doubled, "doubled")?))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_basic.py:168
 #[rt::frame(m, "loop_jumps", 168)]
-pub fn loop_jumps<'py>(
-    m: &rt::Module<'py>,
-    rows: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn loop_jumps<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let mut total: Bound<'py, PyAny>;
     'outer: for row in rt::iter(rows)? {
@@ -320,7 +311,7 @@ pub fn loop_jumps<'py>(
         }
     }
     rt::builtins::print(py, ("done",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_basic.py:226

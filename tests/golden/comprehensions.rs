@@ -10,7 +10,7 @@ use steelix_runtime::Attributes;
 
 // comprehensions.py:9
 #[rt::frame(m, "show", 9)]
-pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<()> {
     m.global("print")?
         .call1((m.global("type")?.call1((exc,))?.attr("__name__")?, exc))?;
     for frame_ in rt::iter(
@@ -26,7 +26,7 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
             frame_.attr("line")?,
         ))?;
     }
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // comprehensions.py:15
@@ -280,8 +280,7 @@ pub fn generator_in_comprehension<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
 
 // comprehensions.py:92
 #[rt::frame(m, "stop_iteration", 92, frame)]
-pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     // comprehensions.py:93
     #[rt::frame(m, "stop_iteration.<locals>.boom", 93, frame)]
     fn boom<'py>(m: &rt::Module<'py>, v: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -296,7 +295,7 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
     let boom = rt::function!(frame, boom(v))?;
     match (|| -> PyResult<Bound<'py, PyAny>> {
         let print = m.global("print")?;
-        let list = PyList::empty(py);
+        let list = PyList::empty(m.py());
         for v in rt::iter(&m.global("range")?.call1((4,))?)? {
             let v = v?;
             list.append(boom.call1((&v,))?)?;
@@ -310,7 +309,7 @@ pub fn stop_iteration<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // comprehensions.py:104
@@ -377,10 +376,7 @@ pub mod bad {
 
     // comprehensions.py:121
     #[rt::frame(m, "Bad.__next__", 121, frame)]
-    pub fn __next__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __next__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         Err(frame.raise(m.global("ValueError")?.call1(("next failed",))?))
     }
 }

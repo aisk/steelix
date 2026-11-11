@@ -53,10 +53,10 @@ pub mod point {
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
         slf.set_attr("y", y)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -82,10 +82,10 @@ pub mod line {
         slf: &Bound<'py, PyAny>,
         start: &Bound<'py, PyAny>,
         end: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("start", start)?;
         slf.set_attr("end", end)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

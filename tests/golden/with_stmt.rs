@@ -25,8 +25,7 @@ pub fn write_and_read<'py>(
 
 // with_stmt.py:52
 #[rt::frame(m, "target_kinds", 52, frame)]
-pub fn target_kinds<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn target_kinds<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     frame.with(&m.global("Manager")?.call1(("abc",))?, |value| {
         let name: Bound<'py, PyAny>;
         let size: Bound<'py, PyAny>;
@@ -34,7 +33,7 @@ pub fn target_kinds<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         m.global("print")?.call1(("unpacked", &name, &size))?;
         Ok(())
     })?;
-    let holder = PyDict::new(py);
+    let holder = PyDict::new(m.py());
     frame.with(&m.global("Manager")?.call1(("d",))?, |value| {
         holder.set_item("value", value)?;
         Ok(())
@@ -44,35 +43,35 @@ pub fn target_kinds<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         m.global("print")?.call1(("no target",))?;
         Ok(())
     })?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // with_stmt.py:63
 #[rt::frame(m, "multiple", 63, frame)]
-pub fn multiple<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn multiple<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     frame.with(&m.global("Manager")?.call1(("outer",))?, |a| {
         frame.with(&m.global("Manager")?.call1(("inner",))?, |b| {
             m.global("print")?.call1(("both", a, b))?;
             Ok(())
         })
     })?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // with_stmt.py:68
 #[rt::frame(m, "suppressing", 68, frame)]
-pub fn suppressing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn suppressing<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     frame.with(
         &rt::call!(m.global("Manager")?, "quiet", suppress = true)?,
         |_| -> PyResult<()> { Err(frame.raise(m.global("ValueError")?.call1(("suppressed",))?)) },
     )?;
     m.global("print")?.call1(("after suppressed",))?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // with_stmt.py:74
 #[rt::frame(m, "not_suppressing", 74, frame)]
-pub fn not_suppressing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn not_suppressing<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match (|| -> PyResult<()> {
         frame.with(
             &m.global("Manager")?.call1(("loud",))?,
@@ -89,12 +88,12 @@ pub fn not_suppressing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // with_stmt.py:82
 #[rt::frame(m, "enter_fails", 82, frame)]
-pub fn enter_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn enter_fails<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match (|| -> PyResult<()> {
         frame.with(&m.global("Manager")?.call1(("first",))?, |_| {
             frame.with(
@@ -114,12 +113,12 @@ pub fn enter_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // with_stmt.py:90
 #[rt::frame(m, "exit_fails", 90, frame)]
-pub fn exit_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn exit_fails<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     match (|| -> PyResult<()> {
         frame.with(
             &rt::call!(m.global("Manager")?, "ok", fail_exit = true)?,
@@ -139,7 +138,7 @@ pub fn exit_fails<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // with_stmt.py:98
@@ -184,7 +183,7 @@ pub fn returns_value<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // with_stmt.py:117
 #[rt::frame(m, "bad_managers", 117, frame)]
-pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     for manager in rt::iter(
         PyList::new(
@@ -210,12 +209,12 @@ pub fn bad_managers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             Err(err) => return Err(err),
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // with_stmt.py:126
 #[rt::frame(module, "lookup_on_type", 126, frame)]
-pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<()> {
     let m = module.global("InstanceMethods")?.call0()?;
     // with_stmt.py:128
     fn lambda<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -238,7 +237,7 @@ pub fn lookup_on_type<'py>(module: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(module.py()))
+    Ok(())
 }
 
 // with_stmt.py:137
@@ -290,12 +289,12 @@ pub mod manager {
         suppress: &Bound<'py, PyAny>,
         fail_enter: &Bound<'py, PyAny>,
         fail_exit: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
         slf.set_attr("suppress", suppress)?;
         slf.set_attr("fail_enter", fail_enter)?;
         slf.set_attr("fail_exit", fail_exit)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // with_stmt.py:14

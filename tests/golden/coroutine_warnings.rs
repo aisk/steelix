@@ -29,13 +29,13 @@ pub async fn coro<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // coroutine_warnings.py:22
 #[rt::frame(m, "make_coroutines", 22)]
-pub fn make_coroutines<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn make_coroutines<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let mut first = Some(m.global("coro")?.call0()?);
     first = None;
     let mut second = Some(m.global("coro")?.call0()?);
     second = None;
     m.global("gc")?.method0("collect")?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // coroutine_warnings.py:30

@@ -13,8 +13,8 @@ pub fn f<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py,
 
 // docstrings.py:31
 /// One line only.
-pub fn g<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    Ok(rt::none(m.py()))
+pub fn g<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+    Ok(())
 }
 
 // docstrings.py:35
@@ -25,14 +25,14 @@ pub fn g<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 ///
 ///  form feed
 ///  vertical tab
-pub fn h<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    Ok(rt::none(m.py()))
+pub fn h<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+    Ok(())
 }
 
 // docstrings.py:44
 /// Ends with blank lines.
-pub fn k<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    Ok(rt::none(m.py()))
+pub fn k<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+    Ok(())
 }
 
 /// Class doc.

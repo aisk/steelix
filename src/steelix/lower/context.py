@@ -80,6 +80,9 @@ class FunctionInfo:
     `PyDict` or `PySet` (`frontend.containers`, design §5)."""
     kind: str = "function"
     """`function`, `coroutine` or `generator` (`scope.function_kind`)."""
+    unit: bool = False
+    """The Rust fn returns `PyResult<()>`: the function only ever returns
+    `None` (`scope.returns_unit`)."""
 
     @property
     def is_async(self) -> bool:

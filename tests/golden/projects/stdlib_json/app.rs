@@ -39,7 +39,7 @@ pub fn accelerated<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // app.py:35
 #[rt::frame(m, "roundtrips", 35)]
-pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let value = m
         .global("json")?
@@ -111,13 +111,13 @@ pub fn roundtrips<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         sort_keys = true,
         indent = 1
     )?,))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:50
 /// The fallbacks the package uses without `_json`.
 #[rt::frame(m, "pure_python", 50, frame)]
-pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let dec = m.global("json")?.method0("JSONDecoder")?;
     dec.set_attr("parse_string", m.global("decoder")?.attr("py_scanstring")?)?;
@@ -161,12 +161,12 @@ pub fn pure_python<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err2) => return Err(err2),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:80
 #[rt::frame(m, "errors", 80, frame)]
-pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     for text in rt::iter(
         PyList::new(
@@ -240,12 +240,12 @@ pub fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         default = m.global("vars")?,
         indent = 0
     )?,))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:104
 #[rt::frame(m, "main", 104)]
-pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     m.global("print")?
         .call1((m.global("accelerated")?.call0()?,))?;
     m.global("roundtrips")?.call0()?;
@@ -259,7 +259,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             .attr("__spec__")?
             .attr("name")?,
     ))?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 pub mod point {
@@ -280,10 +280,10 @@ pub mod point {
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
         slf.set_attr("y", y)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

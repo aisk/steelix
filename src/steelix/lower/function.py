@@ -22,6 +22,7 @@ from steelix.frontend.scope import (
     annotations_of,
     comprehension_variables,
     function_kind,
+    returns_unit,
     walrus_targets,
 )
 from steelix.lower.context import NAMESPACE, Context, FunctionInfo, ModuleContext
@@ -35,6 +36,7 @@ from steelix.rustast.rewrite import count_path, replace_path
 
 BOUND = "Bound<'py, PyAny>"
 RESULT = f"PyResult<{BOUND}>"
+UNIT_RESULT = "PyResult<()>"
 MODULE = "&rt::Module<'py>"
 
 
@@ -85,6 +87,7 @@ def lower_function(
         bool_locals(fn, scope, locals_info, module.bindings),
         container_locals(fn, scope, locals_info),
         function_kind(fn),
+        returns_unit(fn),
     )
     ctx = Context(module, locals_info, info, context_name=context_name(names.mapping.values()))
     first_line = _first_line(fn)
@@ -147,7 +150,7 @@ def lower_function(
             for stmt in stmts:
                 body += lowering.stmt(stmt)
             if locals_info.end_reachable:
-                tail = rs.Call(rs.Path("Ok"), (rs.Call(rs.Path("rt::none"), (rs.Path("py"),)),))
+                tail = lowering.return_value(None)
 
     params = [rs.Param(ctx.context_name, MODULE)]
     for name in scope.frees:
@@ -173,7 +176,7 @@ def lower_function(
     return rs.Fn(
         name=rust_name,
         params=tuple(params),
-        ret=RESULT,
+        ret=UNIT_RESULT if info.unit else RESULT,
         body=bind_py(block, ctx.context_name),
         lifetimes=("'py",),
         public=public,

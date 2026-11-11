@@ -14,10 +14,9 @@ use steelix_runtime::Attributes;
 
 // returned_locals.py:19
 #[rt::frame(m, "gone", 19)]
-pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    rt::builtins::print(py, ("weakref gone",))?;
-    Ok(rt::none(py))
+pub fn gone<'py>(m: &rt::Module<'py>, r#ref: &Bound<'py, PyAny>) -> PyResult<()> {
+    rt::builtins::print(m.py(), ("weakref gone",))?;
+    Ok(())
 }
 
 // returned_locals.py:23
@@ -153,20 +152,16 @@ pub mod tracked {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // returned_locals.py:12
     #[rt::frame(m, "Tracked.__del__", 12)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("del", slf.attr("name")?))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("del", slf.attr("name")?))?;
+        Ok(())
     }
 
     // returned_locals.py:15

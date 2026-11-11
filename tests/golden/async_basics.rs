@@ -388,9 +388,9 @@ pub mod base {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("_value", value)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // async_basics.py:121

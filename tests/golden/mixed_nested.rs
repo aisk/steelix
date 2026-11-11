@@ -35,9 +35,9 @@ pub mod point {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

@@ -3,11 +3,11 @@ use steelix_runtime as rt;
 
 // exit_code.py:1
 #[rt::frame(m, "report", 1)]
-pub fn report<'py>(m: &rt::Module<'py>, code: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn report<'py>(m: &rt::Module<'py>, code: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ("exiting with", code))?;
     rt::builtin(py, "exit")?.call1((code,))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `exit_code.py` in the module `m`.

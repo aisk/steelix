@@ -167,10 +167,10 @@ pub mod planet {
         slf: &Bound<'py, PyAny>,
         mass: &Bound<'py, PyAny>,
         radius: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("mass", mass)?;
         slf.set_attr("radius", radius)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_inherit.py:63
@@ -282,8 +282,8 @@ pub mod shape {
     }
 
     // classes_inherit.py:115
-    pub fn area<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        Ok(rt::none(m.py()))
+    pub fn area<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        Ok(())
     }
 
     // classes_inherit.py:119
@@ -321,9 +321,9 @@ pub mod square {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         side: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("side", side)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_inherit.py:127
@@ -353,7 +353,7 @@ pub mod worker {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
         n: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         rt::call!(
             rt::super_(__class__, slf)?.attr("__init__")?,
@@ -361,18 +361,18 @@ pub mod worker {
         )?;
         slf.set_attr("n", n)?;
         slf.set_attr("result", py.None())?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // classes_inherit.py:144
     #[rt::frame(m, "Worker.run", 144)]
-    pub fn run<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    pub fn run<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         let py = m.py();
         slf.set_attr(
             "result",
             rt::builtins::sum(py, (rt::builtins::range(py, (slf.attr("n")?,))?,))?,
         )?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 
@@ -399,10 +399,12 @@ pub mod upper {
         namespace: &Bound<'py, PyAny>,
         values: &Bound<'py, PyAny>,
         option_string: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::setattr(py, (namespace, slf.attr("dest")?, values.method0("upper")?))?;
-        Ok(rt::none(py))
+    ) -> PyResult<()> {
+        rt::builtins::setattr(
+            m.py(),
+            (namespace, slf.attr("dest")?, values.method0("upper")?),
+        )?;
+        Ok(())
     }
 }
 
@@ -426,12 +428,11 @@ pub mod reversed {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
         items: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    ) -> PyResult<()> {
         rt::super_(__class__, slf)?
             .attr("__init__")?
-            .call1((rt::builtins::reversed(py, (items,))?,))?;
-        Ok(rt::none(py))
+            .call1((rt::builtins::reversed(m.py(), (items,))?,))?;
+        Ok(())
     }
 
     // classes_inherit.py:170
@@ -441,9 +442,9 @@ pub mod reversed {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
         item: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         rt::super_(__class__, slf)?.method1("insert", (0, item))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

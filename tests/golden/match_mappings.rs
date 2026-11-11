@@ -102,10 +102,7 @@ pub fn handle<'py>(
 
 // match_mappings.py:57
 #[rt::frame(m, "counts", 57)]
-pub fn counts<'py>(
-    m: &rt::Module<'py>,
-    mapping: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn counts<'py>(m: &rt::Module<'py>, mapping: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     if let Some([a]) = rt::match_map(mapping, ["a"])?
         && a.eq(1)?
@@ -134,7 +131,7 @@ pub fn counts<'py>(
             ),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 pub mod key {

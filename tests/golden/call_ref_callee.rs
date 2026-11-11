@@ -11,13 +11,13 @@ pub fn run<'py>(
     f: &Bound<'py, PyAny>,
     args: &Bound<'py, PyAny>,
     kwargs: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let mut action: Option<Bound<'py, PyAny>> = None;
     if flag.is_truthy()? {
         action = Some(f.clone());
     }
     rt::call!(rt::local(&action, "action")?, *args, **kwargs)?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 /// Executes the body of `call_ref_callee.py` in the module `m`.

@@ -16,8 +16,7 @@ use steelix_runtime::Attributes;
 
 // tracebacks.py:12
 #[rt::frame(m, "show", 12)]
-pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<()> {
     for frame_ in rt::iter(
         &m.global("traceback")?
             .attr("extract_tb")?
@@ -25,7 +24,7 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
     )? {
         let frame_ = frame_?;
         rt::builtins::print(
-            py,
+            m.py(),
             (
                 " ",
                 frame_.attr("name")?,
@@ -34,7 +33,7 @@ pub fn show<'py>(m: &rt::Module<'py>, exc: &Bound<'py, PyAny>) -> PyResult<Bound
             ),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // tracebacks.py:17
@@ -148,7 +147,7 @@ pub fn multiline<'py>(
 
 // tracebacks.py:74
 #[rt::frame(m, "raise_again", 74, frame)]
-pub fn raise_again<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn raise_again<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match (|| leaf(m, PyList::new(py, [1])?.as_any(), &rt::int(py, 3)))() {
         Ok(_) => {}
@@ -158,12 +157,12 @@ pub fn raise_again<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // tracebacks.py:81
 #[rt::frame(m, "raise_from_handler", 81, frame)]
-pub fn raise_from_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn raise_from_handler<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match (|| leaf(m, PyList::new(py, [1])?.as_any(), &rt::int(py, 3)))() {
         Ok(_) => {}
@@ -173,7 +172,7 @@ pub fn raise_from_handler<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // tracebacks.py:88
@@ -202,10 +201,10 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<
 
 // tracebacks.py:137
 #[rt::frame(m, "main", 137)]
-pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     native_middle(m, PyList::new(py, [3])?.as_any(), &rt::int(py, 9))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `tracebacks.py` in the module `m`.

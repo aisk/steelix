@@ -57,7 +57,7 @@ pub mod builtins;
 #[doc(hidden)]
 pub mod frame;
 
-pub use frame::{Caught, Flow, Frame, Handling, IntoException};
+pub use frame::{Caught, Flow, Frame, Handling, IntoException, Jump};
 
 /// Runs the body of a generated function in a traceback [`Frame`]:
 ///

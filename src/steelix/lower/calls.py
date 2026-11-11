@@ -5,11 +5,12 @@ with a direct PyO3 spelling."""
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from steelix.frontend.module_bindings import is_immutable_constant
 from steelix.frontend.resolve import Direct, Lookup, resolve_call
-from steelix.frontend.scope import default_of, function_kind, params_of
+from steelix.frontend.scope import default_of, function_kind, params_of, returns_unit
 from steelix.lower.names import rust_ident
 from steelix.lower.values import MAX_CALL_ARGS, Kind, Operand, Value
 from steelix.rustast import nodes as rs
@@ -324,6 +325,10 @@ class CallLowering:
                 case _:
                     call_args.append(used[0].ref())
         call: rs.Expr = rs.Call(rs.Path(module.fn_names[fn.name]), tuple(call_args))
+        if returns_unit(fn):
+            # The call is a statement, and its value the `None` it stands for.
+            self.prelude.append(rs.ExprStmt(_try(call)))
+            return replace(self.constant(None, node), unit=_try(call))
         if function_kind(fn) == "function":
             return Value(_try(call), Kind.OWNED)
         # `await f(x)` or `yield from g(x)` runs the future in place.

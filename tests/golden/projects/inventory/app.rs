@@ -28,10 +28,7 @@ pub fn build<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // app.py:52
 #[rt::frame(m, "shop", 52, frame)]
-pub fn shop<'py>(
-    m: &rt::Module<'py>,
-    inventory: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn shop<'py>(m: &rt::Module<'py>, inventory: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     match inventory.method1("take", ("pear", 10)) {
         Ok(_) => {}
@@ -66,12 +63,12 @@ pub fn shop<'py>(
         Err(err2) => return Err(err2),
     }
     inventory.method1("take", ("apple", 4))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:64
 #[rt::frame(m, "plugins", 64)]
-pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let mut plugin: Bound<'py, PyAny>;
     // A computed name: transpiled only with `--include plugins`.
@@ -102,12 +99,12 @@ pub fn plugins<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             r#static.method0("run")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:73
 #[rt::frame(m, "state", 73, frame)]
-pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -168,12 +165,12 @@ pub fn state<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             m.global("config")?.attr("settings")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:86
 #[rt::frame(m, "lazy", 86)]
-pub fn lazy<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn lazy<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ("app: before lazy import",))?;
     let lazy = rt::import(m, "lazy")?;
@@ -185,12 +182,12 @@ pub fn lazy<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             lazy.attr("app_is_main")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // app.py:93
 #[rt::frame(m, "main", 93, frame)]
-pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let inventory = build(m)?;
     shop(m, &inventory)?;
@@ -252,7 +249,7 @@ pub fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             .call1((m.global("Item")?.call1(("bad", 1, -1))?,))?;
         rt::builtins::print(py, (m.global("render")?.call1((&inventory,))?,))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// A subclass of a class from another module.
@@ -283,10 +280,10 @@ pub mod discounted {
         price: &Bound<'py, PyAny>,
         quantity: &Bound<'py, PyAny>,
         percent: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         rt::super_(__class__, slf)?.method1("__init__", (name, price, quantity))?;
         slf.set_attr("percent", percent)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // app.py:40

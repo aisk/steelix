@@ -84,11 +84,11 @@ pub mod item {
         name: &Bound<'py, PyAny>,
         price: &Bound<'py, PyAny>,
         qty: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
         slf.set_attr("price", price)?;
         slf.set_attr("qty", qty)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // inventory.py:10

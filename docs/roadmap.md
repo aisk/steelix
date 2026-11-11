@@ -403,7 +403,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] `rt::call!` 只有关键字参数（没有 `*`/`**`）时直接 vectorcall，关键字名字的 tuple 每个调用点建一次：约 208 ns 到 124 ns（§6）
 - [x] `for` 循环和推导式用 `rt::iter(&xs)?`，它在取后续元素之前检查信号，循环体里不再写 `py.check_signals()?;`，golden 净少约 180 行。`--traceback-lines` 时仍是 `xs.try_iter()?` 和循环体里的这一行（在把行号设回 `for` 行之前），让信号的异常和 CPython 一样报在循环体最后执行的语句上
 - [ ] `Function` 加 `#[pyclass(immutable_type)]`，让 CPython 的 `LOAD_ATTR` 方法特化对原生函数生效（Python 侧方法调用约 5 到 10 ns），暂不做
-- [ ] 没有返回值的函数返回 `PyResult<()>`，去掉 336 处函数末尾的 `Ok(rt::none(py))`（`rt::def!` 的包装要把 `()` 转成 None，成本中等）
+- [x] 没有返回值的函数返回 `PyResult<()>`（design §6"没有返回值的函数"）：普通的 `def` 里所有 `return` 都不带值或者是 `return None` 时，提前返回写 `return Ok(());`，结尾写 `Ok(())`，不再有 `Ok(rt::none(py))`，只为它写的 `let py = m.py();` 也消失。`rt::def!`/`rt::function!` 的写法不变，包装用 `rt::function::IntoReturn`（对 `()` 和 `Bound<'py, T>` 实现）把结果交给 Python。直接调用作为语句时不变，用到值时调用先作为语句执行，值是 `None`（`log(m, x)?; let y = rt::none(py);`）。`try`/`with` 闭包里的 `return` 用没有值的 `rt::Jump`（§9）。协程、生成器和 lambda 不算，只写 `return f(x)` 的函数也不算。原有用例的 1010 个 `def` 里有 261 个，原有的 golden（用例、项目和 logsum）里行尾的 `Ok(rt::none(..))` 从 428 处减到 131 处，`let py = m.py();` 从 712 处减到 649 处，净少 189 行。标准库 154 个模块转换的 7415 个函数里有 2450 个（33%），`Ok(rt::none(..))` 从 2359 处减到 308 处，`let py = m.py();` 少 416 处，生成的代码从 317897 行到 316234 行，`cargo check` 仍然没有错误和警告。变差的一种写法：装饰器表达式或默认值里用到这种调用的值时（只在总是抛异常的函数上有意义，`tests/cases/decorator_lines.py`），`rt::def!` 展开成逐条语句的块。新用例 `tests/cases/unit_functions.py`。需要 runtime 发新版本（新增 `rt::Jump` 和 `rt::function::IntoReturn`，兼容）
 
 ## 发布
 

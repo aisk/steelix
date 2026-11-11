@@ -321,9 +321,9 @@ pub mod manager {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("value", value)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // generators.py:75
@@ -381,9 +381,9 @@ pub mod bag {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         items: &Bound<'py, PyTuple>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("items", items)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // generators.py:125

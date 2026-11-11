@@ -27,7 +27,7 @@ pub fn show_warning<'py>(
     lineno: &Bound<'py, PyAny>,
     file: &Bound<'py, PyAny>,
     line: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -50,17 +50,14 @@ pub fn show_warning<'py>(
             ),
         )?,),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // frames_logging.py:34
 #[rt::frame(m, "warn_native", 34)]
-pub fn warn_native<'py>(
-    m: &rt::Module<'py>,
-    message: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn warn_native<'py>(m: &rt::Module<'py>, message: &Bound<'py, PyAny>) -> PyResult<()> {
     m.global("warnings")?.method1("warn", (message,))?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 /// Executes the body of `frames_logging.py` in the module `m`.

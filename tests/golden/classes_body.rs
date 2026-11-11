@@ -189,9 +189,9 @@ pub mod generic {
         m: &rt::Module<'py>,
         cls: &Bound<'py, PyAny>,
         kwargs: &Bound<'py, PyDict>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         cls.set_attr("created", true)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -236,9 +236,9 @@ pub mod new {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("value", value)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -347,11 +347,11 @@ pub mod uses {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         rt::super_(__class__, slf)?
             .attr("__setattr__")?
             .call1((name, value.mul(2)?))?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_body.py:131

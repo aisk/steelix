@@ -21,12 +21,11 @@ pub fn remember<'py>(m: &rt::Module<'py>, name: &Bound<'py, PyAny>) -> PyResult<
 
 // globals_assert.py:21
 #[rt::frame(m, "reset", 21)]
-pub fn reset<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn reset<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     m.set_global("counter", 0)?;
-    m.set_global("names", PyList::empty(py))?;
+    m.set_global("names", PyList::empty(m.py()))?;
     m.del_global("counter")?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // globals_assert.py:28
@@ -51,9 +50,9 @@ pub fn check<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<
 
 // globals_assert.py:36
 #[rt::frame(m, "define", 36)]
-pub fn define<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn define<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     m.set_global("late", "defined late")?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 /// Executes the body of `globals_assert.py` in the module `m`.

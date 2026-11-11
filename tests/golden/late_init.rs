@@ -150,22 +150,17 @@ pub mod tracked {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        rt::builtins::print(py, ("new", name))?;
-        Ok(rt::none(py))
+        rt::builtins::print(m.py(), ("new", name))?;
+        Ok(())
     }
 
     // late_init.py:11
     #[rt::frame(m, "Tracked.__del__", 11)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("del", slf.attr("name")?))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("del", slf.attr("name")?))?;
+        Ok(())
     }
 
     // late_init.py:14

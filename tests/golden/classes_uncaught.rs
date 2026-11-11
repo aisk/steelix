@@ -22,9 +22,9 @@ pub mod account {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         balance: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("balance", balance)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_uncaught.py:9

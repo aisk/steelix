@@ -101,8 +101,8 @@ pub fn replace<'py>(m: &rt::Module<'py>, r#fn: &Bound<'py, PyAny>) -> PyResult<B
 }
 
 // decorators.py:65
-pub fn gone<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    Ok(rt::none(m.py()))
+pub fn gone<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+    Ok(())
 }
 
 /// Executes the body of `decorators.py` in the module `m`.

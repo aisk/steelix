@@ -13,7 +13,7 @@ pub fn sizes<'py>(
     m: &rt::Module<'py>,
     args: &Bound<'py, PyTuple>,
     kwargs: &Bound<'py, PyDict>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -32,12 +32,12 @@ pub fn sizes<'py>(
             args.as_any().get_item(rt::slice(py, 1, py.None())?)?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // typed_receivers.py:13
 #[rt::frame(m, "containers", 13)]
-pub fn containers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn containers<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -98,17 +98,17 @@ pub fn containers<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 .rich_compare(rt::builtin(py, "int")?, CompareOp::Eq)?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // typed_receivers.py:28
 #[rt::frame(m, "lookup", 28)]
-pub fn lookup<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn lookup<'py>(m: &rt::Module<'py>, key: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, ([("a", 1)].into_py_dict(py)?.as_any().get_item("a")?,))?;
     rt::builtins::print(py, ([("a", 1)].into_py_dict(py)?.as_any().get_item(key)?,))?;
     rt::builtins::print(py, ("unreachable in CPython",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `typed_receivers.py` in the module `m`.

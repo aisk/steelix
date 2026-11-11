@@ -62,10 +62,7 @@ pub fn build<'py>(
 
 // displays.py:18
 #[rt::frame(m, "subscripts", 18)]
-pub fn subscripts<'py>(
-    m: &rt::Module<'py>,
-    items: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn subscripts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -93,12 +90,12 @@ pub fn subscripts<'py>(
     let grid = PyDict::new(py).into_any();
     grid.set_item(PyTuple::new(py, [1, 2])?, "cell")?;
     rt::builtins::print(py, (grid.get_item(PyTuple::new(py, [1, 2])?)?, &grid))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // displays.py:36
 #[rt::frame(m, "attributes", 36)]
-pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let ns = m.global("types")?.method0("SimpleNamespace")?;
     ns.set_attr("x", 1)?;
@@ -114,7 +111,7 @@ pub fn attributes<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             rt::str(py, "abc").method0("upper")?.method0("lower")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // displays.py:47

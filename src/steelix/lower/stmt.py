@@ -75,6 +75,12 @@ class StmtLowering(HandlingLowering, MatchLowering):
         self.markers = 0
         """Number of `frame.line(n)` emitted so far."""
 
+    @property
+    def unit(self) -> bool:
+        """Whether the fn being lowered returns `PyResult<()>` (design §6)."""
+        fn = self.ctx.function
+        return fn is not None and fn.unit
+
     # --- traceback lines ---
 
     def at_line(self, line: int) -> list[rs.Stmt]:
@@ -318,6 +324,9 @@ class StmtLowering(HandlingLowering, MatchLowering):
         return rs.Block(tuple(prelude + out))
 
     def return_value(self, value: ast.expr | None) -> rs.Expr:
+        """What the fn returns for `return value`, or at its end."""
+        if self.unit:
+            return rs.Call(rs.Path("Ok"), (rs.Tuple(()),))
         if value is None:
             return rs.Call(
                 rs.Path("Ok"), (rs.Call(rs.Path("rt::none"), (rs.Path(self.ctx.py()),)),)
@@ -325,6 +334,8 @@ class StmtLowering(HandlingLowering, MatchLowering):
         return self.exprs.value(value).result()
 
     def return_stmt(self, value: ast.expr | None) -> rs.Stmt:
+        if self.unit:
+            return self.return_jump(None)
         if not self.closures:
             return rs.Return(self.return_value(value))
         if value is None:

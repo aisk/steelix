@@ -10,10 +10,9 @@ use steelix_runtime::Attributes;
 
 // try_finally.py:6
 #[rt::frame(m, "log", 6)]
-pub fn log<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyTuple>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    rt::call!(rt::builtin(py, "print")?, *args)?;
-    Ok(rt::none(py))
+pub fn log<'py>(m: &rt::Module<'py>, args: &Bound<'py, PyTuple>) -> PyResult<()> {
+    rt::call!(rt::builtin(m.py(), "print")?, *args)?;
+    Ok(())
 }
 
 // try_finally.py:10
@@ -147,7 +146,7 @@ pub fn nested_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // try_finally.py:83
 #[rt::frame(m, "exception_in_finally", 83, frame)]
-pub fn exception_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn exception_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     {
         let result: PyResult<()> = {
@@ -175,12 +174,12 @@ pub fn exception_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
             Err(err) => return Err(err),
         }
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // try_finally.py:93
 #[rt::frame(m, "exception_state_in_finally", 93, frame)]
-pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match (|| -> PyResult<()> {
         let result: PyResult<()> = Err(frame.raise(PyValueError::new_err("pending")));
@@ -218,7 +217,7 @@ pub fn exception_state_in_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'p
         )?,
     )?;
     finally.resume()?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // try_finally.py:107

@@ -6,13 +6,12 @@ use steelix_runtime::Attributes;
 
 // drop_order.py:17
 #[rt::frame(m, "straight", 17)]
-pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let b = m.global("T")?.call1(("b",))?;
     let a = m.global("T")?.call1(("a",))?;
     let c = m.global("T")?.call1(("c",))?;
     rt::builtins::print(
-        py,
+        m.py(),
         (
             "straight",
             a.attr("name")?,
@@ -20,23 +19,22 @@ pub fn straight<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             c.attr("name")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // drop_order.py:24
 #[rt::frame(m, "reassigned", 24)]
-pub fn reassigned<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn reassigned<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<()> {
     let mut x = x.clone();
     let y = m.global("T")?.call1(("y",))?;
     x = m.global("T")?.call1(("x",))?;
-    rt::builtins::print(py, ("reassigned", x.attr("name")?, y.attr("name")?))?;
-    Ok(rt::none(py))
+    rt::builtins::print(m.py(), ("reassigned", x.attr("name")?, y.attr("name")?))?;
+    Ok(())
 }
 
 // drop_order.py:30
 #[rt::frame(m, "branches", 30)]
-pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     // `a` and `c` are assigned on every path of an `if` chain.
     rt::builtins::print(py, ("start",))?;
@@ -45,7 +43,7 @@ pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bou
     } else if n.eq(1)? {
         m.global("T")?.call1(("a-one",))?
     } else {
-        return Ok(rt::none(py));
+        return Ok(());
     };
     let b = m.global("T")?.call1(("b",))?;
     let c = if n.gt(2)? {
@@ -59,12 +57,12 @@ pub fn branches<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bou
         py,
         ("end", a.attr("name")?, b.attr("name")?, c.attr("name")?),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // drop_order.py:48
 #[rt::frame(m, "in_loop", 48)]
-pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let first = m.global("T")?.call1(("first",))?;
     let mut last: Option<Bound<'py, PyAny>> = None;
@@ -85,16 +83,12 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Boun
             after.attr("name")?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // drop_order.py:56
 #[rt::frame(m, "without_else", 56)]
-pub fn without_else<'py>(
-    m: &rt::Module<'py>,
-    n: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn without_else<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<()> {
     let head = m.global("T")?.call1(("head",))?;
     let mut maybe: Option<Bound<'py, PyAny>> = None;
     if n.is_truthy()? {
@@ -103,7 +97,7 @@ pub fn without_else<'py>(
     let tail = m.global("T")?.call1(("tail",))?;
     if n.is_truthy()? {
         rt::builtins::print(
-            py,
+            m.py(),
             (
                 "without else",
                 head.attr("name")?,
@@ -112,12 +106,12 @@ pub fn without_else<'py>(
             ),
         )?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // drop_order.py:65
 #[rt::frame(m, "in_try", 65, frame)]
-pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let number: Bound<'py, PyAny>;
     let value = match rt::builtins::int(py, (text,)) {
@@ -134,13 +128,12 @@ pub fn in_try<'py>(m: &rt::Module<'py>, text: &Bound<'py, PyAny>) -> PyResult<Bo
     };
     let extra = m.global("T")?.call1(("extra",))?;
     rt::builtins::print(py, ("try", value.attr("name")?, extra.attr("name")?))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // drop_order.py:76
 #[rt::frame(m, "crossing", 76)]
-pub fn crossing<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn crossing<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<()> {
     let b: Bound<'py, PyAny>;
     // `b` is declared before the chain that gives `a` its value.
     let a = if n.is_truthy()? {
@@ -149,8 +142,8 @@ pub fn crossing<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bou
         b = m.global("T")?.call1(("crossing b",))?;
         m.global("T")?.call1(("crossing a2",))?
     };
-    rt::builtins::print(py, ("crossing", a.attr("name")?))?;
-    Ok(rt::none(py))
+    rt::builtins::print(m.py(), ("crossing", a.attr("name")?))?;
+    Ok(())
 }
 
 pub mod t {
@@ -171,20 +164,16 @@ pub mod t {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // drop_order.py:13
     #[rt::frame(m, "T.__del__", 13)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("del", slf.attr("name")?))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("del", slf.attr("name")?))?;
+        Ok(())
     }
 }
 

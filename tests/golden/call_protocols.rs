@@ -16,7 +16,7 @@ pub fn show<'py>(
     function: &Bound<'py, PyAny>,
     args: &Bound<'py, PyTuple>,
     kwargs: &Bound<'py, PyDict>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     match (|| rt::builtins::print(py, (rt::call!(function, *args, **kwargs)?,)))() {
         Ok(_) => {}
@@ -26,7 +26,7 @@ pub fn show<'py>(
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // call_protocols.py:16
@@ -92,7 +92,7 @@ pub fn through<'py>(
 
 // call_protocols.py:153
 #[rt::frame(m, "catch", 153, frame)]
-pub fn catch<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn catch<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     match (|| -> PyResult<()> {
         Err(frame.raise(PyValueError::new_err((m
@@ -108,7 +108,7 @@ pub fn catch<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Err(err) => return Err(err),
     }
     rt::builtins::print(py, ("after",))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // Calls with keyword arguments (no `**`) through objects: the arguments are
@@ -184,9 +184,9 @@ pub mod box_ {
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
         extra: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("value", value.add(extra)?)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // call_protocols.py:85
@@ -279,13 +279,9 @@ pub mod noisy {
 
     // call_protocols.py:149
     #[rt::frame(m, "Noisy.__del__", 149)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("deleted",))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("deleted",))?;
+        Ok(())
     }
 }
 

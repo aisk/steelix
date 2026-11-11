@@ -494,7 +494,7 @@ pub fn run<'py>(
     m: &rt::Module<'py>,
     make: &Bound<'py, PyAny>,
     how: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(py, (make.attr("__name__")?, how))?;
     let g = make.call0()?;
@@ -546,24 +546,23 @@ pub fn run<'py>(
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_close.py:235
 #[rt::frame(m, "unraisable", 235)]
-pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn unraisable<'py>(m: &rt::Module<'py>, u: &Bound<'py, PyAny>) -> PyResult<()> {
     // CPython's message ends with the repr of the generator object, which a
     // delegate run in place does not have (design §12).
     rt::builtins::print(
-        py,
+        m.py(),
         (
             "  unraisable:",
             u.attr("err_msg")?.method1("split", (" <",))?.get_item(0)?,
             u.attr("exc_value")?.repr()?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // generator_close.py:281
@@ -666,7 +665,7 @@ pub mod throwable {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         args: &Bound<'py, PyTuple>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         let py = m.py();
         let list = PyList::empty(py);
         for a in rt::iter(args)? {

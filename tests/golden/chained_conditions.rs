@@ -15,7 +15,7 @@ pub fn check<'py>(
     a: &Bound<'py, PyAny>,
     b: &Bound<'py, PyAny>,
     d: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     if a.lt(b)? && {
         let rhs = f(m, &rt::int(py, 3))?;
@@ -57,7 +57,7 @@ pub fn check<'py>(
         py.check_signals()?;
     }
     rt::builtins::print(py, ("n", &n))?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `chained_conditions.py` in the module `m`.

@@ -4,11 +4,7 @@ use steelix_runtime as rt;
 
 // loop_else_jumps.py:4
 #[rt::frame(m, "skip_rows", 4)]
-pub fn skip_rows<'py>(
-    m: &rt::Module<'py>,
-    rows: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn skip_rows<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<()> {
     'outer: for row in rt::iter(rows)? {
         let row = row?;
         'for_else: {
@@ -20,17 +16,14 @@ pub fn skip_rows<'py>(
             }
             continue 'outer;
         }
-        rt::builtins::print(py, ("row with a negative cell", &row))?;
+        rt::builtins::print(m.py(), ("row with a negative cell", &row))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // loop_else_jumps.py:14
 #[rt::frame(m, "first_complete", 14)]
-pub fn first_complete<'py>(
-    m: &rt::Module<'py>,
-    rows: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+pub fn first_complete<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     'for_else: {
         for row in rt::iter(rows)? {
@@ -48,12 +41,12 @@ pub fn first_complete<'py>(
         }
         rt::builtins::print(py, ("none complete",))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // loop_else_jumps.py:26
 #[rt::frame(m, "countdown", 26)]
-pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     let mut n = n.clone();
     let mut i: Bound<'py, PyAny>;
@@ -75,12 +68,12 @@ pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bo
         rt::builtins::print(py, ("long", &n))?;
         py.check_signals()?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // loop_else_jumps.py:40
 #[rt::frame(m, "nested", 40)]
-pub fn nested<'py>(m: &rt::Module<'py>, groups: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn nested<'py>(m: &rt::Module<'py>, groups: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     'outer2: for group in rt::iter(groups)? {
         let group = group?;
@@ -104,7 +97,7 @@ pub fn nested<'py>(m: &rt::Module<'py>, groups: &Bound<'py, PyAny>) -> PyResult<
         }
         rt::builtins::print(py, ("done with", &group))?;
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `loop_else_jumps.py` in the module `m`.

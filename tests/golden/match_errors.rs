@@ -16,7 +16,7 @@ pub fn attempt<'py>(
     label: &Bound<'py, PyAny>,
     function: &Bound<'py, PyAny>,
     value: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     match (|| rt::builtins::print(py, (label, function.call1((value,))?)))() {
         Ok(_) => {}
@@ -39,7 +39,7 @@ pub fn attempt<'py>(
         }
         Err(err2) => return Err(err2),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // match_errors.py:35
@@ -216,12 +216,9 @@ pub mod not_strings {
 
     // match_errors.py:24
     #[rt::frame(m, "NotStrings.__init__", 24)]
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         slf.set_attr("x", 0)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -239,12 +236,9 @@ pub mod dup {
 
     // match_errors.py:31
     #[rt::frame(m, "Dup.__init__", 31)]
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         slf.set_attr("x", 1)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -298,10 +292,7 @@ pub mod bad_mapping {
 
     // match_errors.py:92
     #[rt::frame(m, "BadMapping.__iter__", 92, frame)]
-    pub fn __iter__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __iter__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         Err(frame.raise(PyRuntimeError::new_err("cannot iterate")))
     }
 
@@ -333,7 +324,7 @@ pub mod explodes {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         other: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         Err(frame.raise(PyValueError::new_err("no comparing")))
     }
 }

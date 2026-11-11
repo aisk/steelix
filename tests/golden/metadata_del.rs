@@ -19,11 +19,10 @@ pub fn f<'py>(
 
 // metadata_del.py:79
 #[rt::frame(m, "reader", 79)]
-pub fn reader<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn reader<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     m.global("started")?.method1("wait", (5,))?;
     rt::builtins::print(
-        py,
+        m.py(),
         (
             "reader sees",
             m.global("f")?.attr("__qualname__")?,
@@ -31,7 +30,7 @@ pub fn reader<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         ),
     )?;
     m.global("done")?.method0("set")?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 pub mod nasty {
@@ -52,20 +51,16 @@ pub mod nasty {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         what: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("what", what)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // metadata_del.py:12
     #[rt::frame(m, "Nasty.__del__", 12)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         rt::builtins::print(
-            py,
+            m.py(),
             (
                 "del",
                 slf.attr("what")?,
@@ -75,7 +70,7 @@ pub mod nasty {
                 m.global("f")?.attr("__defaults__")?,
             ),
         )?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 
@@ -92,20 +87,16 @@ pub mod nasty_name {
 
     // metadata_del.py:17
     #[rt::frame(m, "NastyName.__del__", 17)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         rt::builtins::print(
-            py,
+            m.py(),
             (
                 "del name reads",
                 m.global("f")?.attr("__name__")?,
                 m.global("g")?.attr("__name__")?,
             ),
         )?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 
@@ -122,15 +113,11 @@ pub mod slow {
 
     // metadata_del.py:69
     #[rt::frame(m, "Slow.__del__", 69)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         m.global("started")?.method0("set")?;
         m.global("done")?.method1("wait", (5,))?;
-        rt::builtins::print(py, ("slow del done",))?;
-        Ok(rt::none(py))
+        rt::builtins::print(m.py(), ("slow del done",))?;
+        Ok(())
     }
 }
 

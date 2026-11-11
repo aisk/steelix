@@ -6,7 +6,7 @@ use steelix_runtime::Attributes;
 
 // builtins_special.py:4
 #[rt::frame(m, "info", 4)]
-pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<()> {
     let py = m.py();
     rt::builtins::print(
         py,
@@ -51,7 +51,7 @@ pub fn info<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<Bound<'
             rt::builtins::max(py, (x,))?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `builtins_special.py` in the module `m`.

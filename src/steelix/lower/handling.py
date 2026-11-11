@@ -21,7 +21,8 @@ closure to `frame.with`, which implements the protocol.
 
 `return`, `break` and `continue` can not leave a closure, so a closure that
 contains them returns an `rt::Flow` saying what to do next, and the code
-after it does that (`Ok(rt::Flow::Break) => break,`).
+after it does that (`Ok(rt::Flow::Break) => break,`). In a function that
+returns `()` it is an `rt::Jump`, whose `Return` has no value.
 """
 
 from __future__ import annotations
@@ -66,8 +67,9 @@ class Lowered:
     call: rs.Expr
     """The closure (called, for a `try`)."""
     mode: str
-    """`unit` (`PyResult<()>`), `value` (it always returns: `PyResult<Bound>`)
-    or `flow` (`PyResult<rt::Flow>`)."""
+    """`unit` (`PyResult<()>`), `value` (it always returns: `PyResult<Bound>`,
+    or `PyResult<()>` in a function that returns `()`) or `flow`
+    (`PyResult<rt::Flow>`, there `PyResult<rt::Jump>`)."""
     jumps: set[str]
     next: bool
     """Whether it can end normally (continue after the statement)."""
@@ -85,9 +87,7 @@ def _err(expr: rs.Expr) -> rs.Return:
     return rs.Return(rs.Call(rs.Path("Err"), (expr,)))
 
 
-def _flow(variant: str, *args: rs.Expr) -> rs.Expr:
-    path = rs.Path(f"rt::Flow::{variant}")
-    return rs.Call(path, args) if args else path
+_UNIT_RETURN = rs.Call(rs.Path("Ok"), (rs.Path("rt::Jump::Return"),))
 
 
 class HandlingLowering:
@@ -95,12 +95,25 @@ class HandlingLowering:
 
     # --- jumps out of closures ---
 
-    def return_jump(self: StmtLowering, value: Value) -> rs.Stmt:
-        """`return value`, from the function or out of the closure."""
+    def flow(self: StmtLowering, variant: str, *args: rs.Expr) -> rs.Expr:
+        """`rt::Flow::Next` and the like, `rt::Jump::Next` in a function
+        that returns `()`."""
+        path = rs.Path(f"rt::{'Jump' if self.unit else 'Flow'}::{variant}")
+        return rs.Call(path, args) if args else path
+
+    def return_jump(self: StmtLowering, value: Value | None) -> rs.Stmt:
+        """`return value`, from the function or out of the closure. Without
+        a value in a function that returns `()`."""
+        assert (value is None) == self.unit
+        if value is None:
+            if not self.closures:
+                return rs.Return(_ok(rs.Tuple(())))
+            self.closures[-1].jumps.add("return")
+            return rs.Return(_ok(self.flow("Return")))
         if not self.closures:
             return rs.Return(value.result())
         self.closures[-1].jumps.add("return")
-        return rs.Return(_ok(_flow("Return", value.owned())))
+        return rs.Return(_ok(self.flow("Return", value.owned())))
 
     def leaves_closure(self: StmtLowering) -> bool:
         """Whether a `break` or `continue` of the innermost loop has to leave a closure."""
@@ -109,7 +122,7 @@ class HandlingLowering:
     def loop_jump(self: StmtLowering, kind: str) -> rs.Stmt:
         """`break` or `continue` out of the closure."""
         self.closures[-1].jumps.add(kind)
-        return rs.Return(_ok(_flow(kind.capitalize())))
+        return rs.Return(_ok(self.flow(kind.capitalize())))
 
     # --- closures ---
 
@@ -148,7 +161,7 @@ class HandlingLowering:
             stmts, tail = returns_as_tail(stmts)
             mode = "flow"
             if next_:
-                tail = _ok(_flow("Next"))
+                tail = _ok(self.flow("Next"))
         else:
             mode = "unit"
             if next_:
@@ -158,8 +171,8 @@ class HandlingLowering:
         lifetime = self.ctx.lifetime()
         result = {
             "unit": "()",
-            "value": f"Bound<{lifetime}, PyAny>",
-            "flow": f"rt::Flow<{lifetime}>",
+            "value": "()" if self.unit else f"Bound<{lifetime}, PyAny>",
+            "flow": "rt::Jump" if self.unit else f"rt::Flow<{lifetime}>",
         }[mode]
         body = rs.Closure((), rs.Block(tuple(stmts), tail), f"PyResult<{result}>")
         return Lowered(body, mode, set(jumps), next_)
@@ -195,23 +208,28 @@ class HandlingLowering:
             case "unit":
                 # The body always raises.
                 return [(pattern("()"), [rs.ExprStmt(rs.MacroCall("unreachable", ()))])]
+            case "value" if self.unit:
+                return [(pattern("()"), [self.return_jump(None)])]
             case "value":
                 value = self.ctx.binding("value")
                 jump = self.return_jump(Value(rs.Path(value), Kind.PLACE, temp=True))
                 return [(pattern(value), [jump])]
+        enum = "rt::Jump" if self.unit else "rt::Flow"
         arms: list[tuple[str, list[rs.Stmt]]] = []
         for kind in JUMPS:
             if kind not in lowered.jumps:
                 continue
-            if kind == "return":
+            if kind == "return" and self.unit:
+                arms.append((pattern(f"{enum}::Return"), [self.return_jump(None)]))
+            elif kind == "return":
                 value = self.ctx.binding("value")
                 jump = [self.return_jump(Value(rs.Path(value), Kind.PLACE, temp=True))]
-                arms.append((pattern(f"rt::Flow::Return({value})"), jump))
+                arms.append((pattern(f"{enum}::Return({value})"), jump))
             else:
-                arms.append((pattern(f"rt::Flow::{kind.capitalize()}"), self.jump(kind)))
+                arms.append((pattern(f"{enum}::{kind.capitalize()}"), self.jump(kind)))
         if lowered.next:
             covered = len(arms) == len(JUMPS)
-            arms.append((pattern("rt::Flow::Next" if covered else "_"), next_body))
+            arms.append((pattern(f"{enum}::Next" if covered else "_"), next_body))
         else:
             # `Next` never happens: the last jump covers it.
             last, body = arms[-1]
@@ -225,8 +243,12 @@ class HandlingLowering:
         if lowered.mode == "unit":
             # It always raises (or never ends).
             return [rs.ExprStmt(rs.Try(value)), rs.ExprStmt(rs.MacroCall("unreachable", ()))]
-        if lowered.mode == "value":
+        if lowered.mode == "value" and not self.unit:
             return [self.return_jump(Value(rs.Try(value), Kind.OWNED))]
+        if lowered.mode == "value" and not self.closures:
+            return [rs.Return(value)]
+        if lowered.mode == "value":
+            return [rs.ExprStmt(rs.Try(value)), self.return_jump(None)]
         arms = self.dispatch(lowered, [], wrap=False)
         rest = [(p, b) for p, b in arms if b]
         if len(rest) == 1 and len(arms) == 2 and arms[-1][0] == "_":
@@ -289,14 +311,27 @@ class HandlingLowering:
         async_outcome: str | None = None
         if expr is not None:
             body = stmt.body[0]
+            lifetime = self.ctx.lifetime()
+            ret = f"PyResult<Bound<{lifetime}, PyAny>>"
             with self.exprs.fresh() as inner:
-                scrutinee = self.exprs.value(expr).result()
+                value = self.exprs.value(expr)
+                scrutinee = value.result()
+                call = value.unit
+                if (
+                    isinstance(call, rs.Try)
+                    and isinstance(body, ast.Expr)
+                    and inner
+                    and inner[-1] == rs.ExprStmt(call)
+                ):
+                    # `try: f(x)` where `f` returns `()`: match on the call
+                    # itself, not on the `None` it stands for.
+                    inner.pop()
+                    scrutinee = call.expr
+                    ret = "PyResult<()>"
             items = self.flush_items()
             scrutinee, hoisted = self.hoist_builtins(scrutinee, inner)
             prelude = items + self.mark(statement_line(body), [*inner, rs.Return(scrutinee)])
             prelude += hoisted
-            lifetime = self.ctx.lifetime()
-            ret = f"PyResult<Bound<{lifetime}, PyAny>>"
             if _has_await(scrutinee) and (inner or _has_try(scrutinee)):
                 # `match async { .. }.await`: the type of `Ok(..)` must be
                 # spelled out, a `PyResult` returned by PyO3 or the runtime
@@ -321,6 +356,8 @@ class HandlingLowering:
                 scrutinee = rs.Call(rs.Path("Ok::<_, PyErr>"), scrutinee.args)
             handler_line = self.line
             ok_arms = self.expression_arms(stmt, body)
+            if ret == "PyResult<()>":
+                ok_arms = [("Ok(())", arm_body) for _, arm_body in ok_arms]
         else:
             region = Region(stmt, "body")
             closure, stmts = self.closure([region], lambda: list(self.block(stmt.body).stmts))
@@ -392,6 +429,8 @@ class HandlingLowering:
     ) -> list[tuple[str, list[rs.Stmt]]]:
         """The `Ok` arm of a `try` whose body is one expression."""
         match body:
+            case ast.Return() if self.unit:
+                return [("Ok(_)", [self.return_jump(None)])]
             case ast.Return():
                 value = self.ctx.binding("value")
                 result = Value(rs.Path(value), Kind.PLACE, temp=True)
@@ -636,7 +675,7 @@ class HandlingLowering:
             stmts = body + list(self.block(stmt.body).stmts)
             tail: rs.Expr | None
             if not diverges(stmts):
-                tail = _ok(_flow("Next") if closure.jumps else rs.Tuple(()))
+                tail = _ok(self.flow("Next") if closure.jumps else rs.Tuple(()))
             else:
                 stmts, tail = returns_as_tail(stmts)
                 if not closure.jumps:
@@ -675,6 +714,8 @@ def _unflow(stmt: rs.Stmt) -> rs.Stmt:
             ):
                 # `Ok(f()?)` is `f()`, as `Value.result` writes it.
                 return rs.Return(value.expr if isinstance(value, rs.Try) else _ok(value))
+            case rs.Return(value) if value == _UNIT_RETURN:
+                return rs.Return(_ok(rs.Tuple(())))
             case rs.Closure() | rs.AsyncBlock() | rs.Fn():
                 return node
             case rs.Block(stmts, tail):

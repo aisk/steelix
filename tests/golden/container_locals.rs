@@ -23,7 +23,7 @@ pub fn report<'py>(
     m: &rt::Module<'py>,
     f: &Bound<'py, PyAny>,
     args: &Bound<'py, PyTuple>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     match (|| rt::builtins::print(py, (f.attr("__name__")?, "->", rt::call!(f, *args)?)))() {
         Ok(_) => {}
@@ -41,7 +41,7 @@ pub fn report<'py>(
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // --- qualifying locals ---
@@ -528,7 +528,7 @@ pub fn attempt<'py>(
     m: &rt::Module<'py>,
     label: &Bound<'py, PyAny>,
     f: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let py = m.py();
     match (|| rt::builtins::print(py, (label, f.call0()?)))() {
         Ok(_) => {}
@@ -538,7 +538,7 @@ pub fn attempt<'py>(
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // container_locals.py:215
@@ -1000,7 +1000,7 @@ pub fn append_result<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 // container_locals.py:403
 #[rt::frame(m, "delete_missing", 403, frame)]
-pub fn delete_missing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn delete_missing<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let d = PyDict::new(py);
     let xs = PyList::empty(py).into_any();
@@ -1016,16 +1016,15 @@ pub fn delete_missing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         Err(err) => return Err(err),
     }
     xs.del_item(0)?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // container_locals.py:413
 #[rt::frame(m, "assign_missing", 413)]
-pub fn assign_missing<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
-    let xs = PyList::empty(py).into_any();
+pub fn assign_missing<'py>(m: &rt::Module<'py>) -> PyResult<()> {
+    let xs = PyList::empty(m.py()).into_any();
     xs.set_item(0, 1)?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // --- locals that are not typed ---
@@ -1155,9 +1154,9 @@ pub fn rebound_by_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>
     let xs = rt::Cell::new(py, "xs", PyList::empty(py))?;
     // container_locals.py:488
     #[rt::frame(m, "rebound_by_nested.<locals>.replace", 488)]
-    fn replace<'py>(m: &rt::Module<'py>, xs: &rt::Cell<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn replace<'py>(m: &rt::Module<'py>, xs: &rt::Cell<'py>) -> PyResult<()> {
         xs.set(m.global("Appender")?.call0()?)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
     let replace = rt::function!(frame, replace[&xs]())?;
     xs.get()?.method1("append", (1,))?;
@@ -1362,7 +1361,7 @@ pub async fn generator<'py>(
 
 // container_locals.py:606
 #[rt::frame(m, "drive", 606, frame)]
-pub fn drive<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn drive<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     let r#gen = m.global("generator")?.call1((3,))?;
     rt::builtins::print(
@@ -1422,7 +1421,7 @@ pub fn drive<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             )?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // container_locals.py:616
@@ -1520,7 +1519,7 @@ pub fn lambdas_and_defaults<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
 
 // container_locals.py:723
 #[rt::frame(m, "set_key_in_set", 723, frame)]
-pub fn set_key_in_set<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn set_key_in_set<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     let py = m.py();
     // `in` looks an unhashable set up as a frozenset, `PySet_Contains` does not.
     let s = PySet::new(
@@ -1555,7 +1554,7 @@ pub fn set_key_in_set<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         }
         Err(err) => return Err(err),
     }
-    Ok(rt::none(py))
+    Ok(())
 }
 
 // container_locals.py:735
@@ -1592,9 +1591,9 @@ pub mod loud {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("name", name)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // container_locals.py:15
@@ -1608,13 +1607,9 @@ pub mod loud {
 
     // container_locals.py:18
     #[rt::frame(m, "Loud.__del__", 18)]
-    pub fn __del__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("del", slf.attr("name")?))?;
-        Ok(rt::none(py))
+    pub fn __del__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("del", slf.attr("name")?))?;
+        Ok(())
     }
 }
 
@@ -1637,13 +1632,12 @@ pub mod appender {
         __class__: &rt::Cell<'py>,
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
-        rt::builtins::print(py, ("Appender.append", x))?;
+    ) -> PyResult<()> {
+        rt::builtins::print(m.py(), ("Appender.append", x))?;
         rt::super_(__class__, slf)?
             .attr("append")?
             .call1((x.mul(2)?,))?;
-        Ok(rt::none(py))
+        Ok(())
     }
 }
 

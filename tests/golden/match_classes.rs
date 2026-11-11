@@ -199,10 +199,10 @@ pub mod point {
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
         slf.set_attr("y", y)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 
@@ -282,12 +282,9 @@ pub mod missing {
 
     // match_classes.py:152
     #[rt::frame(m, "Missing.__init__", 152)]
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         slf.set_attr("a", 1)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 }
 

@@ -69,7 +69,7 @@ pub fn dump<'py>(
     default: &Bound<'py, PyAny>,
     sort_keys: &Bound<'py, PyAny>,
     kw: &Bound<'py, PyDict>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<()> {
     let mut cls = cls.clone();
     // cached encoder
     let iterable = if !skipkeys.is_truthy()?
@@ -109,7 +109,7 @@ pub fn dump<'py>(
         let chunk = chunk?;
         fp.method1("write", (&chunk,))?;
     }
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 // json/__init__.py:188

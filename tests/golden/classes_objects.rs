@@ -29,10 +29,10 @@ pub mod point {
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
         slf.set_attr("y", y)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_objects.py:13
@@ -91,9 +91,9 @@ pub mod slots {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         a: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("a", a)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // classes_objects.py:28
@@ -134,11 +134,10 @@ pub mod tree {
         slf: &Bound<'py, PyAny>,
         value: &Bound<'py, PyAny>,
         children: &Bound<'py, PyTuple>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let py = m.py();
+    ) -> PyResult<()> {
         slf.set_attr("value", value)?;
-        slf.set_attr("children", rt::builtins::list(py, (children,))?)?;
-        Ok(rt::none(py))
+        slf.set_attr("children", rt::builtins::list(m.py(), (children,))?)?;
+        Ok(())
     }
 
     // classes_objects.py:37

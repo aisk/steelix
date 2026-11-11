@@ -12,10 +12,10 @@ pub fn run<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'p
 
 // ns/tool.py:9
 #[rt::frame(m, "crash", 9)]
-pub fn crash<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn crash<'py>(m: &rt::Module<'py>) -> PyResult<()> {
     m.global("helper")?
         .method1("fail", ("from the namespace package",))?;
-    Ok(rt::none(m.py()))
+    Ok(())
 }
 
 /// Executes the body of `ns/tool.py` in the module `m`.

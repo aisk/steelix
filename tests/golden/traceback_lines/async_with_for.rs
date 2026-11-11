@@ -487,12 +487,12 @@ pub mod resource {
         slf: &Bound<'py, PyAny>,
         name: &Bound<'py, PyAny>,
         suppress: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         frame.line(9);
         slf.set_attr("name", name)?;
         frame.line(10);
         slf.set_attr("suppress", suppress)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // async_with_for.py:12
@@ -560,10 +560,10 @@ pub mod countdown {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         n: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         frame.line(25);
         slf.set_attr("n", n)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // async_with_for.py:27
@@ -617,10 +617,7 @@ pub mod sync_stop {
 
     // async_with_for.py:42
     #[rt::frame(m, "SyncStop.__anext__", 42, frame)]
-    pub fn __anext__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __anext__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         frame.line(43);
         Err(frame.raise(PyStopAsyncIteration::new_err(())))
     }
@@ -813,10 +810,7 @@ pub mod pairs {
 
     // async_with_for.py:155
     #[rt::frame(m, "Pairs.__init__", 155, frame)]
-    pub fn __init__<'py>(
-        m: &rt::Module<'py>,
-        slf: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    pub fn __init__<'py>(m: &rt::Module<'py>, slf: &Bound<'py, PyAny>) -> PyResult<()> {
         let py = m.py();
         frame.line(156);
         slf.set_attr(
@@ -829,7 +823,7 @@ pub mod pairs {
                 ],
             )?,
         )?;
-        Ok(rt::none(py))
+        Ok(())
     }
 
     // async_with_for.py:158

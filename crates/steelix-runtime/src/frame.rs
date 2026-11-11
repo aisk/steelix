@@ -733,6 +733,16 @@ pub enum Flow<'py> {
     Return(Bound<'py, PyAny>),
 }
 
+/// [`Flow`] in a function that returns `()`, where `return` has no value.
+#[derive(Default)]
+pub enum Jump {
+    #[default]
+    Next,
+    Break,
+    Continue,
+    Return,
+}
+
 /// The exception of an `except` block, from [`Frame::catch`]: used like the
 /// `Bound` it dereferences to, and the exception being handled (see
 /// [`Handling`]) until it is dropped at the end of the block.

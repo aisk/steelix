@@ -723,7 +723,7 @@ pub mod json_encoder {
         indent: &Bound<'py, PyAny>,
         separators: &Bound<'py, PyAny>,
         default: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("skipkeys", skipkeys)?;
         slf.set_attr("ensure_ascii", ensure_ascii)?;
         slf.set_attr("check_circular", check_circular)?;
@@ -740,7 +740,7 @@ pub mod json_encoder {
         if !default.is_none() {
             slf.set_attr("default", default)?;
         }
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // json/encoder.py:166
@@ -766,7 +766,7 @@ pub mod json_encoder {
         m: &rt::Module<'py>,
         slf: &Bound<'py, PyAny>,
         o: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         Err(frame.raise(PyTypeError::new_err((rt::fstring(
             m.py(),
             (

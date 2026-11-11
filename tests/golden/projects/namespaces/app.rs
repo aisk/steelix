@@ -21,14 +21,10 @@ pub fn relative<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<
 
 // app.py:16
 #[rt::frame(m, "describe", 16)]
-pub fn describe<'py>(
-    m: &rt::Module<'py>,
-    module: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let py = m.py();
+pub fn describe<'py>(m: &rt::Module<'py>, module: &Bound<'py, PyAny>) -> PyResult<()> {
     let spec = module.attr("__spec__")?;
     rt::builtins::print(
-        py,
+        m.py(),
         (
             module.attr("__name__")?,
             module.attr("__package__")?,
@@ -36,7 +32,7 @@ pub fn describe<'py>(
             relative(m, &module.attr("__file__")?)?,
         ),
     )?;
-    Ok(rt::none(py))
+    Ok(())
 }
 
 /// Executes the body of `app.py` in the module `m`.

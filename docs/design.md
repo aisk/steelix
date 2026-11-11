@@ -169,7 +169,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
 - 所有 Python 值默认都是 `Bound<'py, PyAny>`，运算直接用 PyO3 的 `add`、`lt`、`get_item`、`call` 等方法
 - 名字写在源码里的属性和方法（`o.x`、`o.x = v`、`o.m(a)`）用 runtime 的扩展 trait `rt::Attributes`（M11）：`o.attr("x")?`、`o.set_attr("x", v)?`、`o.del_attr("x")?`、`o.method0("m")?`、`o.method1("m", (a,))?`。它们就是 PyO3 的 `getattr`、`setattr`、`delattr`、`call_method0`、`call_method1`，区别只在名字必须是 `'static` 的字面量，runtime 为每个名字只创建一次驻留（interned）的 Python 字符串（第 6 节"调用的开销"）。用到它们的模块多一行 `use steelix_runtime::Attributes;`。trait 对所有的 `Bound<'py, T>` 实现（M11a），手写代码里的 `Bound<PyDict>`、`Bound<PyTuple>`、`#[pyclass]` 的值不用先 `.as_any()`，`Borrowed` 通过 `Deref` 也能用。名字在运行时才知道的（手写的代码里）照常用 PyO3 的方法
 - 函数和模块体的 fn 带 `#[rt::frame(m, "qualname", 行号)]` 属性，异常的 traceback 因此有原生函数的帧，函数名和 Python 一样，行号是 `def` 所在的行。函数体用到帧时（`raise`、`except` 等）属性多一个参数 `frame`，它就是函数体里那个变量的名字。`--traceback-lines` 在可能出错的语句前加 `frame.line(N);`，行号精确到语句（见第 9 节）
-- 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
+- 函数体是普通的 Rust fn，第一个参数是模块上下文 `m: &rt::Module<'py>`，Python 参数用 `&Bound`。返回 `PyResult<Bound<'py, PyAny>>`，从不返回值的函数（只有不带值的 `return`、`return None` 或者执行到末尾）返回 `PyResult<()>`，结尾是 `Ok(())`（第 6 节"没有返回值的函数"）。`m.py()` 给出 `Python<'py>`，函数体里用到不止一次时开头写 `let py = m.py();`，只用一次时就地写 `m.py()`
 - 模块体生成 `exec_module(m)`，只依赖传入的模块上下文，与输出模式无关
 - 模块级变量的读写走 globals 字典：`m.global("LIMIT")?` 先查 globals 再查 builtins，找不到抛 `NameError`；写入用 `m.set_global("LIMIT", 20)?`。模块里没有绑定的名字视为 builtin，常用的 builtin 只用位置参数调用时写成 `rt::builtins::print(py, (..))?`、`rt::builtins::max(py, (..))?`，`len(x)` 等少数几个直接写成 PyO3 方法（见第 8 节），其余用 `rt::builtin(py, "vars")?`
 - 比较在条件里用 `lt` 等返回 bool 的方法，需要值时用 `rich_compare(.., CompareOp::Lt)`
@@ -207,7 +207,7 @@ Python 局部变量的作用域是整个函数，Rust 的 `let` 是块作用域�
   - 可能重复赋值（另做一遍"可能已赋值"分析，循环取不动点）时才加 `mut`，与 rustc 的判断一致，不产生 `unused_mut`
   - 被重新赋值的参数在开头遮蔽成 `let mut n = n.clone();`
 - 自行做定值分析，规则与 rustc 一致或更保守（条件一律视为不透明，`while True` 没有 `break` 时之后不可达）。能确定已赋值的变量用 `Bound`，不能确定的用 `Option<Bound>`：声明为 `let mut x: Option<Bound<'py, PyAny>> = None;`，赋值写 `x = Some(..)`，读取写 `rt::local(&x, "x")?`，未赋值时抛和 CPython 一样的 `UnboundLocalError`
-- 不可达的语句（`return`、`break`、`continue` 之后，没有 `break` 的 `while True` 之后）直接丢弃，函数末尾可达时补 `Ok(rt::none(py))`。模块级代码也做同样的可达性分析，避免 rustc 报 unreachable 警告
+- 不可达的语句（`return`、`break`、`continue` 之后，没有 `break` 的 `while True` 之后）直接丢弃，函数末尾可达时补 `Ok(rt::none(py))`（没有返回值的函数是 `Ok(())`，§6）。模块级代码也做同样的可达性分析，避免 rustc 报 unreachable 警告
 - 定值分析覆盖 `for`/`while`（在循环头取不动点）、`break`/`continue`、循环 `else`、解包赋值、增量赋值（先读后写）、`import`（绑定局部变量）和 `del`
 - `del x` 让变量变成未赋值状态，所以被 `del` 的局部变量（包括参数）一律是 `Option`。删除时能确定已赋值就写 `x = None;`，否则写 `rt::del_local(&mut x, "x")?;`，未赋值时抛 `UnboundLocalError`。被 `del` 的参数在开头遮蔽成 `let mut a: Option<..> = Some(a.clone());`
 - `Option` 变量如果第一次出现是顶层赋值，也在那里声明：`let mut x = Some(..);`
@@ -302,6 +302,43 @@ greet(m, &rt::str(py, "Bob"), &rt::str(py, "Hello"), &m.default("greet", "punct"
 - 省略的参数如果默认值是不可变的字面量（`None`、bool、数字、字符串、bytes），并且模块里没有给 `__defaults__`/`__kwdefaults__` 赋值（也没有以字符串形式写出这两个名字，例如 `setattr`），直接在调用处写成字面量
 - 其余默认值用 `m.default("greet", "punct")?` 在调用时从函数对象读取，所以给 `__defaults__`/`__kwdefaults__` 赋值后直接调用也能看到新值，可变默认参数在直接调用和经过 Python 的调用之间共享
 - 多出来的位置参数和关键字参数在调用处构造成 `PyTuple`/`PyDict` 传给 `*args`/`**kwargs`
+
+### 没有返回值的函数
+
+普通的 `def`（不是协程和生成器）里所有的 `return` 都不带值或者写 `return None` 时，Rust fn 返回 `PyResult<()>`：提前返回是 `return Ok(());`，结尾是 `Ok(())`，不再有 `Ok(rt::none(py))`，只为它而写的 `let py = m.py();` 也跟着消失。判断只看语法（`frontend/scope.py` 的 `returns_unit`，不进嵌套的函数和类），模块函数、方法、嵌套函数都一样。`__init__`、setter、`__del__`、只打印或者只改属性的函数基本都属于这一类。
+
+```rust
+// def log(x):
+//     if not x:
+//         return
+//     print(x)
+#[rt::frame(m, "log", 1)]
+pub fn log<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>) -> PyResult<()> {
+    if !x.is_truthy()? {
+        return Ok(());
+    }
+    rt::builtins::print(m.py(), (x,))?;
+    Ok(())
+}
+```
+
+- Python 一侧看到的仍然是 `None`。`rt::def!` 和 `rt::function!` 的写法不变，宏生成的包装用 trait `rt::function::IntoReturn` 把 Rust fn 的结果交给 Python，它对 `Bound<'py, T>` 是对象本身，对 `()` 是 `None`。方法、嵌套函数、装饰器、`map(f, ..)` 这样的回调都经过函数对象，所以只有签名变了
+- 直接调用（上一节）作为语句时写法不变：`log(m, &x)?;`。用到它的值时，调用先作为一条语句执行，值就是 `None`，求值顺序由 §8 的 prelude 机制保证（排在它前面、可能有副作用的操作数先存进临时变量）
+
+  ```rust
+  // y = log(x)
+  log(m, x)?;
+  let y = rt::none(py);
+  // return [value(1), log(x), value(2)]
+  let value2 = value(m, &rt::int(py, 1))?;
+  log(m, x)?;
+  Ok(PyList::new(py, [&value2, &rt::none(py), &value(m, &rt::int(py, 2))?])?.into_any())
+  ```
+
+  条件里的值直接是 `false`（`if log(x):` 是 `log(m, x)?; if false { .. }`）。`try` 体只有这样一个调用时仍然直接 `match log(m, x) { Ok(()) => {} .. }`（§9 的 A 形式）
+- 只在 `return f(x)` 里返回另一个没有返回值的函数的结果的函数不算（它写了要返回的值），生成 `f(m, x)?; Ok(rt::none(py))`。lambda 的函数体是表达式，也不算。协程和生成器的 `return` 是 `StopIteration.value`，Rust fn 是 `async fn`，保持返回 `Bound`
+- `try` 和 `with` 的闭包里的 `return` 用没有值的 `rt::Jump`（§9）
+- 用到这种调用的值的装饰器表达式和默认值（`@(fails("x"))`，只在总是抛异常的函数上有意义）需要先执行语句，`rt::def!` 展开成一个块（下面的装饰器一节），比以前长
 
 ### 调用的开销（M11）
 
@@ -1020,6 +1057,7 @@ match (|| -> PyResult<()> {
 - 闭包里没有会被 `match` 接住的东西（没有 `?`，结果只是最后的 `Ok`/`Err`，例如 `try: raise E`）时不生成闭包：前面的语句直接放在 `match` 之前，`match` 的是结果本身。闭包里有 `let` 时写成 `let result: PyResult<()> = { .. }; match result { .. }`，让这些变量在 handler 执行前离开作用域（clippy 的 `redundant_closure_call`、`blocks_in_conditions`）
 - 函数和闭包最后的 `return x;` 写成尾表达式 `x`，最后的 `if`/`match` 每个分支都 `return` 时整体变成表达式（clippy 的 `needless_return`，`lower/rustflow.py` 的 `returns_as_tail`）
 - 闭包的返回类型按块里的跳转决定：没有跳转是 `PyResult<()>`；只有 `return` 并且结尾不可达时直接返回值，写 `return Ok(..)`；其余是 `PyResult<rt::Flow<'py>>`，`Flow` 有 `Next`、`Break`、`Continue`、`Return(value)`。外面按 `Flow` 分派，只有一种跳转时写成 `if let rt::Flow::Return(value) = ..? { return Ok(value); }`，否则写 `match`
+- 没有返回值的函数（§6，Rust fn 返回 `PyResult<()>`）里 `return` 没有值可带，闭包返回 `PyResult<rt::Jump>`，`Jump` 是没有值的 `Flow`：`Next`、`Break`、`Continue`、`Return`。`return` 写成 `return Ok(rt::Jump::Return);`，外面是 `if let rt::Jump::Return = ..? { return Ok(()); }`。只有 `return` 并且结尾不可达的闭包是 `PyResult<()>`，外面直接 `return finally.resume();`。模块代码和类体里没有 `return`，仍然用 `Flow`
 - handler 的 `let e = frame.catch(err);` 把这一帧补进 traceback，得到 `rt::Caught`：它 deref 成异常对象（`&Bound`），也实现了 `IntoPyObject`、`IntoException`，所以 `e` 和别的局部变量一样用；同时它在块结束前是正在处理的异常（内部是一个 `rt::Handling`）。不用 `as` 时写 `let _caught = frame.catch(err);`。handler 只有 `pass`、赋值字面量这类不会调用 Python 代码的语句时省略这一行
 - 异常对象由 `match` 的 `err` 持有，离开 handler（包括 `continue`、`break`）时释放，和 CPython 一样，`__del__` 和参数的 weakref 在下一条语句之前生效。`Frame` 为了不重复添加 traceback 条目，要记住哪个异常已经有这一帧的条目（在这里 `raise` 的、重新抛出的），M11a 之前它持有这个异常，不经过 `frame.catch` 的 handler（`pass`、只有 `continue`）接住之后异常要等函数返回才释放。现在只记地址：异常的地址，和当时它的 traceback 第一项的帧（这一帧，或者裸 `raise` 时正在处理它的那一帧，都还在运行）。异常释放之后新的异常可能用同一个地址，但它是从被调用的函数来的，traceback 的第一项是别的帧，不会被当成已经有条目（`tests/cases/handler_release.py`）
 - `rt::Caught` 里的 `rt::Handling` 是 RAII guard：创建时用 `PyErr_GetHandledException`/`PyErr_SetHandledException` 保存并设置正在处理的异常，`Drop` 时恢复。所以 handler 里 `sys.exception()`、`logging.exception()`、`traceback.print_exc()`、新异常的 `__context__`、辅助函数里的裸 `raise` 都和 CPython 一样，从 `?`、`return`、`break`、panic 离开时也会恢复
@@ -1091,10 +1129,10 @@ pub mod point {
         slf: &Bound<'py, PyAny>,
         x: &Bound<'py, PyAny>,
         y: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<()> {
         slf.set_attr("x", x)?;
         slf.set_attr("y", y)?;
-        Ok(rt::none(m.py()))
+        Ok(())
     }
 
     // point.py:19
@@ -1491,7 +1529,7 @@ CPython 3.14 把模块里所有的注解编译成一个 `__annotate__` 函数，
 
 保留为 Python 的 `def` 和原生函数的接口相同：都是 globals 里的一个名字，调用方都经过它。所以在 steelix 支持对应的语法之前，也可以手工把它改写成 Rust，步骤是
 
-1. 在模块文件里写一个 `pub fn`，签名用适配层的约定：`fn name<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>, ..) -> PyResult<Bound<'py, PyAny>>`，`*args` 是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`（照着同一个文件里生成的原生函数写）。函数体可以先照抄 steelix 对类似代码的生成方式，也可以直接按第 15 节写原生逻辑
+1. 在模块文件里写一个 `pub fn`，签名用适配层的约定：`fn name<'py>(m: &rt::Module<'py>, x: &Bound<'py, PyAny>, ..) -> PyResult<Bound<'py, PyAny>>`（从不返回值的函数可以写 `PyResult<()>`，§6），`*args` 是 `&Bound<'py, PyTuple>`，`**kwargs` 是 `&Bound<'py, PyDict>`（照着同一个文件里生成的原生函数写）。函数体可以先照抄 steelix 对类似代码的生成方式，也可以直接按第 15 节写原生逻辑
 2. 在 `exec_module` 里原来的位置，把 `rt::exec_python!(..)?;` 换成 `rt::def!(m, name(x, y = ..))?;`，签名写 Python 的参数列表，有默认值的参数用 `rt::def!` 的写法（同样照着生成的例子）。装饰器写在名字前面，`rt::def!(m, @functools.cache name(x))?`（§6，见 `tests/golden/decorators.rs`）
 3. 删掉 raw string 里的 Python 源码和文件开头模块文档里对应的一行，跑端到端测试
 
@@ -1556,7 +1594,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 
 ### 转换放在哪里
 
-生成的函数本身就是面向 Python 的适配层。它的签名 `(m: &rt::Module<'py>, x: &Bound<'py, PyAny>, ..) -> PyResult<Bound<'py, PyAny>>` 是一个契约，有两类调用方依赖它：`rt::def!` 注册的函数对象（Python 代码、key 函数、装饰器都经过它调用），以及生成代码里的直接调用。改写时不改这个签名，而是
+生成的函数本身就是面向 Python 的适配层。它的签名 `(m: &rt::Module<'py>, x: &Bound<'py, PyAny>, ..) -> PyResult<Bound<'py, PyAny>>`（没有返回值的函数是 `PyResult<()>`，§6）是一个契约，有两类调用方依赖它：`rt::def!` 注册的函数对象（Python 代码、key 函数、装饰器都经过它调用），以及生成代码里的直接调用。改写时不改这个签名，而是
 
 1. 把逻辑写成一个新的普通 Rust 函数，参数和返回值用原生类型，不出现 `Bound`、`Python`、`PyResult`
 2. 生成的同名函数只留下类型转换：用 `extract` 把参数转成原生类型，调用新函数，再用 `into_bound_py_any`、`PyDict::set_item` 等把结果转回 Python 对象
