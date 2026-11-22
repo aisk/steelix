@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from steelix.emit.output import write_generated
 from steelix.frontend.parse import ParsedModule
 from steelix.lower.module import LoweredModule, ModuleRole, lower_module
 from steelix.lower.names import Renamer, module_ident
@@ -135,27 +136,41 @@ def render(lowered: LoweredModule) -> str:
     return rustfmt(print_file(lowered.file))
 
 
-def emit_crate(parsed: ParsedModule, out_dir: Path, options: CrateOptions) -> LoweredModule:
-    """Write the crate; the result tells which statements stayed Python."""
+def emit_crate(
+    parsed: ParsedModule, out_dir: Path, options: CrateOptions, *, overwrite: bool = False
+) -> LoweredModule:
+    """Write the crate; the result tells which statements stayed Python.
+
+    Files changed since an earlier run wrote them are not overwritten
+    (`ModifiedFilesError`) unless `overwrite` (see `emit.output`)."""
+    files, lowered = render_crate(parsed, out_dir, options)
+    write_generated(out_dir, files, overwrite=overwrite)
+    return lowered
+
+
+def render_crate(
+    parsed: ParsedModule, out_dir: Path, options: CrateOptions
+) -> tuple[dict[str, str], LoweredModule]:
+    """The files of the crate for one module (by path relative to the crate
+    directory `out_dir`), and the lowered module."""
     lowered = lower_module(
         parsed, fallback=options.fallback, traceback_lines=options.traceback_lines
     )
-    module_rs = render(lowered)
     rust_mod = rust_module_name(parsed.name)
-    src = out_dir / "src"
-    src.mkdir(parents=True, exist_ok=True)
-    (out_dir / "Cargo.toml").write_text(cargo_toml(parsed.name, options), encoding="utf-8")
-    (out_dir / "rustfmt.toml").write_text(config_text(), encoding="utf-8")
-    (src / f"{rust_mod.removeprefix('r#')}.rs").write_text(module_rs, encoding="utf-8")
+    files = {
+        "Cargo.toml": cargo_toml(parsed.name, options),
+        "rustfmt.toml": config_text(),
+        f"src/{rust_mod.removeprefix('r#')}.rs": render(lowered),
+    }
     if options.mode is Mode.BIN:
         path = parsed.path or Path(parsed.filename)
         project = Path(os.path.dirname(os.path.realpath(path)))
-        (out_dir / "build.rs").write_text(rustfmt(build_rs(project)), encoding="utf-8")
-        (src / "main.rs").write_text(rustfmt(main_rs(parsed, rust_mod)), encoding="utf-8")
+        files["build.rs"] = rustfmt(build_rs(project_location(project, out_dir)))
+        files["src/main.rs"] = rustfmt(main_rs(parsed, rust_mod))
     else:
-        (out_dir / "build.rs").write_text(rustfmt(EXT_BUILD_RS), encoding="utf-8")
-        (src / "lib.rs").write_text(rustfmt(lib_rs(parsed, rust_mod)), encoding="utf-8")
-    return lowered
+        files["build.rs"] = rustfmt(EXT_BUILD_RS)
+        files["src/lib.rs"] = rustfmt(lib_rs(parsed, rust_mod))
+    return files, lowered
 
 
 # Names a module of the project must not take in the Rust module that
@@ -260,22 +275,38 @@ def _sibling_names(siblings: list[SourceModule], reserved: frozenset[str]) -> di
 
 
 def emit_project(
-    project: Project, out_dir: Path, options: CrateOptions, *, name: str | None = None
+    project: Project,
+    out_dir: Path,
+    options: CrateOptions,
+    *,
+    name: str | None = None,
+    overwrite: bool = False,
 ) -> list[LoweredModule]:
     """Write the crate of a project: one Rust module per Python module.
 
     A project without other modules is written like a single module
     (`emit_crate`). `name` is the crate's (and executable's) name, by default
     the program's (`project_name`). Returns the lowered modules, the main
-    module first.
+    module first. Files changed since an earlier run wrote them are not
+    overwritten (`ModifiedFilesError`) unless `overwrite`.
     """
+    files, lowered = render_project(project, out_dir, options, name=name)
+    write_generated(out_dir, files, overwrite=overwrite)
+    return lowered
+
+
+def render_project(
+    project: Project, out_dir: Path, options: CrateOptions, *, name: str | None = None
+) -> tuple[dict[str, str], list[LoweredModule]]:
+    """The files of the crate of a project (by path relative to the crate
+    directory `out_dir`), and the lowered modules (see `emit_project`)."""
     if not project.modules and not project.run_module:
         parsed = project.parsed[project.main.relpath]
-        return [emit_crate(parsed, out_dir, options)]
+        files, lowered = render_crate(parsed, out_dir, options)
+        return files, [lowered]
     layout = rust_layout(project)
     patches = cross_module_patches(project)
-    src = out_dir / "src"
-    src.mkdir(parents=True, exist_ok=True)
+    files: dict[str, str] = {}
     lowered_modules: list[LoweredModule] = []
     for source in project.sources():
         rust = layout[source.relpath]
@@ -297,26 +328,20 @@ def emit_project(
             role=role,
             traceback_lines=options.traceback_lines,
         )
-        target = src / rust.file
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(render(lowered), encoding="utf-8")
+        files[f"src/{rust.file}"] = render(lowered)
         lowered_modules.append(lowered)
     for rust in layout.values():
         if rust.namespace:
-            target = src / rust.file
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(namespace_mod_rs(rust), encoding="utf-8")
-    (out_dir / "Cargo.toml").write_text(
-        cargo_toml(name or project_name(project), options), encoding="utf-8"
-    )
-    (out_dir / "rustfmt.toml").write_text(config_text(), encoding="utf-8")
+            files[f"src/{rust.file}"] = namespace_mod_rs(rust)
+    files["Cargo.toml"] = cargo_toml(name or project_name(project), options)
+    files["rustfmt.toml"] = config_text()
     if options.mode is Mode.BIN:
-        (out_dir / "build.rs").write_text(rustfmt(build_rs(project.root)), encoding="utf-8")
-        (src / "main.rs").write_text(rustfmt(project_main_rs(project, layout)), encoding="utf-8")
+        files["build.rs"] = rustfmt(build_rs(project_location(project.root, out_dir)))
+        files["src/main.rs"] = rustfmt(project_main_rs(project, layout))
     else:
-        (out_dir / "build.rs").write_text(rustfmt(EXT_BUILD_RS), encoding="utf-8")
-        (src / "lib.rs").write_text(rustfmt(project_lib_rs(project, layout)), encoding="utf-8")
-    return lowered_modules
+        files["build.rs"] = rustfmt(EXT_BUILD_RS)
+        files["src/lib.rs"] = rustfmt(project_lib_rs(project, layout))
+    return files, lowered_modules
 
 
 def namespace_mod_rs(rust: RustModule) -> str:
@@ -453,17 +478,40 @@ def cargo_toml(module_name: str, options: CrateOptions) -> str:
     return "\n".join(lines)
 
 
-def build_rs(project: Path) -> str:
+def project_location(project: Path, out_dir: Path) -> str:
+    """The project directory as the build script of the crate in `out_dir`
+    records it: relative to the crate, with `/`, so that the crate keeps
+    working when it is moved or committed together with the project, and
+    does not show where it was generated.
+
+    Directories that only share the file system root (or are on different
+    Windows drives) are not in a relative position that survives a move,
+    and get the absolute path, as before."""
+    real_project = os.path.realpath(project)
+    real_out = os.path.realpath(out_dir)
+    try:
+        common = os.path.commonpath([real_project, real_out])
+    except ValueError:
+        return real_project
+    if Path(common) == Path(common).parent:
+        return real_project
+    return Path(os.path.relpath(real_project, real_out)).as_posix()
+
+
+def build_rs(project: str) -> str:
     """The build script of an executable: how it finds Python and the project.
 
     A development build runs with the interpreter selected by `PYO3_PYTHON`
     (and its virtual environment) and the project directory it was
-    transpiled from. `steelix build` sets `STEELIX_DIST`, for a program that
-    finds both next to its executable instead (design §11).
+    transpiled from: `project`, relative to the crate (`project_location`),
+    which the build script makes absolute. `steelix build` sets
+    `STEELIX_DIST`, for a program that finds both next to its executable
+    instead (design §11).
     """
     return f"""\
-/// The project directory the program was transpiled from.
-const PROJECT: &str = {string_literal(str(project))};
+/// The project directory the program was transpiled from, relative to the
+/// crate's directory (absolute when they only share the file system root).
+const PROJECT: &str = {string_literal(project)};
 
 fn main() {{
     println!("cargo:rerun-if-env-changed=PYO3_PYTHON");
@@ -489,7 +537,38 @@ fn main() {{
         .executable()
         .expect("PyO3 found no Python interpreter");
     println!("cargo:rustc-env=STEELIX_PYTHON={{executable}}");
-    println!("cargo:rustc-env=STEELIX_PROJECT={{PROJECT}}");
+    let project = project_dir();
+    println!("cargo:rustc-env=STEELIX_PROJECT={{}}", project.display());
+}}
+
+/// The absolute project directory: `PROJECT` resolved against the crate's
+/// directory, with links resolved like steelix does for the Python files.
+fn project_dir() -> std::path::PathBuf {{
+    let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let project = std::path::Path::new(&crate_dir).join(PROJECT);
+    match project.canonicalize() {{
+        Ok(path) => without_verbatim_prefix(path),
+        Err(err) => {{
+            println!("cargo:warning=no project directory {{}}: {{err}}", project.display());
+            project
+        }}
+    }}
+}}
+
+/// `canonicalize` gives verbatim paths on Windows (`\\\\?\\C:\\app`), which
+/// would show in `__file__` and tracebacks; the program wants the usual
+/// spelling (`C:\\app`, `\\\\server\\share`).
+fn without_verbatim_prefix(path: std::path::PathBuf) -> std::path::PathBuf {{
+    let Some(text) = path.to_str() else {{
+        return path;
+    }};
+    if let Some(share) = text.strip_prefix(r"\\\\?\\UNC\\") {{
+        return format!(r"\\\\{{share}}").into();
+    }}
+    match text.strip_prefix(r"\\\\?\\") {{
+        Some(disk) if disk.as_bytes().get(1) == Some(&b':') => disk.into(),
+        _ => path,
+    }}
 }}
 
 /// Windows has no rpath: the loader looks for the DLLs of an executable

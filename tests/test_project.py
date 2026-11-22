@@ -13,7 +13,6 @@ from steelix.emit.crate import rust_layout
 from steelix.frontend.parse import parse_source
 from steelix.lower.module import ModuleRole, lower_module
 from steelix.project import ProjectError, cross_module_patches, find_project, resolve_relative
-from steelix.rustast.printer import string_literal
 
 
 def write(root: Path, files: dict[str, str]) -> None:
@@ -343,7 +342,7 @@ def test_cli_python_m(tmp_path: Path, monkeypatch) -> None:
     assert 'steelix_runtime::script!("pkg/__main__.py");' in main_rs
     assert 'run_module(&script, MODULES, "pkg.__main__")' in main_rs
     build_rs = " ".join((tmp_path / "out" / "build.rs").read_text(encoding="utf-8").split())
-    assert f"const PROJECT: &str = {string_literal(str(tmp_path.resolve()))};" in build_rs
+    assert 'const PROJECT: &str = "..";' in build_rs
     assert 'name = "pkg"' in (tmp_path / "out" / "Cargo.toml").read_text(encoding="utf-8")
     assert (tmp_path / "out" / "src" / "pkg" / "__main__.rs").is_file()
 

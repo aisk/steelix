@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from steelix.cli import build_parser, main, pytest_command
+from steelix.emit.crate import build_rs, project_location
+from steelix.emit.output import RECORD
 from steelix.rustast.printer import string_literal
 
 
@@ -62,6 +64,7 @@ def test_transpile_writes_bin_crate(tmp_path: Path) -> None:
     out = tmp_path / "out"
     assert main(["transpile", str(source), "-o", str(out)]) == 0
     assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()) == [
+        ".steelix-generated",
         "Cargo.toml",
         "build.rs",
         "rustfmt.toml",
@@ -75,8 +78,10 @@ def test_transpile_writes_bin_crate(tmp_path: Path) -> None:
     assert "steelix_runtime::embed::run_main(&script, app::exec_module)" in main_rs
     assert str(tmp_path) not in main_rs
     build_rs = " ".join((out / "build.rs").read_text(encoding="utf-8").split())
-    assert f"const PROJECT: &str = {string_literal(str(tmp_path))};" in build_rs
-    assert "STEELIX_PROJECT={PROJECT}" in build_rs
+    # Relative to the crate, so that it can move along with the project.
+    assert 'const PROJECT: &str = "..";' in build_rs
+    assert str(tmp_path) not in build_rs
+    assert "STEELIX_PROJECT={}" in build_rs
     assert "$ORIGIN/python/lib" in build_rs
 
 
@@ -92,7 +97,7 @@ def test_symlinked_script_runs_from_its_target(tmp_path: Path, monkeypatch) -> N
     main_rs = (tmp_path / "out" / "src" / "main.rs").read_text(encoding="utf-8")
     assert 'steelix_runtime::script!("tool.py")' in main_rs
     build_rs = " ".join((tmp_path / "out" / "build.rs").read_text(encoding="utf-8").split())
-    assert f"const PROJECT: &str = {string_literal(str(tmp_path / 'real'))};" in build_rs
+    assert 'const PROJECT: &str = "../real";' in build_rs
 
 
 def test_traceback_lines_flag(tmp_path: Path) -> None:
@@ -211,3 +216,129 @@ def test_script_name_that_is_not_an_identifier(tmp_path: Path) -> None:
     assert "mod my_tool;" in (out / "src" / "main.rs").read_text(encoding="utf-8")
     assert (out / "src" / "my_tool.rs").is_file()
     assert 'name = "my-tool"' in (out / "Cargo.toml").read_text(encoding="utf-8")
+
+
+def transpile_app(tmp_path: Path, *extra: str) -> int:
+    return main(["transpile", str(tmp_path / "app.py"), "-o", str(tmp_path / "out"), "-q", *extra])
+
+
+def test_transpile_again_replaces_untouched_files(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("print(1)\n", encoding="utf-8")
+    assert transpile_app(tmp_path) == 0
+    record = json.loads((tmp_path / "out" / RECORD).read_text(encoding="utf-8"))
+    assert sorted(record["files"]) == [
+        "Cargo.toml",
+        "build.rs",
+        "rustfmt.toml",
+        "src/app.rs",
+        "src/main.rs",
+    ]
+    (tmp_path / "app.py").write_text("print(2)\n", encoding="utf-8")
+    assert transpile_app(tmp_path) == 0
+    assert "2" in (tmp_path / "out" / "src" / "app.rs").read_text(encoding="utf-8")
+
+
+def test_transpile_does_not_overwrite_edited_files(tmp_path: Path, capsys) -> None:
+    (tmp_path / "app.py").write_text("print(1)\n", encoding="utf-8")
+    assert transpile_app(tmp_path) == 0
+    module = tmp_path / "out" / "src" / "app.rs"
+    edited = module.read_text(encoding="utf-8") + "\n// Rewritten by hand.\n"
+    module.write_text(edited, encoding="utf-8")
+    added = tmp_path / "out" / "src" / "extra.rs"
+    added.write_text("// Mine.\n", encoding="utf-8")
+    capsys.readouterr()
+    assert transpile_app(tmp_path) == 1
+    err = capsys.readouterr().err
+    assert err == (
+        f"steelix: not overwriting files in {tmp_path / 'out'} that were changed after "
+        "steelix wrote them:\n"
+        "  src/app.rs (edited)\n"
+        "generate the crate into another directory and merge the changes, or pass "
+        "--overwrite to replace these files\n"
+    )
+    assert module.read_text(encoding="utf-8") == edited
+    # Still refused the next time: the failed run recorded nothing.
+    assert transpile_app(tmp_path) == 1
+    assert transpile_app(tmp_path, "--overwrite") == 0
+    assert "Rewritten by hand" not in module.read_text(encoding="utf-8")
+    # A file the user added is never touched.
+    assert added.read_text(encoding="utf-8") == "// Mine.\n"
+    assert transpile_app(tmp_path) == 0
+
+
+def test_line_endings_and_formatting_are_no_edits(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("def f(x):\n    return x + 1\n\nprint(f(1))\n", "utf-8")
+    assert transpile_app(tmp_path) == 0
+    out = tmp_path / "out"
+    toml = out / "Cargo.toml"
+    toml.write_bytes(toml.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    module = out / "src" / "app.rs"
+    text = module.read_text(encoding="utf-8")
+    # What a formatter with other settings might make of it; rustfmt
+    # brings it back.
+    reformatted = text.replace("\n    ", "\n        ")
+    assert reformatted != text
+    module.write_text(reformatted, encoding="utf-8")
+    (tmp_path / "app.py").write_text("def f(x):\n    return x + 2\n\nprint(f(1))\n", "utf-8")
+    assert transpile_app(tmp_path) == 0
+    assert "2" in module.read_text(encoding="utf-8")
+
+
+def test_files_without_a_record_are_compared_with_the_new_ones(tmp_path: Path, capsys) -> None:
+    """A crate of a steelix that kept no record, or a directory written by
+    hand: identical files are fine, different ones are not overwritten."""
+    (tmp_path / "app.py").write_text("print(1)\n", encoding="utf-8")
+    assert transpile_app(tmp_path) == 0
+    out = tmp_path / "out"
+    (out / RECORD).unlink()
+    assert transpile_app(tmp_path) == 0
+    (out / RECORD).unlink()
+    (out / "build.rs").write_text("fn main() {}\n", encoding="utf-8")
+    capsys.readouterr()
+    assert transpile_app(tmp_path) == 1
+    assert "  build.rs (not recorded as generated by steelix)\n" in capsys.readouterr().err
+    assert (out / "build.rs").read_text(encoding="utf-8") == "fn main() {}\n"
+    assert transpile_app(tmp_path, "--overwrite") == 0
+    assert (out / RECORD).is_file()
+
+
+def test_files_no_longer_generated(tmp_path: Path, capsys) -> None:
+    """Untouched files of an earlier run that the new one does not write are
+    deleted; edited ones are kept, with a warning, and no longer recorded."""
+    (tmp_path / "helper.py").write_text("X = 1\n", encoding="utf-8")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "util.py").write_text("Y = 2\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("import helper\nimport pkg.util\n", encoding="utf-8")
+    assert transpile_app(tmp_path) == 0
+    out = tmp_path / "out"
+    helper = out / "src" / "helper.rs"
+    helper.write_text(helper.read_text(encoding="utf-8") + "// Edited.\n", encoding="utf-8")
+    assert (out / "src" / "pkg" / "util.rs").is_file()
+    (tmp_path / "app.py").write_text("print(1)\n", encoding="utf-8")
+    capsys.readouterr()
+    assert transpile_app(tmp_path) == 0
+    assert capsys.readouterr().err == (
+        f"steelix: warning: kept {out / 'src' / 'helper.rs'}, which was edited and is no "
+        "longer generated (delete it if it is not needed)\n"
+    )
+    assert helper.is_file()
+    assert not (out / "src" / "pkg").exists()
+    assert sorted(json.loads((out / RECORD).read_text(encoding="utf-8"))["files"]) == [
+        "Cargo.toml",
+        "build.rs",
+        "rustfmt.toml",
+        "src/app.rs",
+        "src/main.rs",
+    ]
+
+
+def test_project_location_is_relative_to_the_crate(tmp_path: Path) -> None:
+    assert project_location(tmp_path / "proj", tmp_path / "proj" / "build" / "app") == "../.."
+    assert project_location(tmp_path / "a" / "proj", tmp_path / "out") == "../a/proj"
+    # Directories that only share the file system root: no relative
+    # position worth keeping.
+    far = Path(os.path.abspath("/steelix-project"))
+    absolute = project_location(far, Path(os.path.abspath("/steelix-out/app")))
+    assert absolute == os.path.realpath(far)
+    assert f"const PROJECT: &str = {string_literal(absolute)};" in build_rs(absolute)

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from steelix.diagnostics import UnsupportedError
+from steelix.emit.output import RECORD
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -196,6 +197,12 @@ def add_program_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="path of the steelix-runtime crate (default: the one in this source checkout)",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="replace the files of the crate even if they were edited since steelix "
+        f"wrote them (which it records in {RECORD})",
+    )
 
 
 def add_discovery_arguments(parser: argparse.ArgumentParser) -> None:
@@ -294,14 +301,19 @@ class CommandError(Exception):
 def emit_program(args: argparse.Namespace, mode: str, output: Path | None):
     """Finds the program's project and writes its crate to `output` (for
     `None`, `BUILD_DIR/NAME`). Returns the project, the crate directory and
-    the lowered modules."""
+    the lowered modules.
+
+    Files of the crate that were edited since steelix wrote them are not
+    overwritten without `--overwrite`; edited files that the crate no longer
+    has are kept, with a warning."""
     from steelix.emit.crate import (
         CrateOptions,
         Mode,
         default_runtime_path,
-        emit_project,
         project_name,
+        render_project,
     )
+    from steelix.emit.output import ModifiedFilesError, write_generated
     from steelix.project import ProjectError
 
     runtime = args.runtime_path or default_runtime_path()
@@ -314,11 +326,20 @@ def emit_program(args: argparse.Namespace, mode: str, output: Path | None):
     project = discover_project(args, run_main=options.mode is Mode.BIN)
     try:
         crate = output if output is not None else args.build_dir / project_name(project)
-        lowered = emit_project(project, crate, options)
+        files, lowered = render_project(project, crate, options)
+        kept = write_generated(crate, files, overwrite=args.overwrite)
+    except ModifiedFilesError as err:
+        raise CommandError(str(err)) from err
     except ProjectError as err:
         raise CommandError(str(err), 2) from err
     except (UnsupportedError, SyntaxError, UnicodeDecodeError, OSError) as err:
         raise CommandError(str(err)) from err
+    for path in kept:
+        print(
+            f"steelix: warning: kept {crate / path}, which was edited and is no longer "
+            "generated (delete it if it is not needed)",
+            file=sys.stderr,
+        )
     return project, crate, lowered
 
 
