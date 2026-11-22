@@ -724,7 +724,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     let print = m.global("print")?;
                     let list = PyList::empty(py);
                     for item in rt::iter(&m.global("frames")?.call1((&e,))?)? {
-                        let [name, underscore] = rt::unpack(&item?)?;
+                        let [name, _] = rt::unpack(&item?)?;
                         list.append(&name)?;
                     }
                     print.call1(("cancelled", &log, list))?;
@@ -1688,7 +1688,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 let value = m.global("repr")?.call1((m.global("e")?,))?;
                 let list = PyList::empty(py);
                 for item4 in rt::iter(&m.global("frames")?.call1((m.global("e")?,))?)? {
-                    let [name, underscore] = rt::unpack(&item4?)?;
+                    let [name, _] = rt::unpack(&item4?)?;
                     list.append(&name)?;
                 }
                 print.call1(("thrown through", value, list))?;

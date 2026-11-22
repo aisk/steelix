@@ -20,6 +20,14 @@ leaves (`return`, `break`, `continue`), it is declared with that value:
 evaluation order stays the same. Moving a declaration past another one
 changes the order Rust drops the two in when the function returns, which
 may differ from CPython's (design §12).
+
+`ignore_unread`: a Python `_` (`underscore` in Rust) that a destructuring
+`let` binds and nothing reads is Rust's `_` pattern:
+`let [_, w] = rt::unpack(&pair)?;`. The ignored part is then dropped at the
+end of the statement instead of the end of the block (design §12). Never a
+plain `let _ = ..`, which would drop a value someone may keep alive on
+purpose, nor `if let Some(_)`, which clippy wants as `.is_some()`, dropping
+the value before the body instead of after it.
 """
 
 from __future__ import annotations
@@ -38,6 +46,12 @@ _PATTERN_WORDS = frozenset({"Some", "Ok", "Err", "mut", "ref", "_"})
 def move_returned_locals(file: rs.File) -> rs.File:
     """`file` with returned locals moved instead of cloned."""
     return dataclasses.replace(file, items=[_item(item) for item in file.items])
+
+
+def ignore_unread(file: rs.File) -> rs.File:
+    """`file` with the unread `underscore` bindings of destructuring `let`s
+    written `_`."""
+    return dataclasses.replace(file, items=[_unread_node(item) for item in file.items])
 
 
 def declare_late(block: rs.Block, locals_: Collection[str]) -> rs.Block:
@@ -372,3 +386,77 @@ def _borrowed(expr: rs.Expr) -> frozenset[str]:
 
     visit(expr)
     return frozenset(found)
+
+
+# A binding in a pattern with the Rust name of a Python `_` (or `__`, `_1`),
+# or of a temporary for it.
+_PATTERN_BINDING = re.compile(r"(?<![\w#])(?:mut )?(underscore\d*_*)(?![\w(])")
+
+
+def _unread_node(node: Any) -> Any:
+    """`node` with the unread `underscore` bindings of the destructuring
+    `let`s in it ignored, innermost first."""
+    if isinstance(node, tuple):
+        new = tuple(_unread_node(item) for item in node)
+        return node if all(a is b for a, b in zip(new, node, strict=True)) else new
+    if not dataclasses.is_dataclass(node) or isinstance(node, type):
+        return node
+    changes = {}
+    for field in dataclasses.fields(node):
+        value = getattr(node, field.name)
+        new = _unread_node(value)
+        if new is not value:
+            changes[field.name] = new
+    if changes:
+        node = dataclasses.replace(node, **changes)
+    match node:
+        case rs.Block(stmts, tail):
+            new_stmts = tuple(
+                _unread_let(stmt, (stmts[i + 1 :], tail)) if isinstance(stmt, rs.Let) else stmt
+                for i, stmt in enumerate(stmts)
+            )
+            if any(a is not b for a, b in zip(new_stmts, stmts, strict=True)):
+                node = rs.Block(new_stmts, tail)
+    return node
+
+
+def _unread_let(let: rs.Let, scope: Any) -> rs.Let:
+    if let.init is None or not let.name.startswith(("[", "(")):
+        return let
+    pattern = _ignore_unread(let.name, scope)
+    return let if pattern == let.name else dataclasses.replace(let, name=pattern)
+
+
+def _ignore_unread(pattern: str, scope: Any) -> str:
+    """`pattern` with each `underscore` binding that `scope` does not
+    mention replaced by `_`."""
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        return match.group(0) if _named(scope, name) else "_"
+
+    return _PATTERN_BINDING.sub(replace, pattern)
+
+
+def _named(node: Any, name: str) -> bool:
+    """Whether `name` occurs in `node` at all: as a path, a binding, or a
+    word of verbatim text (a macro's tokens, a pattern), so that an
+    occurrence the AST does not model keeps the binding."""
+    word = re.compile(rf"(?<![\w#]){re.escape(name)}(?!\w)")
+    found = False
+
+    def visit(value: Any) -> None:
+        nonlocal found
+        if found:
+            return
+        if isinstance(value, str):
+            found = word.search(value) is not None
+        elif isinstance(value, tuple | list):
+            for item in value:
+                visit(item)
+        elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+            for field in dataclasses.fields(value):
+                visit(getattr(value, field.name))
+
+    visit(node)
+    return found
