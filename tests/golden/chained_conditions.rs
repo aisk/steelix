@@ -54,7 +54,7 @@ pub fn check<'py>(
             break;
         }
         n = rt::iadd(&n, 1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     rt::builtins::print(py, ("n", &n))?;
     Ok(())

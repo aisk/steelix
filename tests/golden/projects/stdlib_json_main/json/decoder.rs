@@ -94,7 +94,7 @@ pub fn py_scanstring<'py>(
                 ))?));
             } else {
                 _append.call1((&terminator,))?;
-                py.check_signals()?;
+                rt::checkpoint(py)?;
                 continue;
             }
         }
@@ -149,7 +149,7 @@ pub fn py_scanstring<'py>(
             char = rt::builtins::chr(py, (&uni,))?;
         }
         _append.call1((&char,))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(PyTuple::new(py, [&rt::str(py, "").method1("join", (&chunks,))?, &end])?.into_any())
 }
@@ -300,7 +300,7 @@ pub fn JSONObject<'py>(
                 end.sub(1)?,
             ))?));
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     if !object_pairs_hook.is_none() {
         result = object_pairs_hook.call1((&pairs,))?;
@@ -396,7 +396,7 @@ pub fn JSONArray<'py>(
                 &comma_idx,
             ))?));
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(PyTuple::new(py, [values.as_any(), &end])?.into_any())
 }

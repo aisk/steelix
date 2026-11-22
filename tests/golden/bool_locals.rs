@@ -120,7 +120,7 @@ pub fn flip<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<Bound<'
             count = rt::iadd(&count, 1)?;
         }
         n = rt::isub(&n, 1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     rt::builtins::print(py, ("flipped", on, &count))?;
     let done = rt::bool(py, on).is(rt::bool(py, true));
@@ -217,7 +217,7 @@ pub fn redundant<'py>(m: &rt::Module<'py>, c: &Bound<'py, PyAny>) -> PyResult<Bo
         if n.gt(2)? {
             break;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     let same = a && a;
     let never = a && !a;

@@ -362,7 +362,7 @@ pub fn counts<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<(
                 }
             }
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(140);
     }
     frame.line(150);
@@ -405,7 +405,7 @@ pub fn loop_jumps<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResul
             && let item = row.get_item(0)?
             && item.eq("skip")?
         {
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(169);
             continue;
         } else {
@@ -437,12 +437,12 @@ pub fn loop_jumps<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResul
                                 }
                                 frame.line(182);
                                 total = rt::iadd(&total, &v)?;
-                                py.check_signals()?;
+                                rt::checkpoint(py)?;
                                 frame.line(179);
                             }
                             frame.line(184);
                             rt::builtins::print(py, (&name, "sum", &total))?;
-                            py.check_signals()?;
+                            rt::checkpoint(py)?;
                             frame.line(169);
                             continue 'outer;
                         }
@@ -452,7 +452,7 @@ pub fn loop_jumps<'py>(m: &rt::Module<'py>, rows: &Bound<'py, PyAny>) -> PyResul
                 }
             }
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(169);
     }
     frame.line(187);
@@ -593,7 +593,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 command(m, &m.global("line")?)?,
             ),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(27);
     }
     rt::def!(
@@ -621,7 +621,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("value", item2?)?;
         frame.line(60);
         stars(m, &m.global("value")?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(59);
     }
     rt::def!(m, literals(value))?;
@@ -658,7 +658,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
                 literals(m, &m.global("value")?)?,
             ),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(92);
     }
     rt::def!(m, nested(point))?;
@@ -686,7 +686,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         m.set_global("point", item4?)?;
         frame.line(112);
         rt::builtins::print(py, (nested(m, &m.global("point")?)?,))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(111);
     }
     rt::def!(
@@ -797,7 +797,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             frame.line(205);
             rt::builtins::print(py, ("not a message:", m.global("message")?))?;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(198);
     }
     frame.line(206);

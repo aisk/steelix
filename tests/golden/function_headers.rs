@@ -35,7 +35,7 @@ pub fn report<'py>(m: &rt::Module<'py>, data: &Bound<'py, PyAny>) -> PyResult<()
         .lt(2)?
     {
         n.set(rt::iadd(&n.get()?, 1)?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     // function_headers.py:12
     #[rt::frame(m, "report.<locals>.<lambda>", 12)]

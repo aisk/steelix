@@ -17,7 +17,7 @@ pub async fn count<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
     while i.lt(n)? {
         rt::yield_(&i).await?;
         i = rt::iadd(&i, 1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(rt::none(py))
 }
@@ -38,7 +38,7 @@ pub async fn averager<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         total = rt::iadd(&total, &value)?;
         n = rt::iadd(&n, 1)?;
         average = total.div(&n)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -88,7 +88,7 @@ pub async fn catches<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -253,7 +253,7 @@ pub fn make_counter<'py>(
         loop {
             count.set(rt::iadd(&count.get()?, 1)?)?;
             rt::yield_(count.get()?).await?;
-            m.py().check_signals()?;
+            rt::checkpoint(m.py())?;
         }
     }
     let counter = rt::function!(frame, gen counter[&count]())?;

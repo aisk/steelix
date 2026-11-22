@@ -110,7 +110,7 @@ pub fn while_return<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult
             return Ok(());
         }
         rt::builtins::print(py, ("n", &n))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -1146,7 +1146,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             break;
         }
         m.set_global("count", rt::iadd(&m.global("count")?, 1)?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     loop {
         proc(m, &rt::str(py, "while false"))?;
@@ -1154,7 +1154,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             break;
         }
         rt::builtins::print(py, ("never",))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     proc(m, &rt::str(py, "fstring"))?;
     rt::builtins::print(py, (rt::format(&rt::none(py), "")?,))?;

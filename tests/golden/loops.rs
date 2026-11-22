@@ -69,7 +69,7 @@ pub fn count_down<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<B
                 rt::builtins::print(py, ("stop at", &n))?;
                 break 'while_else;
             }
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
         rt::builtins::print(py, ("ran out",))?;
     }
@@ -148,7 +148,7 @@ pub fn spin<'py>(m: &rt::Module<'py>, limit: &Bound<'py, PyAny>) -> PyResult<Bou
         if k.ge(limit)? {
             break;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(k)
 }

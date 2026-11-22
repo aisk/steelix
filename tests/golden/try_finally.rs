@@ -302,12 +302,12 @@ pub fn while_with_finally<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny
             match finally.resume()? {
                 rt::Flow::Break => break 'while_else,
                 rt::Flow::Continue => {
-                    py.check_signals()?;
+                    rt::checkpoint(py)?;
                     continue;
                 }
                 _ => {}
             }
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
         log(m, &PyTuple::new(py, ["no break"])?)?;
     }

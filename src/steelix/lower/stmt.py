@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from steelix.frontend.desugar import AsyncFor, annotation_source, binding_name
 from steelix.frontend.fallback import COMPOUND, first_line, loop_jumps, python_runs, python_source
 from steelix.frontend.locals import is_constant_true
-from steelix.lower.comprehension import line_marker, unpack_pattern
+from steelix.lower.comprehension import checkpoint, line_marker, unpack_pattern
 from steelix.lower.context import NAMESPACE, Context
 from steelix.lower.expr import IN_PLACE, ExprLowering, negate
 from steelix.lower.function import cell_declared_at, lower_nested
@@ -49,8 +49,8 @@ class _Loop:
     `while`, the next item of a `for`) can raise: `continue` and the end of
     the body set the traceback line back to it."""
     signals: bool = True
-    """Whether the next iteration starts with `py.check_signals()?`; a `for`
-    loop's `rt::iter` checks them itself (see `for_iterator`)."""
+    """Whether the next iteration starts with `rt::checkpoint(py)?`; a `for`
+    loop's `rt::iter` makes it itself (see `for_iterator`)."""
 
 
 class StmtLowering(HandlingLowering, MatchLowering):
@@ -481,12 +481,13 @@ class StmtLowering(HandlingLowering, MatchLowering):
         return out
 
     def check_signals(self) -> rs.Stmt:
-        """`py.check_signals()?;` at the end of every iteration of a `while`
-        loop, where CPython's eval loop would run pending signal handlers:
-        without it, a native loop can not be stopped with Ctrl-C
-        (`KeyboardInterrupt`). `for` loops check them in `rt::iter`, or
-        like this with `--traceback-lines` (`for_iterator`)."""
-        return _try_stmt(rs.MethodCall(rs.Path(self.ctx.py()), "check_signals", ()))
+        """`rt::checkpoint(py)?;` at the end of every iteration of a `while`
+        loop, where CPython's eval loop would run pending signal handlers
+        and let other threads take the GIL: without it, a native loop can
+        not be stopped with Ctrl-C (`KeyboardInterrupt`) and starves the
+        other threads. `for` loops check in `rt::iter`, or like this with
+        `--traceback-lines` (`for_iterator`)."""
+        return _try_stmt(checkpoint(self.ctx.py()))
 
     def for_iterator(self, iterable: Value) -> tuple[rs.Expr, bool]:
         """The iterator of a `for` loop, and whether the loop body checks

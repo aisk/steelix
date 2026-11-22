@@ -11,6 +11,6 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
     m.set_global("n", 0)?;
     loop {
         m.set_global("n", rt::iadd(&m.global("n")?, 1)?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }

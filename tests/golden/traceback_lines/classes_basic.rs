@@ -476,7 +476,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
             if !k.method1("startswith", ("__",))?.is_truthy()? {
                 return Ok(Some(k));
             }
-            m.py().check_signals()?;
+            rt::checkpoint(m.py())?;
         }
         Ok(None)
     }

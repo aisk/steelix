@@ -510,7 +510,7 @@ pub fn generator_into_native<'py>(m: &rt::Module<'py>) -> PyResult<()> {
             let value = value?;
             frame.line(205);
             total = total.add(&value)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(204);
         }
         Ok(())
@@ -542,7 +542,7 @@ pub fn loop_with_try<'py>(
         match (|| total.add(m.global("int")?.call1((&item,))?))() {
             Ok(value) => total = value,
             Err(err) if frame.matches_at(&err, 215, || m.global("ValueError"))? => {
-                py.check_signals()?;
+                rt::checkpoint(py)?;
                 frame.line(212);
                 continue;
             }
@@ -552,7 +552,7 @@ pub fn loop_with_try<'py>(
         if total.gt(10)? {
             break;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(212);
     }
     Ok(total)
@@ -674,7 +674,7 @@ def name_after_handler():
         frame.line(247);
         m.global("print")?
             .call1((m.global("classify")?.call1((m.global("kind")?,))?,))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(246);
     }
     frame.line(248);

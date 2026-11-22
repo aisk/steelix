@@ -6,12 +6,11 @@ container in a temporary, and its variables are `let` bindings in the loop
 body, so they do not leak and shadow nothing outside:
 
     let list = PyList::empty(py);
-    for x in xs.try_iter()? {
+    for x in rt::iter(&xs)? {
         let x = x?;
         if x.is_truthy()? {
             list.append(f(m, &x)?)?;
         }
-        py.check_signals()?;
     }
 
 A generator expression is a nested fn, the *step*, holding its `for` loop
@@ -62,6 +61,12 @@ class ComprehensionVariable:
 
 def line_marker(line: int) -> rs.Stmt:
     return rs.ExprStmt(rs.MethodCall(rs.Path("frame"), "line", (rs.IntLit(line),)))
+
+
+def checkpoint(py: str) -> rs.Expr:
+    """`rt::checkpoint(py)`, the end of an iteration of a loop that does not
+    iterate with `rt::iter` (`StmtLowering.check_signals`)."""
+    return rs.Call(rs.Path("rt::checkpoint"), (rs.Path(py),))
 
 
 def unpack_pattern(names: list[str], star: int | None) -> str:
@@ -257,8 +262,7 @@ class ComprehensionLowering:
         body += _guarded(conditions, innermost_stmts)
         if not _returns(body):
             if traceback_lines:
-                check = rs.MethodCall(rs.Path(self.ctx.py()), "check_signals")
-                body.append(rs.ExprStmt(rs.Try(check)))
+                body.append(rs.ExprStmt(rs.Try(checkpoint(self.ctx.py()))))
             if self.markers != markers:
                 self.line = None
                 body += self.at_line(iter_line)

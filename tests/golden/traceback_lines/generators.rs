@@ -20,7 +20,7 @@ pub async fn count<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<
         rt::yield_(&i).await?;
         frame.line(11);
         i = rt::iadd(&i, 1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(9);
     }
     Ok(rt::none(py))
@@ -46,7 +46,7 @@ pub async fn averager<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         n = rt::iadd(&n, 1)?;
         frame.line(24);
         average = total.div(&n)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -105,7 +105,7 @@ pub async fn catches<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -120,7 +120,7 @@ pub async fn in_loops<'py>(
     for row in rows.try_iter()? {
         let row = row?;
         if row.is_none() {
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             continue;
         }
         frame.line(54);
@@ -137,13 +137,13 @@ pub async fn in_loops<'py>(
                 }
                 frame.line(59);
                 rt::yield_(&item).await?;
-                py.check_signals()?;
+                rt::checkpoint(py)?;
                 frame.line(54);
             }
             frame.line(61);
             rt::yield_(rt::str(py, "row done")).await?;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(51);
     }
     Ok(rt::str(py, "all done"))
@@ -221,7 +221,7 @@ pub async fn tree<'py>(
             let child = child?;
             frame.line(104);
             rt::delegate(Box::pin(tree(m, &child))).await?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(103);
         }
     } else {
@@ -310,7 +310,7 @@ pub fn make_counter<'py>(
             count.set(rt::iadd(&count.get()?, 1)?)?;
             frame.line(165);
             rt::yield_(count.get()?).await?;
-            m.py().check_signals()?;
+            rt::checkpoint(m.py())?;
         }
     }
     frame.line(161);
@@ -338,7 +338,7 @@ pub fn closure_gen<'py>(
         for v in values.try_iter()? {
             let v = v?;
             list.append(v.mul(scale)?)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
         Ok(list.into_any())
     }
@@ -366,7 +366,7 @@ pub async fn gen_with_nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, Py
         let value = value?;
         frame.line(181);
         rt::yield_(&value).await?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(180);
     }
     Ok(rt::none(py))
@@ -475,7 +475,7 @@ pub mod bag {
             let item = item?;
             frame.line(127);
             rt::yield_(&item).await?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(126);
         }
         Ok(rt::none(py))
@@ -497,7 +497,7 @@ pub mod bag {
                 rt::yield_(PyTuple::new(py, [&previous, &item])?).await?;
             }
             previous = item.clone();
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(131);
         }
         Ok(rt::none(py))

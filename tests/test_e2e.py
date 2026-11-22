@@ -321,6 +321,8 @@ DEFAULT_LINES_CASES = [
     "decorators_uncaught",
     "async_uncaught",
     "match_uncaught",
+    # Without the markers `for` loops let other threads in from `rt::iter`.
+    "thread_switching",
 ]
 DEFAULT_SUFFIX = "_default_lines"
 # Prints line numbers of traceback entries, which are the def lines here.

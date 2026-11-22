@@ -19,12 +19,11 @@
 //!     m: &rt::Module<'py>,
 //!     words: &Bound<'py, PyIterator>,
 //! ) -> PyResult<Option<Bound<'py, PyAny>>> {
-//!     for word in words {
+//!     for word in rt::iter(words)? {
 //!         let word = word?;
 //!         if word.is_truthy()? {
 //!             return Ok(Some(word.call_method0("upper")?));
 //!         }
-//!         m.py().check_signals()?;
 //!     }
 //!     Ok(None)
 //! }
@@ -171,6 +170,11 @@ impl GenExpr {
     /// Runs the step for the next value: `None` once the generator is
     /// exhausted (or closed).
     fn resume<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        // CPython lets other threads take the GIL when a generator resumes.
+        // The step's `rt::iter` is new on every call and only checks before
+        // its second item, so a consumer written in C (`any(..)`, `sum(..)`)
+        // taking every item would otherwise never let them run.
+        crate::iter::switch_threads(py);
         let Some(iter) = self.start()? else {
             return Ok(None);
         };

@@ -426,7 +426,7 @@ pub fn tricky<'py>(m: &rt::Module<'py>) -> PyResult<()> {
             break;
         }
         n = n.add(1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     let item3 = trace(m, &rt::str(py, "x"), &rt::int(py, 0))?;
     if trace(m, &rt::str(py, "xs"), PyList::empty(py).as_any())?.contains(item3)? {

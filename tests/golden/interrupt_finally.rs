@@ -14,7 +14,7 @@ pub fn spin<'py>(m: &rt::Module<'py>) -> PyResult<()> {
         rt::call!(rt::builtin(py, "print")?, "ready", flush = true)?;
         loop {
             n = rt::iadd(&n, 1)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     })();
     let finally = frame.finally(result);

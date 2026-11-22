@@ -158,7 +158,7 @@ pub async fn handles<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 

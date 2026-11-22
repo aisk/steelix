@@ -571,18 +571,39 @@ def test_traceback_lines_marks_statements() -> None:
     for line in (4, 5, 9, 10):
         assert f"frame.line({line});" in out
     # Without the markers the code is the same, except that a `for` loop
-    # checks for signals in its body, before the line goes back to the
+    # makes its checkpoint in its body, before the line goes back to the
     # header, instead of in `rt::iter` (and so may use `py` once more).
     default = render_module(parse_source(textwrap.dedent(TRACEBACK_SOURCE), "m"))
 
     def normalized(code: str) -> str:
-        skipped = ("frame.line(", "check_signals", "let py = m.py();")
+        skipped = ("frame.line(", "rt::checkpoint(", "let py = m.py();")
         lines = [line for line in code.splitlines() if not any(s in line for s in skipped)]
         code = "\n".join(lines).replace(", frame)]", ")]").replace("m.py()", "py")
         return re.sub(r"rt::iter\(&?([\w.]+)\)\?", r"\1.try_iter()?", code)
 
-    assert "py.check_signals()?;" in out
+    assert "rt::checkpoint(py)?;" in out
     assert normalized(out) == normalized(default)
+
+
+def test_unread_underscore_is_ignored_in_patterns() -> None:
+    out = lower(
+        """
+        def first(pair):
+            _, w = pair
+            return w
+
+        def both(pair):
+            _, w = pair
+            print(_)
+            return w
+
+        def keys(rows):
+            return {k: 1 for k, _ in rows}
+        """
+    )
+    assert "let [_, w] = rt::unpack(pair)?;" in out
+    assert "let [underscore, w] = rt::unpack(pair)?;" in out
+    assert "let [k, _] = rt::unpack(&item?)?;" in out
 
 
 def test_frame_is_an_attribute_of_the_fn() -> None:

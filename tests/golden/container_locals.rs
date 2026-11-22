@@ -237,7 +237,7 @@ pub fn branches<'py>(m: &rt::Module<'py>, flag: &Bound<'py, PyAny>) -> PyResult<
     out.append(flag)?;
     while out.len() < 4 {
         out = rt::list!(py, *out, out.len())?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(out.into_any())
 }
@@ -643,7 +643,7 @@ pub fn protocols<'py>(
     )?;
     while ys.is_truthy()? {
         rt::builtins::print(py, ("pop", ys.method0("pop")?))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     if d.is_truthy()? {
         rt::builtins::print(py, ("dict is true",))?;
@@ -1455,7 +1455,7 @@ pub async fn coroutine<'py>(
             let iter = rt::aiter(&xs)?;
             while let Some(x) = rt::anext(&iter).await? {
                 rt::builtins::print(py, (&x,))?;
-                py.check_signals()?;
+                rt::checkpoint(py)?;
             }
         }
         Ok(())

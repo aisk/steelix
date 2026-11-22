@@ -57,14 +57,14 @@ pub async fn for_flow<'py>(
             while let Some(item) = rt::anext(&iter).await? {
                 i = item;
                 if i.eq(3)? {
-                    py.check_signals()?;
+                    rt::checkpoint(py)?;
                     continue;
                 }
                 if i.eq(1)? {
                     break 'for_else;
                 }
                 seen.append(&i)?;
-                py.check_signals()?;
+                rt::checkpoint(py)?;
             }
         }
         seen.append("no break")?;
@@ -74,7 +74,7 @@ pub async fn for_flow<'py>(
         while let Some(item2) = rt::anext(&iter).await? {
             i = item2;
             seen.append(&i)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     }
     seen.append("else")?;
@@ -82,7 +82,7 @@ pub async fn for_flow<'py>(
         let iter = rt::aiter(&m.global("SyncStop")?.call0()?)?;
         while let Some(underscore) = rt::anext(&iter).await? {
             seen.append("never")?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     }
     Ok(seen.into_any())
@@ -139,7 +139,7 @@ pub async fn nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     },
                 )
                 .await?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     }
     Ok(rt::none(py))
@@ -159,7 +159,7 @@ pub async fn found_in<'py>(
             if item.eq(wanted)? {
                 return Ok(rt::bool(py, true));
             }
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     }
     Ok(rt::bool(py, false))
@@ -175,7 +175,7 @@ pub async fn unpacking<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
         while let Some(item) = rt::anext(&iter).await? {
             let [a, b] = rt::unpack(&item)?;
             pairs.append(a.add(&b)?)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     }
     Ok(pairs.into_any())
@@ -244,7 +244,7 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 let iter = rt::aiter(&cls.call0()?)?;
                 while let Some(x) = rt::anext(&iter).await? {
                     rt::builtins::print(py, ("item", &x))?;
-                    py.check_signals()?;
+                    rt::checkpoint(py)?;
                 }
             }
             Ok(())
@@ -331,7 +331,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         while !queue.method0("empty")?.is_truthy()? {
             yield_value = rt::await_(queue.method0("get")?).await?;
             rt::builtins::print(py, ("got", &yield_value))?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
         Ok(rt::none(py))
     }

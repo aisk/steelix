@@ -191,10 +191,10 @@ pub fn in_loop<'py>(m: &rt::Module<'py>, items: &Bound<'py, PyAny>) -> PyResult<
     while rt::local(&count, "count")?.lt(3)? {
         count = Some(rt::local(&count, "count")?.add(1)?);
         if rt::local(&count, "count")?.eq(2)? {
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             continue;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     items.get_item(rt::local(&count, "count")?)
 }

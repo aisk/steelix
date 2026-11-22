@@ -27,7 +27,7 @@ pub async fn native<'py>(
         let iter = rt::aiter(&m.global("ticks")?.call1((n,))?)?;
         while let Some(i) = rt::anext(&iter).await? {
             total = rt::iadd(&total, &i)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
     }
     let collect = m.global("collect")?.call1((n,))?;

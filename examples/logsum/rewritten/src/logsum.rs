@@ -90,7 +90,7 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
     {
         let line = line?;
         if !line.call_method0("strip")?.is_truthy()? {
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             continue;
         }
         match parse_line(m, &line) {
@@ -106,7 +106,7 @@ pub fn load<'py>(m: &rt::Module<'py>, path: &Bound<'py, PyAny>) -> PyResult<Boun
         } else {
             requests.call_method1("append", (&request,))?;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(PyTuple::new(py, [&requests, &malformed])?.into_any())
 }
@@ -179,7 +179,7 @@ pub fn print_statuses<'py>(
             .getattr("get")?
             .call1((request.get_item("status")?.floor_div(100)?, "other"))?;
         classes.set_item(&name, classes.call_method1("get", (&name, 0))?.add(1)?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     let peak = rt::call!(
         rt::builtin(py, "max")?,
@@ -226,7 +226,7 @@ pub fn print_statuses<'py>(
                 ),
             )?,),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(rt::none(py))
 }
@@ -280,7 +280,7 @@ pub fn print_paths<'py>(
                 ),
             )?,),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(rt::none(py))
 }
@@ -300,7 +300,7 @@ pub fn print_latency<'py>(
         if !request.get_item("ms")?.is_none() {
             timed.getattr("append")?.call1((request.get_item("ms")?,))?;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     timed.call_method0("sort")?;
     rt::builtins::print(
@@ -329,7 +329,7 @@ pub fn print_latency<'py>(
                 ),
             )?,),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     let slow_requests = PyList::empty(py).into_any();
     for item2 in requests.try_iter()? {
@@ -337,7 +337,7 @@ pub fn print_latency<'py>(
         if !request.get_item("ms")?.is_none() && request.get_item("ms")?.ge(slow)? {
             slow_requests.call_method1("append", (&request,))?;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     rt::builtins::print(
         py,
@@ -380,7 +380,7 @@ pub fn print_latency<'py>(
                 ),
             )?,),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(rt::none(py))
 }
@@ -418,7 +418,7 @@ pub fn print_hours<'py>(
                 ),
             )?,),
         )?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(rt::none(py))
 }
@@ -444,7 +444,7 @@ pub fn main<'py>(m: &rt::Module<'py>, argv: &Bound<'py, PyAny>) -> PyResult<Boun
         let request = request?;
         total_bytes = rt::iadd(&total_bytes, request.get_item("bytes")?)?;
         clients.getattr("add")?.call1((request.get_item("ip")?,))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     rt::call!(
         rt::builtin(py, "print")?,

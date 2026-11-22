@@ -81,7 +81,7 @@ pub async fn handle<'py>(
                             let other = other?;
                             frame.line(31);
                             total = rt::iadd(&total, rt::delegate(fetch(m, &other)).await?)?;
-                            py.check_signals()?;
+                            rt::checkpoint(py)?;
                             frame.line(30);
                         }
                         frame.line(32);
@@ -124,7 +124,7 @@ pub async fn main<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let request = request?;
         frame.line(45);
         rt::builtins::print(py, (rt::delegate(handle(m, &request)).await?,))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(44);
     }
     // A capture assigned before an `await` in the guard keeps its value.
@@ -200,7 +200,7 @@ pub async fn tokens<'py>(
                 }
             }
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(59);
     }
     Ok(rt::none(py))
@@ -225,7 +225,7 @@ pub async fn lines<'py>(
             frame.line(81);
             rt::builtins::print(py, ("sent", &received, "for", &key, &value))?;
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(77);
     }
     frame.line(84);

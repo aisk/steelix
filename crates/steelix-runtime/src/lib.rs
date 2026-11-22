@@ -115,7 +115,7 @@ pub use import::{import, import_from, import_module, import_names};
 pub use importer::{
     ExecModule, NativeImporter, NativeLoader, NativeModule, init_extension, install_importer,
 };
-pub use iter::{Iter, iter};
+pub use iter::{Iter, checkpoint, iter};
 pub use matching::{
     item_from_end, match_class, match_instance, match_keys, match_map, match_mapping, match_rest,
     match_seq, match_seq_len, match_seq_min, match_seq_star,
@@ -246,6 +246,9 @@ impl<'py> RecursionGuard<'py> {
         if failed != 0 {
             return Err(PyErr::fetch(py));
         }
+        // CPython also lets other threads take the GIL when a function
+        // starts, so that recursion without loops does not starve them.
+        iter::switch_threads(py);
         Ok(Self { _py: py })
     }
 }

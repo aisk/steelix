@@ -23,7 +23,7 @@ pub fn collatz_steps<'py>(
         }
         frame.line(15);
         steps = steps.add(1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(10);
     }
     Ok(steps)
@@ -67,7 +67,7 @@ pub fn count_up<'py>(
         total = total.add(&i)?;
         frame.line(36);
         i = i.add(m.global("STEP")?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(34);
     }
     Ok(total)
@@ -88,7 +88,7 @@ pub fn first_square_above<'py>(
         if k.mul(&k)?.gt(bound)? {
             return Ok(k);
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -148,7 +148,7 @@ pub fn exec_module(m: &rt::Module<'_>) -> PyResult<()> {
         }
         frame.line(58);
         m.set_global("n", m.global("n")?.sub(m.global("STEP")?)?)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(53);
     }
     frame.line(59);

@@ -222,7 +222,7 @@ pub async fn keeps_yielding<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyA
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 

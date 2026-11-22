@@ -15,7 +15,7 @@ pub fn report<'py>(m: &rt::Module<'py>, error: &Bound<'py, PyAny>) -> PyResult<(
     let mut tb = error.attr("__traceback__")?;
     while !tb.attr("tb_next")?.is_none() {
         tb = tb.attr("tb_next")?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     rt::builtins::print(
         py,

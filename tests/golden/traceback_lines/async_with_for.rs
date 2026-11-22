@@ -43,13 +43,13 @@ pub async fn with_flow<'py>(
             rt::Flow::Return(value2) => return Ok(value2),
             rt::Flow::Break => break,
             rt::Flow::Continue => {
-                py.check_signals()?;
+                rt::checkpoint(py)?;
                 frame.line(94);
                 continue;
             }
             rt::Flow::Next => {}
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(94);
     }
     Ok(found.into_any())
@@ -72,7 +72,7 @@ pub async fn for_flow<'py>(
                 i = item;
                 frame.line(109);
                 if i.eq(3)? {
-                    py.check_signals()?;
+                    rt::checkpoint(py)?;
                     frame.line(108);
                     continue;
                 }
@@ -82,7 +82,7 @@ pub async fn for_flow<'py>(
                 }
                 frame.line(113);
                 seen.append(&i)?;
-                py.check_signals()?;
+                rt::checkpoint(py)?;
                 frame.line(108);
             }
         }
@@ -96,7 +96,7 @@ pub async fn for_flow<'py>(
             i = item2;
             frame.line(117);
             seen.append(&i)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(116);
         }
     }
@@ -108,7 +108,7 @@ pub async fn for_flow<'py>(
         while let Some(underscore) = rt::anext(&iter).await? {
             frame.line(121);
             seen.append("never")?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(120);
         }
     }
@@ -180,7 +180,7 @@ pub async fn nested<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                     },
                 )
                 .await?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(135);
         }
     }
@@ -203,7 +203,7 @@ pub async fn found_in<'py>(
             if item.eq(wanted)? {
                 return Ok(rt::bool(py, true));
             }
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(141);
         }
     }
@@ -222,7 +222,7 @@ pub async fn unpacking<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
             let [a, b] = rt::unpack(&item)?;
             frame.line(150);
             pairs.append(a.add(&b)?)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(149);
         }
     }
@@ -277,7 +277,7 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(168);
     }
     frame.line(174);
@@ -299,7 +299,7 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
                 while let Some(x) = rt::anext(&iter).await? {
                     frame.line(177);
                     rt::builtins::print(py, ("item", &x))?;
-                    py.check_signals()?;
+                    rt::checkpoint(py)?;
                     frame.line(176);
                 }
             }
@@ -323,7 +323,7 @@ pub async fn errors<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(174);
     }
     match (|| -> PyResult<()> {
@@ -389,7 +389,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
         let i = i?;
         frame.line(199);
         queue.method1("put_nowait", (&i,))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
         frame.line(198);
     }
     // async_with_for.py:201
@@ -406,7 +406,7 @@ pub async fn library<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> {
             yield_value = rt::await_(queue.method0("get")?).await?;
             frame.line(204);
             rt::builtins::print(py, ("got", &yield_value))?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             frame.line(202);
         }
         Ok(rt::none(py))

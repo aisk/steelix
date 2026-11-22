@@ -295,7 +295,7 @@ pub async fn count_up<'py>(
     while i.lt(n)? {
         rt::yield_(&i).await?;
         i = rt::iadd(&i, 1)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(rt::none(py))
 }
@@ -312,7 +312,7 @@ pub async fn accumulate<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>>
             return Ok(total);
         }
         total = rt::iadd(&total, &x)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -330,7 +330,7 @@ pub async fn resilient<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAny>> 
             }
             Err(err) => return Err(err),
         }
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -784,7 +784,7 @@ pub fn trampoline<'py>(
         } else {
             m.global("sum")?.call1((&args,))?
         };
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 
@@ -804,7 +804,7 @@ pub async fn stubborn_in_except<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py,
                     Err(err) if frame.matches(&err, || m.global("GeneratorExit"))? => {}
                     Err(err) => return Err(err),
                 }
-                py.check_signals()?;
+                rt::checkpoint(py)?;
             }
         }
         Err(err) => Err(err),

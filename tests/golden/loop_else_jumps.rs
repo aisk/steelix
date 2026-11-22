@@ -59,14 +59,14 @@ pub fn countdown<'py>(m: &rt::Module<'py>, n: &Bound<'py, PyAny>) -> PyResult<()
                     break 'while_else;
                 }
                 i = rt::iadd(&i, 1)?;
-                py.check_signals()?;
+                rt::checkpoint(py)?;
             }
             rt::builtins::print(py, ("short", &n))?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
             continue 'outer;
         }
         rt::builtins::print(py, ("long", &n))?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(())
 }

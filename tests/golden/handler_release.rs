@@ -170,7 +170,7 @@ pub fn frame_names<'py>(
     while !tb.is_none() {
         names.append(tb.attr("tb_frame")?.attr("f_code")?.attr("co_name")?)?;
         tb = tb.attr("tb_next")?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(names.into_any())
 }

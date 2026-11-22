@@ -48,7 +48,7 @@ pub fn in_while<'py>(
             break;
         }
         out.append(&item)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
     Ok(PyTuple::new(py, [out.as_any(), &item])?.into_any())
 }

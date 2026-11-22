@@ -50,7 +50,7 @@ pub mod body_ {
         }
         while ns.get("total")?.gt(10)? {
             ns.set("total", rt::isub(&ns.get("total")?, 1)?)?;
-            py.check_signals()?;
+            rt::checkpoint(py)?;
         }
         ns.set("names", PyList::empty(py))?;
         if ns
