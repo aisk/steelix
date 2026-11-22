@@ -23,21 +23,23 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       CARGO_TERM_COLOR: always
+      # The same interpreter as CI (`.python-version` accepts any 3.14).
+      UV_PYTHON: "3.14.9"
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v6
 
       - name: Install Python
-        run: uv python install 3.14.9
+        run: uv python install "$UV_PYTHON"
 
       # The same toolchain as CI.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.95.0"
 
-      # `cargo publish` builds the crates, and PyO3 needs the interpreter
-      # that `.cargo/config.toml` names.
+      # `cargo publish` builds the crates, and PyO3 needs the virtual
+      # environment that `.cargo/config.toml` names.
       - name: Set up the environment
         run: uv sync --locked
 

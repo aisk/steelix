@@ -1,3 +1,10 @@
-# Point PyO3 at the project's uv managed interpreter (run `uv sync` first).
+# Point PyO3 at the project's uv managed virtual environment (run `uv sync`
+# first). PyO3 looks for the interpreter inside it: `.venv/bin/python`, or
+# `.venv\Scripts\python.exe` on Windows. Cargo has no per-platform `[env]`, so
+# a `PYO3_PYTHON` path here could only be right on one of them.
+#
+# `PYO3_PYTHON` in the environment still takes precedence. PyO3 ignores
+# `VIRTUAL_ENV` when conda's `CONDA_PREFIX` is also set (an activated conda
+# environment); set `PYO3_PYTHON` then.
 [env]
-PYO3_PYTHON = { value = ".venv/bin/python", relative = true }
+VIRTUAL_ENV = { value = ".venv", relative = true, force = true }

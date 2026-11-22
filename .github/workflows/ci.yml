@@ -20,6 +20,10 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
+      # `.python-version` accepts any 3.14 so that developers need not have
+      # this exact patch release; CI uses the one the copies of the standard
+      # library in tests/apps come from.
+      UV_PYTHON: "3.14.9"
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +32,7 @@ jobs:
           enable-cache: true
 
       - name: Install Python
-        run: uv python install 3.14.9
+        run: uv python install "$UV_PYTHON"
 
       # Pinned so new clippy lints do not turn CI red unannounced; bump
       # together with the toolchain used for development.
@@ -42,23 +46,38 @@ jobs:
           # The e2e tests build every generated crate in target/e2e.
           cache-all-crates: true
 
+      # The dist tests run the built program in a sandbox, bwrap. The image
+      # does not have it, and the Ubuntu mirror has been unreachable for
+      # hours at a time, so the package is kept in the Actions cache and
+      # only downloaded on a miss.
+      - name: Cache bubblewrap
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/bubblewrap
+          key: bubblewrap-${{ matrix.os }}-1
+
       - name: Install bubblewrap
         if: runner.os == 'Linux'
-        # The dist tests run the built program in a sandbox. Ubuntu 24.04
+        # The image comes with package lists, so a download usually needs no
+        # `apt-get update`; it is only the fallback for a retry. Ubuntu 24.04
         # restricts unprivileged user namespaces, which bwrap needs.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
+          if ! command -v bwrap > /dev/null; then
+            mkdir -p ~/bubblewrap
+            cd ~/bubblewrap
+            for attempt in 1 2 3 4 5; do
+              if ls ./*.deb > /dev/null 2>&1; then break; fi
+              apt-get download -o Acquire::Retries=3 bubblewrap && break
+              sleep $((attempt * 20))
+              sudo apt-get update || true
+            done
+            sudo dpkg -i ./*.deb
+          fi
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Set up the environment
         run: uv sync --locked
-
-      - name: Point PyO3 at the virtual environment
-        if: runner.os == 'Windows'
-        # `.cargo/config.toml` names `.venv/bin/python`, which Windows does
-        # not have; the environment variable takes precedence over it.
-        run: echo "PYO3_PYTHON=$GITHUB_WORKSPACE/.venv/Scripts/python.exe" >> "$GITHUB_ENV"
 
       - name: Lint
         run: |
