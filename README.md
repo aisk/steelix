@@ -2,7 +2,7 @@
 
 steelix transpiles Python into Rust code that calls libpython through [PyO3](https://pyo3.rs).
 
-It is meant to help move Python projects to Rust. You transpile the project once and get a Rust program that behaves like the original. Semantics and error messages stay the same, the standard library and third party packages are still imported from Python, and tracebacks still point at the Python source. You can deploy that program right away, then replace its functions with ordinary Rust one at a time, keeping it working after every step.
+It is meant to help move Python projects to Rust. You transpile the project once and get a Rust program that behaves like the original. Semantics and error messages stay the same apart from a list of [known differences](docs/differences.md), the standard library and third party packages are still imported from Python, and tracebacks still name the Python files and functions. You can deploy that program right away, then replace its functions with ordinary Rust one at a time, keeping it working after every step.
 
 It is a bit like [Nuitka](https://nuitka.net), but the output is Rust instead of C, and the goal is readability rather than speed. Nuitka's C is meant for a compiler; steelix's Rust is meant to be read and edited by people, and becomes the starting point of the port. It is plain PyO3 plus a small runtime crate.
 
@@ -114,7 +114,7 @@ m.set_global(
 )?;
 ```
 
-`cargo build` in `out/` produces an executable that embeds libpython and prints `6`, like `python inventory.py`. `Item` is still a real Python class whose methods are native functions, and `load` is a real Python function (`inspect.signature`, pickling and monkeypatching still work).
+`cargo build` in `out/` produces an executable that embeds libpython and prints `6`, like `python inventory.py`. `Item` is still a real Python class whose methods are native functions, and `load` is a native function object that Python code can call, wrap, pickle and replace like a Python function (`inspect.signature` and `functools.wraps` work; calls from inside the same module go straight to the Rust function, see [Differences from CPython](#differences-from-cpython)).
 
 ## Installation
 
@@ -139,6 +139,8 @@ steelix coverage app.py                        # how much of the code becomes Ru
 steelix attrs app.py --class Point             # who reads and writes the attributes of a class
 ```
 
+Transpiling again into the same directory replaces the files that are still as steelix wrote them, but refuses to overwrite files you edited since and lists them; `--overwrite` replaces them anyway. The record of what was generated is `.steelix-generated` in the crate; keep it with the crate. The crate refers to the project directory by a path relative to itself, so the two can be committed or moved together.
+
 When building a generated crate yourself, point PyO3 at the interpreter whose packages the program uses: `PYO3_PYTHON=/path/to/venv/bin/python cargo build` (`\path\to\venv\Scripts\python.exe` on Windows).
 
 `steelix build` bundles the Python runtime and the site-packages of the build environment next to the executable, so the result runs on a machine without Python (Linux, glibc at least as new as the build machine's).
@@ -157,9 +159,31 @@ Each generated function keeps its Python calling convention, so it can be rewrit
 - Relocatable distributions (`steelix build`) only for Linux. On macOS and Windows the generated crates build and run on the machine they were built on.
 - No free-threaded Python.
 
+## Differences from CPython
+
+The program raises the same exceptions with the same messages, but it is not the interpreter running your code. Read [docs/differences.md](docs/differences.md) before deploying; the ones most likely to matter:
+
+- Tracebacks have a frame for each native function with its file and name, but by default the line is the line of its `def` (line 1 for module code), not the failing statement. `steelix transpile --traceback-lines` reports statement lines, at the cost of a `frame.line(N);` before statements in the generated Rust.
+- Native functions, generators and coroutines are runtime types, not `types.FunctionType` and friends (`inspect.isfunction` is False), and have no bytecode. Native code runs without interpreter frames, so `sys._getframe`, `logging`'s line numbers, profilers, coverage and debuggers do not see inside it.
+- Calls between the functions of a module are direct Rust calls; replacing a function from another module (`mock.patch("app.f")`) does not affect them.
+
+## Performance
+
+Transpiling does not make a program faster: the generated code makes the same calls into libpython as the interpreter. Measured release builds are roughly on par with CPython. Plain loops, dict and string code run at the same speed, method-heavy object code is up to about 1.7x slower, and direct recursive calls are about 1.7x faster. The speed-up comes from the functions you rewrite in plain Rust.
+
 ## Status
 
-Early, but tested against CPython: every test case, six command line tools of the standard library, the standard library `json` package and a small Scheme interpreter run with the same output and the same tracebacks as under CPython, and 154 standard library modules transpile into crates that compile without warnings.
+Early, but tested against CPython: every test case, six command line tools of the standard library, the standard library `json` package and a small Scheme interpreter run with the same output and the same tracebacks (built with `--traceback-lines`) as under CPython, and 154 standard library modules transpile into crates that compile without warnings.
+
+## Development
+
+```sh
+uv sync                                    # any Python 3.14; CI uses 3.14.9
+uv run pytest -m "not e2e and not cargo"   # the quick tests
+uv run pytest                              # everything, building every generated crate
+```
+
+`.cargo/config.toml` points PyO3 at `.venv`, so `cargo build` and `cargo clippy` work at the repository root after `uv sync`, on Windows too; `PYO3_PYTHON` overrides it. The runtime's Rust unit tests also need libpython on the loader path, so pytest runs them. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

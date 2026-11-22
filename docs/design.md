@@ -83,7 +83,7 @@ Cargo crate
 steelix/
 ├── pyproject.toml             uv 项目，Python 3.14
 ├── Cargo.toml                 Rust workspace，成员为 crates/*
-├── .cargo/config.toml         仓库内构建时 PYO3_PYTHON 指向 .venv/bin/python
+├── .cargo/config.toml         仓库内构建时用 VIRTUAL_ENV 让 PyO3 找到 .venv 里的解释器
 ├── docs/
 │   ├── design.md              本文档
 │   ├── roadmap.md             里程碑与任务拆解
@@ -360,7 +360,7 @@ M10 在 skime 上测到 Python 调用原生函数比调用 Python 函数慢几�
 
 - 参数不纯时的方法调用 `o.attr("m")?.call1((f()?,))?` 仍然先创建 bound method。要避免它得在 runtime 里重新实现 `_PyObject_GetMethod`（类型的 MRO、数据描述符、实例 dict、`__getattr__`），不算低成本
 - 字符串常量 `rt::str(py, "..")` 仍然每次新建。缓存它们会让 `is` 的结果和以前不同（虽然更接近 CPython），而且不在热点上
-- 循环里的 `py.check_signals()`、`#[rt::frame]` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动（M14 之后 `for` 循环的检查挪进了 `rt::iter`，为了可读性）
+- 循环里的信号检查（现在是 `rt::checkpoint`，§12）、`#[rt::frame]` 和直接调用的 `RecursionGuard` 都只占几 ns，没有动（M14 之后 `for` 循环的检查挪进了 `rt::iter`，为了可读性）
 - M14 之后的 review 又测过不值得的：字符串常量缓存、`__slots__` 的 inline cache（`roadmap.md` 的性能候选项）；去掉 vectorcall 入口的 `RecursionGuard` 最多快 6.5%，但 Python 侧的递归要靠它抛 `RecursionError`
 - 全局变量的缓存（dict watcher），理由见第 7 节
 
@@ -692,7 +692,7 @@ Ok(dict.into_any())
 - 作用域和 CPython 一样：第一个 `for` 的可迭代对象在外层求值，其余部分在推导式里。`symtable` 把推导式的变量算作外层函数的局部变量，分析（`frontend/scope.py` 的 `walk_scope`）把推导式里对它们的使用排除在外，所以 `[x for x in x]`、和全局变量同名的推导式变量都是对的。函数里推导式变量的 Rust 名字用函数的重命名表，模块级和类体里另取不冲突的名字，推导式结束后临时变量可以再用这个名字
 - 类体里的推导式看不到类的命名空间（第一个可迭代对象除外），名字直接查 globals 和 builtins，和 CPython 一样抛 `NameError`
 - dict 推导式先求值 key 再求值 value（3.8 起的顺序），重复的 key 后者覆盖前者。set 推导式的 `set.add(..)` 是 `PySet` 自己的方法，生成的方法调用带 `concrete` 标记，检查器（§2）不要求擦除类型
-- 和普通的 `for` 一样用 `rt::iter` 迭代，取每个后续元素之前检查信号
+- 和普通的 `for` 一样用 `rt::iter` 迭代，取每个后续元素之前做一次 `rt::checkpoint`（信号、让出 GIL，§12）
 - 行号：错误报告在外层帧里。默认（§9）就是外层函数的 `def` 行。`--traceback-lines` 时行号是出错的部分所在的行：推导式跨行时，第一个可迭代对象、条件、元素前面各写 `frame.line(N)`，迭代体改变了行号时在结尾设回 `for` 的行（取下一个元素时出错报这一行），推导式结束后设回语句的行。推导式写在一行里时没有额外的 marker
 - 推导式里定义的 lambda 或生成器表达式捕获推导式的变量时，这个变量是一个在循环之前创建的 `rt::Cell`，所有迭代共用（`[lambda: i for i in range(3)]` 的三个函数都返回 2），和 CPython 内联之后的行为一样
 - `locals()`、`vars()`、`dir()`（不带参数）和不带命名空间的 `exec`/`eval` 在推导式里会看到推导式的变量，所在的函数或语句保留为 Python
@@ -820,7 +820,7 @@ pub async fn running_total<'py>(m: &rt::Module<'py>) -> PyResult<Bound<'py, PyAn
             return Ok(total);
         }
         total = rt::iadd(&total, &x)?;
-        py.check_signals()?;
+        rt::checkpoint(py)?;
     }
 }
 rt::def!(m, gen running_total())?;
@@ -839,7 +839,7 @@ lowering（`lower/expr.py` 的 `suspension`、`lower/handling.py`、`lower/stmt.
       let iter = rt::aiter(&xs)?;
       while let Some(x) = rt::anext(&iter).await? {
           ..
-          py.check_signals()?;
+          rt::checkpoint(py)?;
       }
   }
   ```
@@ -1222,7 +1222,8 @@ m.set_global(
   - 生成的 `Cargo.toml` 在 dev profile 下把 pyo3、pyo3-ffi 和 runtime 设为 `opt-level = 3`，生成的 crate 本身设为 1。没有优化的 PyO3 让每个 Python 操作慢几倍；不用 `package."*"`，因为它也会优化 proc macro，让干净构建的时间翻倍。实测（M3a）一个递归加循环的基准：全部 `opt-level = 0` 时 1.39s，现在的配置 0.40s，而 CPython 是 0.18s；干净构建从 11.5s 增加到 15.3s，改一行后重新构建从 0.5s 增加到 1.0s。转换出来的代码每个操作仍然经过 C API，没有字节码解释的开销但也没有 CPython 的特化和内联缓存，在函数被改写成原生 Rust 之前不会比 CPython 快
   - release profile 打开 `lto = "fat"` 和 `codegen-units = 1`。生成代码调用大量很小的 runtime 函数（`attr`、`global`、`frame::run` 等），没有 LTO 时它们跨 crate 内联不了。skime 的 fib 22（release）从 0.92s 降到 0.85s（CPython 0.41s），二进制小 7%。代价是 release 构建变慢：改生成代码后重新构建从 33s 到 51s，干净构建从 44s 到 62s。只影响编译方式，不改变行为和生成的代码
   - 只有 crate 是 workspace 根时 profile 才生效，所以只在独立 crate（默认）里生成
-  - 开发构建（在生成的 crate 里 `cargo build`）：build.rs 设置指向构建时 libpython 的 rpath（macOS 上 framework 构建的 Python 另加 framework 的 rpath），避免运行时加载到系统的 libpython（Windows 没有 rpath，build.rs 把解释器的 `python314.dll` 复制到 target 的 profile 目录和放测试二进制的 `deps` 里，加载器在可执行文件旁边找到它），并把构建用的解释器（`PYO3_PYTHON`）和项目目录作为 `STEELIX_PYTHON`、`STEELIX_PROJECT` 交给编译器。程序用这个解释器的安装和 venv，只适合在本机运行。分发用的构建见下面的"分发"
+  - 开发构建（在生成的 crate 里 `cargo build`）：build.rs 设置指向构建时 libpython 的 rpath（macOS 上 framework 构建的 Python 另加 framework 的 rpath），避免运行时加载到系统的 libpython（Windows 没有 rpath，build.rs 把解释器的 `python314.dll` 复制到 target 的 profile 目录和放测试二进制的 `deps` 里，加载器在可执行文件旁边找到它），并把构建用的解释器（`PYO3_PYTHON`）和项目目录作为 `STEELIX_PYTHON`、`STEELIX_PROJECT` 交给编译器。build.rs 里的项目目录 `PROJECT` 是相对于 crate 目录的路径（如 `".."`），构建时相对 `CARGO_MANIFEST_DIR` 解析成绝对路径（解析符号链接），所以 crate 和项目一起提交或移动后照样能用，生成的文件里也没有本机路径；只有两者除了文件系统根（或 Windows 的盘符）没有共同的上级目录时才写绝对路径。程序用这个解释器的安装和 venv，只适合在本机运行。分发用的构建见下面的"分发"
+  - 再次生成到同一个目录不会覆盖手改过的文件（§15）：每次生成把写出的文件和内容的哈希（统一换行符后）记在 crate 根的 `.steelix-generated`（JSON）里。下次生成时，和记录一致的文件（`.rs` 文件 rustfmt 格式化后一致也算）照常替换，不再生成的照常删除；和记录不一致的、或者没有记录（用户自己加的、旧版本生成的）而内容和新生成的不同的文件，报错列出这些文件，什么都不写，`--overwrite` 强制替换。不再生成但手改过的文件保留，给出警告，不再记录。用户自己加的、不和生成文件同名的文件从来不动
   - 与 `python app.py` 一致的脚本信息（M2，M7 改成运行时确定）。`main.rs` 里只有脚本相对于项目目录的名字 `steelix_runtime::script!("app.py")`，宏在生成的 crate 里读取 build.rs 给出的两个路径（分发构建时没有），runtime 在启动时算出下面这些路径。所以 `main.rs` 里没有本机的绝对路径，golden 也不用替换路径
     - `sys.path[0]` 是项目目录（脚本所在目录，解析符号链接），所以脚本旁边还没转换的 Python 模块照样能 import
     - `__main__` 的 `__file__` 是项目目录加上脚本名，是绝对路径（3.9 起 CPython 也是绝对路径），`__cached__` 是 `None`
@@ -1302,7 +1303,7 @@ Windows 上 runtime 的差异：
 - 未捕获的 `KeyboardInterrupt` 之后和 CPython 一样以 `STATUS_CONTROL_C_EXIT`（`0xC000013A`）退出。测试里没法只给一个进程发 Ctrl-C（`CTRL_C_EVENT` 发给整个控制台），中断的用例跳过
 - 解释器角色看程序名去掉 `.exe` 之后是不是 `python`。`steelix test` 不能建符号链接（需要特权），改用硬链接（不行就复制）的 `python.exe`，旁边同样链接 `python314.dll`
 - runtime 自己声明的几个 CPython 函数（`PyMethod_New`、`PyErr_FormatUnraisable`）要说明来自哪个 DLL：PyO3 用 `raw-dylib`，但它需要字面量的 DLL 名，runtime 的 build.rs 改为链接解释器 `libs/` 下的导入库 `python314.lib`
-- `.cargo/config.toml` 里的 `PYO3_PYTHON` 是 `.venv/bin/python`，Windows 上要在环境变量里设成 `.venv\Scripts\python.exe`（环境变量优先于配置文件）
+- `.cargo/config.toml` 设的是 `VIRTUAL_ENV = .venv`（不是 `PYO3_PYTHON`），PyO3 在 Windows 上找 `Scripts\python.exe`，别的平台找 `bin/python`，所以仓库内的构建在 Windows 上不用另外设置。环境变量 `PYO3_PYTHON` 仍然优先；同时设了 conda 的 `CONDA_PREFIX` 时 PyO3 会忽略这两个变量，要手工设 `PYO3_PYTHON`
 - steelix 读写文本文件都显式用 UTF-8（Windows 默认是 locale 的编码，比如 GBK），调用 rustfmt 和读 cargo 的输出也是
 
 Windows 的分发要做的是：`python314.dll` 放在可执行文件旁边由加载器找到（没有 rpath），标准库在 `Lib/`、扩展模块在 `DLLs/`，`sys.executable` 不能是符号链接（要复制一个 `python.exe` 和它旁边的 DLL，或者用别的方式区分角色），`--remap-path-prefix` 和测试里的路径也要换成 Windows 的写法。multiprocessing 的 spawn 在 Windows 上用 `_winapi.CreateProcess`，命令行的识别方式一样（开发构建已经验证过）；没有 forkserver。现在 `steelix build` 在 Windows 上直接报错。
@@ -1331,6 +1332,7 @@ Windows 的分发要做的是：`python314.dll` 放在可执行文件旁边由�
   - 被重新赋值的参数（`let mut n = n.clone();`）不会让实参提前释放，调用方一直持有实参到调用返回，CPython 的帧拥有实参，`f(T())` 里的 `T()` 在 `n` 被重新赋值时就释放
   - 经过函数对象的调用（`f.call1((a, b))?`，例如嵌套函数和不能直接调用的模块函数）的参数在调用返回后按书写顺序释放，先 `a` 后 `b`，因为 Rust 的元组按字段顺序 drop。CPython 先释放 `b`。直接调用的参数是语句里的临时变量，按相反的顺序释放，和 CPython 一样
   - `match`（§8 "match 语句"，`tests/cases/match_release.py`）的主体活到 `match` 结束，模式取出来但没有绑定名字的值（`if let Some([item, x])` 里的 `item`、类模式的属性）活到这个 case 结束，CPython 在执行体之前就释放了它们。只在一个 case 里用到的捕获名字在这个 case 结束时释放，和 `for` 的目标变量一样，CPython 要等到函数返回
+  - 没有被读取的 `_`（`for name, _ in pairs`、`_, ext = os.path.splitext(p)`）在解包的 `let` 里写成 Rust 的 `_` 模式（`let [name, _] = rt::unpack(&item?)?;`，`rustast/cleanup.py` 的 `ignore_unread`），这个元素在语句结束时就释放，CPython 要等 `_` 被重新赋值或者函数返回。单独的 `_ = f()` 不改写（`let _ = ..` 会立即释放，有人可能靠它让对象活着），`if let Some(underscore)` 也不改写（clippy 要求把 `Some(_)` 写成 `.is_some()`，那会在执行块之前就释放这个值）
   - 一条语句里的临时值活到语句结束（§8 的"粒度是语句"）：`print("made", D(tag).tag)` 里的 `D` 在 `print` 之后才释放，CPython 取完 `.tag` 就释放
   - 异常离开原生函数时，函数的局部变量随着 Rust 的返回立即释放。CPython 的 traceback 引用帧，帧持有局部变量，它们要等 traceback 释放（通常是调用方的 `except` 结束）才释放。原生帧没有 `f_locals`，traceback 里也看不到它们
 
@@ -1343,9 +1345,15 @@ Windows 的分发要做的是：`python314.dll` 放在可执行文件旁边由�
   - `warnings.warn` 的位置是调用这个原生函数的保留代码所在的行；整条调用链都是原生代码时是 `<sys>:0`
     - 所以默认的 filter 对它们和 CPython 不同：`DeprecationWarning` 默认只在 `__main__` 里显示，`<sys>:0` 的不显示；同一条文字的警告在同一个位置只显示一次，所有 `<sys>:0` 的都算同一个位置，CPython 里不同行的会各显示一次。原生协程和生成器的 `throw(type, value, tb)` 的 `DeprecationWarning` 和多个 `coroutine '..' was never awaited` 就是这样（`coroutine_warnings` 用例）
   - 从调用方帧推断模块名的 API：三个参数的 `type(name, bases, dict)` 创建的类没有 `__module__`，`enum.Enum("C", "A B")` 这样的函数式 API 得到 `<unknown>`。`collections.namedtuple` 找不到帧时用 `__main__`，bin 模式的主模块碰巧是对的
-  - 要修好需要在原生函数运行期间压入真正的解释器帧，CPython 没有公开 API（第 9 节）
-- 原生的 `while` 循环每次迭代结尾（以及 `continue` 之前）调用 `py.check_signals()?`（`PyErr_CheckSignals`，M3d 加入，M4 从迭代开头移到结尾，traceback 的行号因此和 CPython 一样是最后执行的语句）。`for` 循环和推导式（M14 之后）用 `rt::iter(&xs)?` 代替 `xs.try_iter()?`，它在取第二个及以后的元素之前检查，循环体里不用再写这一行。`--traceback-lines` 时循环体结尾要把行号设回 `for` 那一行，`rt::iter` 的检查在那之后，报的会是 `for` 行，而 CPython 报循环体最后执行的语句（检查在回跳的 `JUMP_BACKWARD` 上），所以这时仍然写 `xs.try_iter()?`，在设回行号之前 `py.check_signals()?;`（`interrupt_for` 用例）。两处都检查不行：信号落在两次检查之间时报的是 `for` 行，CI 上偶发过。对应 CPython 在循环回跳处检查信号，所以 Ctrl-C 能打断只调用 C API 的循环，抛出 `KeyboardInterrupt`。它同时会运行已经排上的循环垃圾回收，和解释器的检查点一样。代价实测每次迭代 3 到 5 ns（release，`for i in range(n): total += i` 从 36 ns 到 42 ns，空循环从 6.3 ns 到 9.7 ns），只在几乎什么都不做的循环里明显。bin 模式下未捕获的 `KeyboardInterrupt` 打印 traceback，finalize 之后和 CPython 一样用 `SIGINT` 结束进程（shell 看到的是被中断，`subprocess` 看到的退出码是 `-2`）
-- 原生循环里 GIL 不会像解释器那样定期切换，其他 Python 线程要等到原生代码调用会释放 GIL 的 API 时才能运行
+  - `sys._getframe()`、`inspect.currentframe()`、`inspect.stack()` 在原生函数里得到的是离它最近的 Python 帧；整条调用链都是原生代码时（bin 模式下模块代码本身就是原生的）没有 Python 帧，`sys._getframe()` 抛 `ValueError: call stack is not deep enough`，`inspect.currentframe()`、`inspect.stack()` 也一样
+  - `sys.settrace`、`sys.setprofile` 和 `cProfile` 看不到原生函数：它们的事件来自解释器执行字节码（`call`、`line`、`return`）和调用 C 函数（`c_call`，只对 `builtin_function_or_method`），原生函数两者都不是。profiler 把原生函数的时间算在调用它的 Python 帧上，调试器（`pdb`、IDE）不能在原生函数里设断点或单步执行。`sys.monitoring` 只有 Python 字节码调用它时的 `CALL` 事件，没有 `PY_START`、`LINE`、`PY_RETURN`。要看原生代码的耗时，用看得到 Rust 函数的 profiler（`perf`、`py-spy --native` 等）
+  - 要修好需要在原生函数运行期间压入真正的解释器帧，CPython 没有公开 API（第 9 节）。在每次调用时创建帧对象并把它链进线程状态的代价和风险都太大（帧的布局是内部的，每个版本都变），不做
+- 原生的 `while` 循环每次迭代结尾（以及 `continue` 之前）调用 `rt::checkpoint(py)?`，相当于 CPython 的 eval loop 在循环回跳处检查 eval breaker（M3d 加入时是 `py.check_signals()?`，M4 从迭代开头移到结尾，traceback 的行号因此和 CPython 一样是最后执行的语句）。`for` 循环和推导式（M14 之后）用 `rt::iter(&xs)?` 代替 `xs.try_iter()?`，它在取第二个及以后的元素之前做同样的检查，循环体里不用再写这一行。`--traceback-lines` 时循环体结尾要把行号设回 `for` 那一行，`rt::iter` 的检查在那之后，报的会是 `for` 行，而 CPython 报循环体最后执行的语句（检查在回跳的 `JUMP_BACKWARD` 上），所以这时仍然写 `xs.try_iter()?`，在设回行号之前 `rt::checkpoint(py)?;`（`interrupt_for` 用例）。两处都检查不行：信号落在两次检查之间时报的是 `for` 行，CI 上偶发过。检查做两件事
+  - 运行排上的信号处理函数（`PyErr_CheckSignals`），所以 Ctrl-C 能打断只调用 C API 的循环，抛出 `KeyboardInterrupt`。它同时会运行已经排上的循环垃圾回收，和解释器的检查点一样。bin 模式下未捕获的 `KeyboardInterrupt` 打印 traceback，finalize 之后和 CPython 一样用 `SIGINT` 结束进程（shell 看到的是被中断，`subprocess` 看到的退出码是 `-2`）
+  - 让别的线程拿到 GIL。别的线程等 GIL 超过 `sys.getswitchinterval()`（默认 5 ms）时会请求持有者放开，解释器在检查点上放开 GIL，等那个线程拿到之后再重新排队。`rt::checkpoint` 照样做（`py.detach(|| ())`；有放开请求时 CPython 的 `drop_gil` 会等到别的线程拿到 GIL，即 `FORCE_SWITCHING`），所以原生循环和 CPython 一样定期让别的 Python 线程运行。0.3.2 及以前原生循环一直持有 GIL，直到调用会释放 GIL 的 API：等别的线程设置标志的 `while not done: ..` 永远不结束，后台线程在长循环期间完全不运行（`thread_switching` 用例，修复前每一项都是 False）。函数开始时（`RecursionGuard::enter`：带 `recursive` 的直接调用、经过函数对象的调用、协程和生成器的恢复）和生成器表达式恢复时也让出 GIL，对应 CPython 在 `RESUME` 上的检查，所以没有循环的递归也不会饿死别的线程。这两处不运行信号处理函数，`KeyboardInterrupt` 仍然只从循环里抛出：在那里抛出的异常不在这个函数的帧里
+  - 两件事都由 CPython 在线程状态的 `eval_breaker` 上置位通知（低 8 位：`_PY_GIL_DROP_REQUEST_BIT`、`_PY_SIGNALS_PENDING_BIT`、`_PY_GC_SCHEDULED_BIT` 等）。`rt::checkpoint` 先读这个字（`PyThreadState_GetUnchecked` 加一次原子读），没有事件时直接返回，有事件时才放开 GIL、调用 `PyErr_CheckSignals`。`eval_breaker` 是 3.13 起公开头文件 `cpython/pystate.h` 里 `struct _ts` 的第四个字段，位的定义在内部头文件 `pycore_ceval.h`；pyo3-ffi 把 `PyThreadState` 当作不透明类型，所以 runtime 自己声明结构体的开头（`iter.rs`）。这依赖 CPython 的实现细节，支持新的 Python 版本时要核对。别的事件（`Py_AddPendingCall` 排上的调用、`PyThreadState_SetAsyncExc` 设置的异步异常）没有公开 API 可以处理，仍然要等原生代码回到解释器
+  - 代价（release，fat LTO，五个小基准：整数算术的 `for` 循环、对象方法调用、字符串方法、dict 读写、递归的 fib，各取 8 次运行的最小值）：之前每次迭代调用 `PyErr_CheckSignals` 约 3 到 5 ns（`for i in range(n): total += i` 从 36 ns 到 42 ns，空循环从 6.3 ns 到 9.7 ns）。换成先读 `eval_breaker` 之后循环为主的四项（`loop_arith`、`objects`、`strings`、`dicts`）和之前在测量误差以内，递归为主的 `fib` 慢约 3%（每次调用开始时多读一次）
+- 生成器表达式的元素全部被 C 实现的函数（`sum`、`any`、`"".join`）取走时，每次恢复只让出 GIL，不检查信号：step 里的 `rt::iter` 每次调用都是新的，只在第二个元素之前检查，所以 Ctrl-C 要等这个调用结束才生效，CPython 在生成器恢复时（`RESUME`）也处理信号
 - 直接调用的递归受 C 栈大小限制而不是 `sys.getrecursionlimit()`，`RecursionError` 的信息是 `Stack overflow (used N kB) ...` 而不是 `maximum recursion depth exceeded`
 - 模块级代码里，`def` 执行之前的调用走 globals 查找（会得到 `NameError`）；但函数体里的直接调用不检查被调函数的 `def` 是否已经执行过
 - `rt::builtins` 里的 builtin（`print`、`max`、`sorted` 等）在参数求值之后才查找（Python 是先查找名字再求值参数），只有参数求值过程中替换了这个 builtin 才看得出区别
@@ -1355,7 +1363,7 @@ Windows 的分发要做的是：`python314.dll` 放在可执行文件旁边由�
 - `from x import y` 失败时 `ImportError` 的文字和 CPython 一样（M6 起包括循环 import 的"partially initialized module"和模块名遮蔽标准库的提示，§7）。模块级 import 传给 `__import__` 的 `locals` 是 `None`（CPython 传模块的 dict）
 - warning（例如 `DeprecationWarning`）的输出里没有源码行
 - 对自身模块的修改（第 7 节）只识别常见写法。识别不到的有：`importlib.import_module(__name__)`、`__import__(__name__)`、`getattr(sys, "modules")` 等其他取得模块对象的方式，经过参数、容器、属性传递的模块对象，单个模块的 ext 模式下按模块的真实名字 `import` 自己，`exec`/`eval` 的命名空间是别处得到的模块 dict，项目以外的模块里的修改（没有一起转换的测试里的 `mock.patch("app.f")`），以及项目内用别的写法做的修改（模块名是算出来的字符串等）。这些情况下直接调用看不到替换
-- 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，`__code__` 只描述签名，没有字节码，`co_firstlineno` 是 1（`dis`、`inspect.getsource` 等依赖字节码或源位置的工具无法使用）。`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）。函数类型本身的 `type(f).__module__` 是实例属性 `__module__` 的 getset descriptor 而不是字符串（PyO3 的类是 heap type，类型的 `__module__` 从类型的 `__dict__` 里读，被实例的 getter 占了），`type(f).__name__` 是 `function`（M10 检查 skime 的函数是否原生时发现）
+- 函数对象是 `Function` 而不是 `types.FunctionType`：`isinstance(f, types.FunctionType)` 和 `inspect.isfunction(f)` 为 False，`__code__` 只描述签名，没有字节码，`co_firstlineno` 是 1（`dis`、`inspect.getsource` 等依赖字节码或源位置的工具无法使用：`inspect.getsource(f)` 抛 `TypeError: module, class, method, function, traceback, frame, or code object was expected, got function`，`inspect.getsource(f.__code__)` 不报错，但返回的是模块开头的代码）。让 `inspect` 接受原生函数只能伪装成 `types.FunctionType`（例如让 `__class__` 返回它），但认出函数之后会用到字节码、`__globals__` 的 CPython 工具（cloudpickle 按值序列化函数、`copy` 函数对象的写法、`types.FunctionType(f.__code__, ..)`）就会出错，不做。正确的 `co_firstlineno` 要让 `rt::def!` 知道 `def` 的行号，那在 `#[rt::frame]` 里，不改生成代码拿不到，也不做`__closure__` 存在，内容是真实的 cell。`inspect.signature`、`functools.wraps`、pickle 能正常使用（第 6 节）。函数类型本身的 `type(f).__module__` 是实例属性 `__module__` 的 getset descriptor 而不是字符串（PyO3 的类是 heap type，类型的 `__module__` 从类型的 `__dict__` 里读，被实例的 getter 占了），`type(f).__name__` 是 `function`（M10 检查 skime 的函数是否原生时发现）
 - `del f.__defaults__` 等删除元信息属性的操作抛 `AttributeError`，CPython 是把它设为 None。赋值为 None 的行为一致
 - 函数类型是每个扩展模块自己的：一个进程里 import 了两个 steelix 生成的扩展模块（ext 模式）时，各自带一份 runtime，`type(a.f) is type(b.f)` 为 False，`isinstance(a.f, type(b.f))` 也是 False。生成器表达式的类型、`NativeLoader` 等 runtime 的类同样如此。bin 模式和一个项目的所有模块共用一个 runtime，没有这个问题
 - 注解由源码文本 `eval` 得到。STRING 格式对非字符串字面量的注解直接返回源码文本，CPython 由 AST 重新生成，空白等写法可能不同；函数注解在 FORWARDREF 格式下创建的 `ForwardRef` 没有 `owner`（类注解的有）。`__annotate__` 对 FORWARDREF、STRING 格式直接返回结果，CPython 编译器生成的 `__annotate__` 只支持 VALUE，其余格式由 `annotationlib` 用假 globals 实现，通过 `annotationlib.get_annotations` 使用时没有区别
@@ -1576,7 +1584,7 @@ stdlib_calendar.py: native 50/72 (69%) functions, 42/42 (100%) module statements
 - 生成的 `Cargo.toml` 依赖 `steelix-runtime` 的方式：在源码 checkout 里运行时（测试和开发）用 path 依赖，指向仓库里的 `crates/steelix-runtime`；从 PyPI 安装的 steelix 找不到这个目录，写成 crates.io 上的版本（`emit/crate.py` 的 `RUNTIME_VERSION`，现在是 `"0.3"`）。`--runtime-path` 可以显式指定。所以 runtime 必须和 PyPI 上的 steelix 同步发布到 crates.io，版本的前两位一致
 - **发版**：PyPI 上的 `steelix` 和 crates.io 上的 `steelix-runtime` 一起发布。runtime 依赖的 `steelix-runtime-macros` 有变化时先发布它，没有变化就不用动（0.3.1 的 runtime 用的是 0.3.0 的宏）。发版前先 `git fetch`，确认本地包含远端的提交，git tag 用 `v` 前缀（`v0.1.0`）。发布由 `.github/workflows/release.yml` 完成：改好三处版本号（`pyproject.toml`、`crates/steelix-runtime/Cargo.toml`，宏有变化时还有它的 `Cargo.toml` 和 runtime 对它的依赖）并提交，推送 tag `vX.Y.Z` 之后，workflow 先检查 tag、`steelix`、`steelix-runtime` 的版本一致，`RUNTIME_VERSION` 是 runtime 版本的前两位（`.github/release_versions.py`），然后依次发布宏（版本已经在 crates.io 上就跳过）、runtime、PyPI 上的 `steelix`，最后创建 GitHub release 并附上 wheel 和 sdist。两个 registry 都用 trusted publishing（OIDC），仓库里不存 token。每一步都跳过已经发布的东西，所以失败之后可以直接重跑。workflow 不重新跑测试，打 tag 之前先确认那个提交的 CI 是绿的。改了 runtime 的公开接口（生成代码用到的部分）时提升 `RUNTIME_VERSION`
 - 源码映射：函数前的 `// file.py:LINE` 注释，异常的 traceback 里有原生函数的帧，行号是 `def` 行，`--traceback-lines` 时语句前有 `frame.line(N);`，行号精确到语句（第 9 节）
-- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，Ubuntu 24.04、macOS 15 和 Windows Server 2025 各一个 job（macOS 和 Windows 上没有 `bwrap`，沙箱里的分发测试跳过，Windows 上整个分发都跳过），所有步骤都用 bash（Windows 默认的 pwsh 在多行命令中间失败时不会停），Windows 上把 `PYO3_PYTHON` 设成 `.venv\Scripts\python.exe`，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
+- **CI**（`.github/workflows/ci.yml`）：GitHub Actions 在 push 和 PR 时运行，Ubuntu 24.04、macOS 15 和 Windows Server 2025 各一个 job（macOS 和 Windows 上没有 `bwrap`，沙箱里的分发测试跳过，Windows 上整个分发都跳过），所有步骤都用 bash（Windows 默认的 pwsh 在多行命令中间失败时不会停）。Python 版本由 workflow 里的 `UV_PYTHON=3.14.9` 固定（`.python-version` 只写 `3.14`，开发时可以用任意 3.14 的补丁版本）。Linux 上的 `bwrap` 用缓存的 .deb 安装，缓存未命中时 `apt-get download` 并重试，平时不依赖 Ubuntu 的镜像，`uv python install 3.14.9`、Rust 1.95.0（固定版本，和开发用的工具链一致，新版 clippy 增加的 lint 不会让 CI 突然失败，升级时两边一起改），`uv sync --locked` 之后跑 `ruff check`、`ruff format --check`、`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings` 和完整的 `uv run pytest`（含 e2e、cargo、dist）。uv 和 cargo（包括 `target/e2e`）都有缓存。分发测试需要 `bwrap`，CI 用 apt 安装，并且关掉 Ubuntu 24.04 对非特权 user namespace 的 AppArmor 限制（`kernel.apparmor_restrict_unprivileged_userns=0`），否则 `bwrap` 无法启动。测试不依赖仓库以外的固定路径：Python 来自 `.venv`（`uv sync` 创建），分发测试从解释器本身推出标准库和 site-packages 的位置，没有 `bwrap` 时跳过
 
 ## 15. 把函数改写成原生 Rust（M3b）
 
