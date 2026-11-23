@@ -413,6 +413,7 @@ runtime 的公开接口多了 `rt::delegate`，生成的代码用到了它，和
 - [x] 0.3.0：`rt::frame!` 换成 `#[rt::frame]`、`frame.matches` 去掉行号，runtime 的公开接口不兼容，`RUNTIME_VERSION = "0.3"`，tag `v0.3.0`。`steelix-runtime-macros` 和 `steelix-runtime` 0.3.0 已发布到 crates.io，没有发 PyPI：发布时本地缺远端的 macOS 和 Windows 两个提交，runtime 0.3.0 不含它们
 - [x] 0.3.1：合并了 macOS 和 Windows 的支持，tag `v0.3.1`。`steelix-runtime` 0.3.1 已发布到 crates.io（宏 crate 没有变化，仍是 0.3.0）。PyPI 上没有单独发布，0.3.2 包含它的全部内容
 - [x] 0.3.2：`rt::builtins` 的简写、容器局部变量、没有返回值的函数返回 `PyResult<()>`。runtime 的公开接口只有兼容的新增（`rt::builtins` 的函数、`IntoReturn`、`Jump`），`RUNTIME_VERSION` 仍是 `"0.3"`，宏 crate 没有变化（0.3.0）。第一次由 workflow 发布，tag `v0.3.2`：Release workflow 成功，`steelix-runtime` 0.3.2 发布到 crates.io（宏 0.3.0 已在 crates.io 上，跳过），`steelix` 0.3.2 的 wheel 和 sdist 上传到 PyPI，GitHub release `v0.3.2` 附带这两个文件。按记录这是 0.1.0 之后 PyPI 上的第一个新版本
+- [x] 0.3.3：原生循环让出 GIL（`rt::checkpoint`）、再次转译时保留改过的文件（`--overwrite`、`.steelix-generated`）、`build.rs` 用相对路径找项目、没有读过的 `_` 写成 `_` 模式。runtime 的公开接口只有兼容的新增（`rt::checkpoint`），`RUNTIME_VERSION` 仍是 `"0.3"`，宏 crate 没有变化（0.3.0），tag `v0.3.3`
 - [x] 变更记录：仓库根目录的 `CHANGELOG.md`（英文）从 0.1.0 记起，写给 CLI 和 runtime crate 的用户，特别是 runtime 的不兼容变化。以后每次发版在里面加一节
 - [x] 自动发版：推送 tag `vX.Y.Z` 触发 `.github/workflows/release.yml`，检查版本后发布 crates.io 上的宏和 runtime、PyPI 上的 `steelix`，再创建 GitHub release（design §14）。需要先在 crates.io（两个 crate）和 PyPI 上把这个 workflow 设成 trusted publisher
 - [ ] 以后每次发版：PyPI 和 crates.io 同步，`RUNTIME_VERSION` 与 runtime 的版本一致（design §14）
